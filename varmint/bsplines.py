@@ -10,16 +10,27 @@ def divide00(num, denom):
   return np.where(force_zero, 0, num) / np.where(force_zero, 1, denom)
 
 @partial(jax.jit, static_argnums=(2,))
-def bspline_basis(u, knots, degree):
-  '''Computes b-spline basis functions.
+def bspline1d_basis(u, knots, degree):
+  ''' Computes b-spline basis functions in one dimension.
 
-     u: The locations at which to evaluate the basis functions.
-        Can be a numpy array of any size.
+  Parameters:
+  -----------
 
-     knots: The knot vector. Should be non-decreasing and consistent with the
-            specified
+   - u: The locations at which to evaluate the basis functions, generally
+        assumed to be in the interval [0,1) although they really just need to
+        be consistent with the knot ranges. Can be an ndarray of any size.
 
-     degree: The degree of the piecewise polynomials.
+   - knots: The knot vector. Should be non-decreasing and consistent with the
+            specified degree.  A one-dimensional ndarray.
+
+   - degree: The degree of the piecewise polynomials. Integer.
+
+  Returns:
+  --------
+   Returns an ndarray whose first dimensions are the same as u, but with an
+   additional dimension determined by the number of basis functions, i.e.,
+   one less than the number of knots minus the degree.
+
   '''
   u1d = np.atleast_1d(u)
 
@@ -43,7 +54,7 @@ def bspline_basis(u, knots, degree):
   else:
 
     # Take advantage of the recursive definition.
-    B = bspline_basis(u, knots, degree-1)
+    B = bspline1d_basis(u, knots, degree-1)
 
     # There are two halves.  The indexing is a little tricky.
     # Also we're using the np.divide 'where' argument to deal
@@ -61,3 +72,81 @@ def bspline_basis(u, knots, degree):
     v1       = divide00(v1_num, v1_denom)
 
     return v0 + v1
+
+@partial(jax.jit, static_argnums=(3,))
+def bspline2d_basis(u, xknots, yknots, degree):
+  ''' Compute b-spline basis functions in two dimensions as tensor products.
+
+  Parameters:
+  -----------
+
+   - u: The locations at which to evaluate the basis functions, generally
+        assumed to be in the interval [0,1) although they really just need to
+        be consistent with the knot ranges.  Must be a two-dimensional ndarray
+        where the second dimension has length two.  The first dimension (N)
+        corresponds to the number of points at which the basis functions should
+        be evaluated.
+
+   - xknots: The knot vector for the first dimension. Should be non-decreasing
+             and consistent with the specified degree.  A one-dimensional
+             ndarray of length J.
+
+   - yknots: The knot vector for the second dimension. Should be non-decreasing
+             and consistent with the specified degree.  A one-dimensional
+             ndarray of length K.
+
+   - degree: The degree of the piecewise polynomials. Integer.
+
+  Returns:
+  --------
+   Returns an ndarray of dimension N x J x K, where ret[n,:,:] is the tensor
+   product of basis functions for x and y, evaluated at u[n,:].
+  '''
+
+  basis_x  = np.expand_dims(bspline1d_basis(u[:,0], xknots, degree), -1)
+  basis_y  = np.expand_dims(bspline1d_basis(u[:,1], yknots, degree), -2)
+  basis_xy = basis_x * basis_y
+
+  return basis_xy
+
+@partial(jax.jit, static_argnums=(4,))
+def bspline3d_basis(u, xknots, yknots, zknots, degree):
+  ''' Compute b-spline basis functions in three dimensions as tensor products.
+
+  Parameters:
+  -----------
+
+   - u: The locations at which to evaluate the basis functions, generally
+        assumed to be in the interval [0,1) although they really just need to
+        be consistent with the knot ranges.  Must be a two-dimensional ndarray
+        where the second dimension has length three.  The first dimension (N)
+        corresponds to the number of points at which the basis functions should
+        be evaluated.
+
+   - xknots: The knot vector for the first dimension. Should be non-decreasing
+             and consistent with the specified degree.  A one-dimensional
+             ndarray of length J.
+
+   - yknots: The knot vector for the second dimension. Should be non-decreasing
+             and consistent with the specified degree.  A one-dimensional
+             ndarray of length K.
+
+   - zknots: The knot vector for the third dimension. Should be non-decreasing
+             and consistent with the specified degree.  A one-dimensional
+             ndarray of length L.
+
+   - degree: The degree of the piecewise polynomials. Integer.
+
+  Returns:
+  --------
+   Returns an ndarray of dimension N x J x K x L, where ret[n,:,:,:] is the
+   tensor product of basis functions for x, y, and z, evaluated at u[n,:].
+  '''
+
+  basis_x  = bspline1d_basis(u[:,0], xknots, degree)[:,:,np.newaxis,np.newaxis]
+  basis_y  = bspline1d_basis(u[:,1], yknots, degree)[:,np.newaxis,:,np.newaxis]
+  basis_z  = bspline1d_basis(u[:,2], zknots, degree)[:,np.newaxis,np.newaxis,:]
+
+  basis_xyz = basis_x * basis_y * basis_z
+
+  return basis_xyz
