@@ -178,6 +178,60 @@ class TestBSplines(ut.TestCase):
     self.assertEqual(basis.shape[2], 25)
     self.assertEqual(basis.shape[3], num_control)
 
+  def test_bspline2d_basis_sizes_1(self):
+    # Make sure we get sizes we expect.
+
+    npr.seed(1)
+
+    u            = npr.randn(100,2)
+    degree       = 3
+    num_xcontrol = 10
+    num_ycontrol = 11
+    num_xknots    = num_xcontrol + degree + 1
+    num_yknots    = num_ycontrol + degree + 1
+
+    xknots = np.hstack([np.zeros(degree),
+                       np.linspace(0, 1, num_xknots - 2*degree),
+                       np.ones(degree)])
+    yknots = np.hstack([np.zeros(degree),
+                        np.linspace(0, 1, num_yknots - 2*degree),
+                        np.ones(degree)])
+
+    basis = bsplines.bspline2d_basis(u, xknots, yknots, degree)
+    self.assertEqual(basis.shape[0], 100)
+    self.assertEqual(basis.shape[1], num_xcontrol)
+    self.assertEqual(basis.shape[2], num_ycontrol)
+
+  def test_bspline3d_basis_sizes_1(self):
+    # Make sure we get sizes we expect.
+
+    npr.seed(1)
+
+    u            = npr.randn(100,3)
+    degree       = 3
+    num_xcontrol = 10
+    num_ycontrol = 11
+    num_zcontrol = 12
+    num_xknots    = num_xcontrol + degree + 1
+    num_yknots    = num_ycontrol + degree + 1
+    num_zknots    = num_zcontrol + degree + 1
+
+    xknots = np.hstack([np.zeros(degree),
+                       np.linspace(0, 1, num_xknots - 2*degree),
+                       np.ones(degree)])
+    yknots = np.hstack([np.zeros(degree),
+                        np.linspace(0, 1, num_yknots - 2*degree),
+                        np.ones(degree)])
+    zknots = np.hstack([np.zeros(degree),
+                        np.linspace(0, 1, num_zknots - 2*degree),
+                        np.ones(degree)])
+
+    basis = bsplines.bspline3d_basis(u, xknots, yknots, zknots, degree)
+    self.assertEqual(basis.shape[0], 100)
+    self.assertEqual(basis.shape[1], num_xcontrol)
+    self.assertEqual(basis.shape[2], num_ycontrol)
+    self.assertEqual(basis.shape[3], num_zcontrol)
+
   def test_bspline1d_basis_sums(self):
 
     npr.seed(1)
@@ -222,3 +276,68 @@ class TestBSplines(ut.TestCase):
     basis = bsplines.bspline3d_basis(u, knots, knots, knots, degree)
     sums = np.sum(basis, axis=(1,2,3,))
     nptest.assert_array_almost_equal(sums, np.ones(sums.shape), decimal=6)
+
+  def test_bspline1d_sizes_1(self):
+    # Make sure we get sizes we expect.
+
+    npr.seed(1)
+
+    u           = npr.randn(100)
+    control     = npr.randn(10)
+    degree      = 3
+    num_knots   = control.shape[0] + degree + 1
+    knots = np.hstack([np.zeros(degree),
+                       np.linspace(0, 1, num_knots - 2*degree),
+                       np.ones(degree)])
+    func = bsplines.bspline1d(u, control, knots, degree)
+    self.assertEqual(func.shape[0], 100)
+
+  def test_bspline2d_sizes_1(self):
+    # Make sure we get sizes we expect.
+
+    npr.seed(1)
+
+    u           = npr.randn(100, 2)
+    control     = npr.randn(10, 11, 2)
+    degree      = 3
+    num_xknots  = control.shape[0] + degree + 1
+    num_yknots  = control.shape[1] + degree + 1
+
+    xknots = np.hstack([np.zeros(degree),
+                       np.linspace(0, 1, num_xknots - 2*degree),
+                       np.ones(degree)])
+    yknots = np.hstack([np.zeros(degree),
+                        np.linspace(0, 1, num_yknots - 2*degree),
+                        np.ones(degree)])
+
+    funcs = bsplines.bspline2d(u, control, xknots, yknots, degree)
+    self.assertEqual(len(funcs.shape), 2)
+    self.assertEqual(funcs.shape[0], 100)
+    self.assertEqual(funcs.shape[1], 2)
+
+  def test_bspline3d_sizes_1(self):
+    # Make sure we get sizes we expect.
+
+    npr.seed(1)
+
+    u           = npr.randn(100, 3)
+    control     = npr.randn(10, 11, 13, 3)
+    degree      = 3
+    num_xknots  = control.shape[0] + degree + 1
+    num_yknots  = control.shape[1] + degree + 1
+    num_zknots  = control.shape[2] + degree + 1
+
+    xknots = np.hstack([np.zeros(degree),
+                       np.linspace(0, 1, num_xknots - 2*degree),
+                       np.ones(degree)])
+    yknots = np.hstack([np.zeros(degree),
+                        np.linspace(0, 1, num_yknots - 2*degree),
+                        np.ones(degree)])
+    zknots = np.hstack([np.zeros(degree),
+                        np.linspace(0, 1, num_zknots - 2*degree),
+                        np.ones(degree)])
+
+    funcs = bsplines.bspline3d(u, control, xknots, yknots, zknots, degree)
+    self.assertEqual(len(funcs.shape), 2)
+    self.assertEqual(funcs.shape[0], 100)
+    self.assertEqual(funcs.shape[1], 3)
