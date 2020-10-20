@@ -1,5 +1,7 @@
 import jax
-import jax.numpy as np
+import jax.numpy    as np
+import numpy.random as npr
+import timeit
 
 from functools import partial
 
@@ -102,9 +104,10 @@ def bspline2d_basis(u, xknots, yknots, degree):
    Returns an ndarray of dimension N x J x K, where ret[n,:,:] is the tensor
    product of basis functions for x and y, evaluated at u[n,:].
   '''
+  u2d = np.atleast_2d(u)
 
-  basis_x  = bspline1d_basis(u[:,0], xknots, degree)[:,:,np.newaxis]
-  basis_y  = bspline1d_basis(u[:,1], yknots, degree)[:,np.newaxis,:]
+  basis_x  = bspline1d_basis(u2d[:,0], xknots, degree)[:,:,np.newaxis]
+  basis_y  = bspline1d_basis(u2d[:,1], yknots, degree)[:,np.newaxis,:]
   basis_xy = basis_x * basis_y
 
   return basis_xy
@@ -173,3 +176,86 @@ def bspline3d(u, control, xknots, yknots, zknots, degree):
 
   # This is 3x slower for reasons I don't understand.
   return np.tensordot(basis_xyz, control, ((1,2,3), (0,1,2)))
+
+@partial(jax.jit, static_argnums=(2,))
+def bspline1d_basis_derivs(u, knots, degree):
+  ''' Derivatives of basis functions '''
+  d_basis = bspline1d_basis(u, knots, degree-1)
+  v0 = divide00(d_basis[:,:-1] * degree, knots[degree:-1] - knots[:-degree-1])
+  v1 = divide00(d_basis[:,1:] * degree, knots[degree+1:] - knots[1:-degree])
+  return v0 - v1
+
+def bspline1d_derivs(u, control, knots, degree):
+  ''' Evaluate the derivative of a one-dimensional bspline function. '''
+  return bspline1d_basis_derivs(u, knots, degree) @ control
+
+partial(jax.jit, static_argnums=(2,))
+def bspline2d_basis_derivs(u, xknots, yknots, degree):
+  ''' Derivatives of 2d basis functions '''
+  u2d = np.atleast_2d(u)
+
+  basis_x     = bspline1d_basis(u2d[:,0], xknots, degree)
+  basis_y     = bspline1d_basis(u2d[:,1], yknots, degree)
+  basis_x_du1 = bspline1d_basis_derivs(u2d[:,0], xknots, degree)
+  basis_y_du2 = bspline1d_basis_derivs(u2d[:,1], yknots, degree)
+
+  return np.stack([ basis_y[:,np.newaxis,:] * basis_x_du1[:,:,np.newaxis],
+                    basis_x[:,:,np.newaxis] * basis_y_du2[:,np.newaxis,:] ],
+                  axis=3)
+
+def compare_1d_deriv_times():
+  npr.seed(1)
+  u           = npr.rand(100)
+  num_control = 10
+  degree      = 3
+  num_knots   = num_control + degree + 1
+  knots = np.hstack([np.zeros(degree),
+                     np.linspace(0, 1, num_knots - 2*degree),
+                     np.ones(degree)])
+
+
+  df_basis_fn = jax.jit(jax.vmap(
+    jax.jacfwd(bspline1d_basis, argnums=0),
+    in_axes=(0, None, None),
+    ), static_argnums=(2,))
+
+  version1 = lambda : bspline1d_basis_derivs(u, knots, degree)
+  version2 = lambda : np.squeeze(df_basis_fn(u, knots, degree))
+
+  version1_t = timeit.timeit(version1, number=1000)
+  version2_t = timeit.timeit(version2, number=1000)
+
+  print('Hand: %0.3fsec  JAX: %0.3fsec (%0.1fx)' % (version1_t, version2_t,
+                                                    version2_t/version1_t))
+
+def compare_2d_deriv_times():
+  npr.seed(1)
+
+  df_basis_fn = jax.jit(jax.vmap(
+    jax.jacfwd(bspline2d_basis, argnums=0),
+    in_axes=(0, None, None, None),
+  ), static_argnums=(3,))
+
+  npr.seed(1)
+
+  u            = npr.rand(100,2)
+  num_xcontrol = 10
+  num_ycontrol = 11
+  degree       = 3
+  num_xknots   = num_xcontrol + degree + 1
+  num_yknots   = num_ycontrol + degree + 1
+  xknots = np.hstack([np.zeros(degree),
+                      np.linspace(0, 1, num_xknots - 2*degree),
+                      np.ones(degree)])
+  yknots = np.hstack([np.zeros(degree),
+                      np.linspace(0, 1, num_yknots - 2*degree),
+                      np.ones(degree)])
+
+  version1 = lambda : bspline2d_basis_derivs(u, xknots, yknots, degree)
+  version2 = lambda : np.squeeze(df_basis_fn(u, xknots, yknots, degree))
+
+  version1_t = timeit.timeit(version1, number=1000)
+  version2_t = timeit.timeit(version2, number=1000)
+
+  print('Hand: %0.3fsec  JAX: %0.3fsec (%0.1fx)' % (version1_t, version2_t,
+                                                    version2_t/version1_t))
