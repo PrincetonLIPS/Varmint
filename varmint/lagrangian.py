@@ -47,7 +47,7 @@ def generate_lagrangian(quad, ref_ctrl, degree, knots=None):
     for dd in range(3):
       num_knots = ref_ctrl.shape[dd] + degree + 1
       knots.append(np.hstack([np.zeros(degree),
-                              np.linspace(0, 1, num_knots - 2*degree + 1),
+                              np.linspace(0, 1, num_knots - 2*degree),
                               np.ones(degree)]))
     knots = tuple(knots)
     logging.info('Using default knots.')

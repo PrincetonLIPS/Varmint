@@ -108,3 +108,72 @@ class TestBSplines(ut.TestCase):
         crv.degree,
       ).ravel()
       nptest.assert_almost_equal(point1, point2, decimal=6)
+
+  def test_bspline1d_basis_sizes_1(self):
+    # Make sure we get sizes we expect.
+
+    npr.seed(1)
+
+    u           = npr.randn(100)
+    degree      = 3
+    num_control = 10
+    num_knots   = num_control + degree + 1
+    knots = np.hstack([np.zeros(degree),
+                       np.linspace(0, 1, num_knots - 2*degree),
+                       np.ones(degree)])
+    basis = bsplines.bspline1d_basis(u, knots, degree)
+    self.assertEqual(basis.shape[0], 100)
+    self.assertEqual(basis.shape[1], num_control)
+
+  def test_bspline1d_basis_sizes_2(self):
+    # Make sure we get sizes we expect.
+
+    npr.seed(1)
+
+    u           = npr.randn(100, 50)
+    degree      = 3
+    num_control = 10
+    num_knots   = num_control + degree + 1
+    knots = np.hstack([np.zeros(degree),
+                       np.linspace(0, 1, num_knots - 2*degree),
+                       np.ones(degree)])
+    basis = bsplines.bspline1d_basis(u, knots, degree)
+    self.assertEqual(basis.shape[0], 100)
+    self.assertEqual(basis.shape[1], 50)
+    self.assertEqual(basis.shape[2], num_control)
+
+  def test_bspline1d_basis_sizes_3(self):
+    # Make sure we get sizes we expect.
+
+    npr.seed(1)
+
+    u           = npr.randn(100, 50, 25)
+    degree      = 3
+    num_control = 10
+    num_knots   = num_control + degree + 1
+    knots = np.hstack([np.zeros(degree),
+                       np.linspace(0, 1, num_knots - 2*degree),
+                       np.ones(degree)])
+    basis = bsplines.bspline1d_basis(u, knots, degree)
+    self.assertEqual(basis.shape[0], 100)
+    self.assertEqual(basis.shape[1], 50)
+    self.assertEqual(basis.shape[2], 25)
+    self.assertEqual(basis.shape[3], num_control)
+
+  def test_bspline1d_basis_sizes_4(self):
+    # Make sure we get sizes we expect.
+
+    npr.seed(1)
+
+    u           = npr.randn(100, 50, 25)
+    degree      = 7
+    num_control = 10
+    num_knots   = num_control + degree + 1
+    knots = np.hstack([np.zeros(degree),
+                       np.linspace(0, 1, num_knots - 2*degree),
+                       np.ones(degree)])
+    basis = bsplines.bspline1d_basis(u, knots, degree)
+    self.assertEqual(basis.shape[0], 100)
+    self.assertEqual(basis.shape[1], 50)
+    self.assertEqual(basis.shape[2], 25)
+    self.assertEqual(basis.shape[3], num_control)
