@@ -177,3 +177,48 @@ class TestBSplines(ut.TestCase):
     self.assertEqual(basis.shape[1], 50)
     self.assertEqual(basis.shape[2], 25)
     self.assertEqual(basis.shape[3], num_control)
+
+  def test_bspline1d_basis_sums(self):
+
+    npr.seed(1)
+
+    u           = npr.rand(100)
+    degree      = 7
+    num_control = 10
+    num_knots   = num_control + degree + 1
+    knots = np.hstack([np.zeros(degree),
+                       np.linspace(0, 1, num_knots - 2*degree),
+                       np.ones(degree)])
+    basis = bsplines.bspline1d_basis(u, knots, degree)
+    sums = np.sum(basis, axis=1)
+    nptest.assert_array_almost_equal(sums, np.ones(sums.shape), decimal=6)
+
+  def test_bspline2d_basis_sums(self):
+
+    npr.seed(1)
+
+    u           = npr.rand(100,2)
+    degree      = 7
+    num_control = 10
+    num_knots   = num_control + degree + 1
+    knots = np.hstack([np.zeros(degree),
+                       np.linspace(0, 1, num_knots - 2*degree),
+                       np.ones(degree)])
+    basis = bsplines.bspline2d_basis(u, knots, knots, degree)
+    sums = np.sum(basis, axis=(1,2,))
+    nptest.assert_array_almost_equal(sums, np.ones(sums.shape), decimal=6)
+
+  def test_bspline3d_basis_sums(self):
+
+    npr.seed(1)
+
+    u           = npr.rand(100,3)
+    degree      = 7
+    num_control = 10
+    num_knots   = num_control + degree + 1
+    knots = np.hstack([np.zeros(degree),
+                       np.linspace(0, 1, num_knots - 2*degree),
+                       np.ones(degree)])
+    basis = bsplines.bspline3d_basis(u, knots, knots, knots, degree)
+    sums = np.sum(basis, axis=(1,2,3,))
+    nptest.assert_array_almost_equal(sums, np.ones(sums.shape), decimal=6)
