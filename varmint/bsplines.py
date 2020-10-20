@@ -103,8 +103,8 @@ def bspline2d_basis(u, xknots, yknots, degree):
    product of basis functions for x and y, evaluated at u[n,:].
   '''
 
-  basis_x  = np.expand_dims(bspline1d_basis(u[:,0], xknots, degree), -1)
-  basis_y  = np.expand_dims(bspline1d_basis(u[:,1], yknots, degree), -2)
+  basis_x  = bspline1d_basis(u[:,0], xknots, degree)[:,:,np.newaxis]
+  basis_y  = bspline1d_basis(u[:,1], yknots, degree)[:,np.newaxis,:]
   basis_xy = basis_x * basis_y
 
   return basis_xy
@@ -163,13 +163,13 @@ def bspline2d(u, control, xknots, yknots, degree):
   basis_xy = bspline2d_basis(u, xknots, yknots, degree)
 
   # This is 3x slower for reasons I don't understand.
-  return np.tensordot(basis_xy, control, ((1,2), (1,0)))
+  return np.tensordot(basis_xy, control, ((1,2), (0,1)))
 
 @partial(jax.jit, static_argnums=(5,))
-def bspline3d(u, control, xknots, yknots, degree):
+def bspline3d(u, control, xknots, yknots, zknots, degree):
   ''' Evaluate a three-dimensional bspline function. '''
 
   basis_xyz = bspline3d_basis(u, xknots, yknots, zknots, degree)
 
   # This is 3x slower for reasons I don't understand.
-  return np.tensordot(basis_xyz, control, ((1,2,3), (2,1,0)))
+  return np.tensordot(basis_xyz, control, ((1,2,3), (0,1,2)))
