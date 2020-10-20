@@ -150,3 +150,26 @@ def bspline3d_basis(u, xknots, yknots, zknots, degree):
   basis_xyz = basis_x * basis_y * basis_z
 
   return basis_xyz
+
+@partial(jax.jit, static_argnums=(3,))
+def bspline1d(u, control, knots, degree):
+  ''' Evaluate a one-dimensional bspline function. '''
+  return bspline1d_basis(u, knots, degree) @ control
+
+@partial(jax.jit, static_argnums=(4,))
+def bspline2d(u, control, xknots, yknots, degree):
+  ''' Evaluate a two-dimensional bspline function. '''
+
+  basis_xy = bspline2d_basis(u, xknots, yknots, degree)
+
+  # This is 3x slower for reasons I don't understand.
+  return np.tensordot(basis_xy, control, ((1,2), (1,0)))
+
+@partial(jax.jit, static_argnums=(5,))
+def bspline3d(u, control, xknots, yknots, degree):
+  ''' Evaluate a three-dimensional bspline function. '''
+
+  basis_xyz = bspline3d_basis(u, xknots, yknots, zknots, degree)
+
+  # This is 3x slower for reasons I don't understand.
+  return np.tensordot(basis_xyz, control, ((1,2,3), (2,1,0)))
