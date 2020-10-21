@@ -10,6 +10,23 @@ import bsplines
 
 class TestBSplines(ut.TestCase):
 
+  def test_mesh_2d(self):
+    mesh = bsplines.mesh(np.arange(5), np.arange(6))
+
+    self.assertEqual(len(mesh.shape), 3)
+    self.assertEqual(mesh.shape[0], 5)
+    self.assertEqual(mesh.shape[1], 6)
+    self.assertEqual(mesh.shape[2], 2)
+
+  def test_mesh_3d(self):
+    mesh = bsplines.mesh(np.arange(5), np.arange(6), np.arange(7))
+
+    self.assertEqual(len(mesh.shape), 4)
+    self.assertEqual(mesh.shape[0], 5)
+    self.assertEqual(mesh.shape[1], 6)
+    self.assertEqual(mesh.shape[2], 7)
+    self.assertEqual(mesh.shape[3], 3)
+
   def test_divide00(self):
     # Verify basic functionality of the divide00 function, which is required for
     # the spline functions to do sensible things outside their support.
@@ -342,13 +359,267 @@ class TestBSplines(ut.TestCase):
     self.assertEqual(funcs.shape[0], 100)
     self.assertEqual(funcs.shape[1], 3)
 
+  def test_bspline2d_basis_values_1(self):
+
+    degree = 0
+    xknots = np.linspace(0, 1, 3)
+    yknots = np.linspace(0, 1, 5)
+
+    nptest.assert_array_equal(
+      bsplines.bspline2d_basis(
+        np.array([0.01,0.01]),
+        xknots,
+        yknots,
+        degree,
+      ),
+      np.array([[[1., 0., 0., 0.,],
+                 [0., 0., 0., 0.,]]])
+    )
+
+    nptest.assert_array_equal(
+      bsplines.bspline2d_basis(
+        np.array([0.25,0.10]),
+        xknots,
+        yknots,
+        degree,
+      ),
+      np.array([[[1., 0., 0., 0.,],
+                 [0., 0., 0., 0.,]]])
+    )
+
+    nptest.assert_array_equal(
+      bsplines.bspline2d_basis(
+        np.array([0.55,0.10]),
+        xknots,
+        yknots,
+        degree,
+      ),
+      np.array([[[0., 0., 0., 0.,],
+                 [1., 0., 0., 0.,]]])
+    )
+
+    nptest.assert_array_equal(
+      bsplines.bspline2d_basis(
+        np.array([0.35,0.30]),
+        xknots,
+        yknots,
+        degree,
+      ),
+      np.array([[[0., 1., 0., 0.,],
+                 [0., 0., 0., 0.,]]])
+    )
+
+    nptest.assert_array_equal(
+      bsplines.bspline2d_basis(
+        np.array([0.65,0.60]),
+        xknots,
+        yknots,
+        degree,
+      ),
+      np.array([[[0., 0., 0., 0.,],
+                 [0., 0., 1., 0.,]]])
+    )
+
+    nptest.assert_array_equal(
+      bsplines.bspline2d_basis(
+        np.array([0.0,0.0]),
+        xknots,
+        yknots,
+        degree,
+      ),
+      np.array([[[1., 0., 0., 0.,],
+                 [0., 0., 0., 0.,]]])
+    )
+
+    nptest.assert_array_equal(
+      bsplines.bspline2d_basis(
+        np.array([0.99,0.99]),
+        xknots,
+        yknots,
+        degree,
+      ),
+      np.array([[[0., 0., 0., 0.,],
+                 [0., 0., 0., 1.,]]])
+    )
+
+    nptest.assert_array_equal(
+      bsplines.bspline2d_basis(
+        np.array([1.0,1.0]),
+        xknots,
+        yknots,
+        degree,
+      ),
+      np.array([[[0., 0., 0., 0.,],
+                 [0., 0., 0., 0.,]]])
+    )
+
+  def test_bspline3d_basis_values_1(self):
+
+    degree = 0
+    xknots = np.linspace(0, 1, 3)
+    yknots = np.linspace(0, 1, 5)
+    zknots = np.linspace(0, 1, 11)
+
+    nptest.assert_array_equal(
+      bsplines.bspline3d_basis(
+        np.array([0.0,0.0,0.0]),
+        xknots,
+        yknots,
+        zknots,
+        degree,
+      ),
+      jax.ops.index_add(np.zeros((1,2,4,10)), (0,0,0,0), 1.0),
+    )
+
+    nptest.assert_array_equal(
+      bsplines.bspline3d_basis(
+        np.array([1.0,1.0,1.0]),
+        xknots,
+        yknots,
+        zknots,
+        degree,
+      ),
+      np.zeros((1,2,4,10)),
+    )
+
+    nptest.assert_array_equal(
+      bsplines.bspline3d_basis(
+        np.array([0.4,0.30,0.05]),
+        xknots,
+        yknots,
+        zknots,
+        degree,
+      ),
+      jax.ops.index_add(np.zeros((1,2,4,10)), (0,0,1,0), 1.0),
+    )
+
+    nptest.assert_array_equal(
+      bsplines.bspline3d_basis(
+        np.array([0.01,0.01,0.15]),
+        xknots,
+        yknots,
+        zknots,
+        degree,
+      ),
+      jax.ops.index_update(np.zeros((1,2,4,10)), (0,0,0,1), 1.0),
+    )
+
+    nptest.assert_array_equal(
+      bsplines.bspline3d_basis(
+        np.array([0.51,0.01,0.95]),
+        xknots,
+        yknots,
+        zknots,
+        degree,
+      ),
+      jax.ops.index_update(np.zeros((1,2,4,10)), (0,1,0,9), 1.0),
+    )
+
+    nptest.assert_array_equal(
+      bsplines.bspline3d_basis(
+        np.array([0.51,0.65,0.95]),
+        xknots,
+        yknots,
+        zknots,
+        degree,
+      ),
+      jax.ops.index_update(np.zeros((1,2,4,10)), (0,1,2,9), 1.0),
+    )
+
+  def test_bspline2d_values_1(self):
+
+    degree   = 0
+    xknots   = np.linspace(0, 1, 3)
+    yknots   = np.linspace(0, 1, 5)
+    xcontrol = np.arange(2)+5  # 5, 6
+    ycontrol = np.arange(4)+11 # 11, 12, 13, 14
+    control  = bsplines.mesh(xcontrol, ycontrol)
+
+    nptest.assert_array_equal(
+      bsplines.bspline2d(
+        np.array([0.0, 0.0]),
+        control,
+        xknots,
+        yknots,
+        degree,
+      ),
+      np.array([[5.0, 11.0]])
+    )
+
+    nptest.assert_array_equal(
+      bsplines.bspline2d(
+        np.array([0.4, 0.0]),
+        control,
+        xknots,
+        yknots,
+        degree,
+      ),
+      np.array([[5.0, 11.0]])
+    )
+
+    nptest.assert_array_equal(
+      bsplines.bspline2d(
+        np.array([0.4, 0.85]),
+        control,
+        xknots,
+        yknots,
+        degree,
+      ),
+      np.array([[5.0, 14.0]])
+    )
+
+
+  def test_bspline3d_values_1(self):
+
+    degree   = 0
+    xknots   = np.linspace(0, 1, 3)
+    yknots   = np.linspace(0, 1, 5)
+    zknots   = np.linspace(0, 1, 11)
+    xcontrol = np.arange(2)+5  # 5, 6
+    ycontrol = np.arange(4)+11 # 11, 12, 13, 14
+    zcontrol = np.arange(10)+1 # 1, 2, 3, ... , 10
+    control  = bsplines.mesh(xcontrol, ycontrol, zcontrol)
+
+    nptest.assert_array_equal(
+      bsplines.bspline3d(
+        np.array([0.0, 0.0, 0.0]),
+        control,
+        xknots,
+        yknots,
+        zknots,
+        degree,
+      ),
+      np.array([[5.0, 11.0, 1.0]])
+    )
+
+    nptest.assert_array_equal(
+      bsplines.bspline3d(
+        np.array([0.4, 0.0, 0.15]),
+        control,
+        xknots,
+        yknots,
+        zknots,
+        degree,
+      ),
+      np.array([[5.0, 11.0, 2.0]])
+    )
+
+    nptest.assert_array_equal(
+      bsplines.bspline3d(
+        np.array([0.4, 0.85, 0.25]),
+        control,
+        xknots,
+        yknots,
+        zknots,
+        degree,
+      ),
+      np.array([[5.0, 14.0, 3.0]])
+    )
+
+
+
   def test_bspline1d_basis_derivs(self):
     # Compare to the JAX version.
-
-    df_basis_fn = jax.vmap(
-      jax.jacfwd(bsplines.bspline1d_basis, argnums=0),
-      in_axes=(0, None, None),
-    )
 
     npr.seed(1)
 
@@ -360,18 +631,13 @@ class TestBSplines(ut.TestCase):
                        np.linspace(0, 1, num_knots - 2*degree),
                        np.ones(degree)])
 
-    res1 = bsplines.bspline1d_basis_derivs(u, knots, degree)
-    res2 = np.squeeze(df_basis_fn(u, knots, degree))
+    res1 = bsplines.bspline1d_basis_derivs_hand(u, knots, degree)
+    res2 = bsplines.bspline1d_basis_derivs_jax(u, knots, degree)
 
     nptest.assert_array_almost_equal(res1, res2, decimal=5)
 
   def test_bspline1d_derivs(self):
     # Compare to the JAX version.
-
-    df_fn = jax.vmap(
-      jax.jacfwd(bsplines.bspline1d, argnums=0),
-      in_axes=(0, None, None, None),
-    )
 
     npr.seed(1)
 
@@ -383,18 +649,13 @@ class TestBSplines(ut.TestCase):
                        np.linspace(0, 1, num_knots - 2*degree),
                        np.ones(degree)])
 
-    res1 = bsplines.bspline1d_derivs(u, control, knots, degree)
-    res2 = np.squeeze(df_fn(u, control, knots, degree))
+    res1 = bsplines.bspline1d_derivs_hand(u, control, knots, degree)
+    res2 = bsplines.bspline1d_derivs_jax(u, control, knots, degree)
 
     nptest.assert_array_almost_equal(res1, res2, decimal=5)
 
   def test_bspline2d_basis_derivs(self):
     # Compare to the JAX version.
-
-    df_basis_fn = jax.vmap(
-      jax.jacfwd(bsplines.bspline2d_basis, argnums=0),
-      in_axes=(0, None, None, None),
-    )
 
     npr.seed(1)
 
@@ -411,7 +672,33 @@ class TestBSplines(ut.TestCase):
                        np.linspace(0, 1, num_yknots - 2*degree),
                        np.ones(degree)])
 
-    res1 = bsplines.bspline2d_basis_derivs(u, xknots, yknots, degree)
-    res2 = np.squeeze(df_basis_fn(u, xknots, yknots, degree))
+    res1 = bsplines.bspline2d_basis_derivs_hand(u, xknots, yknots, degree)
+    res2 = bsplines.bspline2d_basis_derivs_jax(u, xknots, yknots, degree)
 
     nptest.assert_array_almost_equal(res1, res2, decimal=5)
+
+  '''
+  def test_bspline2d_derivs(self):
+    # Make sure we get sizes we expect.
+
+    npr.seed(1)
+
+    u           = npr.rand(100, 2)
+    control     = npr.randn(10, 11, 2)
+    degree      = 3
+    num_xknots  = control.shape[0] + degree + 1
+    num_yknots  = control.shape[1] + degree + 1
+
+    xknots = np.hstack([np.zeros(degree),
+                       np.linspace(0, 1, num_xknots - 2*degree),
+                       np.ones(degree)])
+    yknots = np.hstack([np.zeros(degree),
+                        np.linspace(0, 1, num_yknots - 2*degree),
+                        np.ones(degree)])
+
+    res1 = bsplines.bspline2d_derivs_hand(u, control, xknots, yknots, degree)
+    res2 = bsplines.bspline2d_derivs_jax(u, control, xknots, yknots, degree)
+    print(res1.shape, res2.shape)
+
+    nptest.assert_array_almost_equal(res1, res2, decimal=5)
+  '''
