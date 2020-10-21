@@ -262,6 +262,25 @@ bspline2d_derivs_jax = jax.jit(
 # Hand-coded appears slightly faster.
 bspline2d_derivs = bspline2d_derivs_hand
 
+# Don't bother coding the 3d derivatives by hand.
+bspline3d_basis_derivs_jax = jax.jit(
+  jax.vmap(
+    lambda *args: np.squeeze(jax.jacfwd(bspline3d_basis, argnums=0)(*args)),
+    (0, None, None, None, None),
+  ),
+  static_argnums=(4,),
+)
+bspline3d_basis_derivs = bspline3d_basis_derivs_jax
+
+bspline3d_derivs_jax = jax.jit(
+  jax.vmap(
+    lambda *args: np.squeeze(jax.jacfwd(bspline3d, argnums=0)(*args)),
+    (0, None, None, None, None, None),
+  ),
+  static_argnums=(5,),
+)
+bspline3d_derivs = bspline3d_derivs_jax
+
 def compare_1d_basis_deriv_times():
   npr.seed(1)
 

@@ -894,6 +894,5 @@ class TestBSplines(ut.TestCase):
 
     res1 = bsplines.bspline2d_derivs_hand(u, control, xknots, yknots, degree)
     res2 = bsplines.bspline2d_derivs_jax(u, control, xknots, yknots, degree)
-    print(res1.shape, res2.shape)
 
     nptest.assert_array_almost_equal(res1, res2, decimal=5)
