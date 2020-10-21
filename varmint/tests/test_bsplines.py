@@ -732,6 +732,88 @@ class TestBSplines(ut.TestCase):
     )
 
 
+  def test_bspline3d_values_2(self):
+
+    degree   = 1
+    xknots   = np.array([0.0, 0.0, 0.5, 1.0, 1.0])              # 3 control pts
+    yknots   = np.array([0.0, 0.0, 0.25, 0.50, 0.75, 1.0, 1.0]) # 5 control pts
+    zknots   = np.array([0.0, 0.0, 1./3, 2./3, 1.0, 1.0])       # 4 control pts
+    xcontrol = np.arange(3)+5  # 5, 6, 7
+    ycontrol = np.arange(5)+11 # 11, 12, 13, 14, 15
+    zcontrol = np.arange(4)+1 # 1, 2, 3, 4
+    control  = bsplines.mesh(xcontrol, ycontrol, zcontrol)
+
+    nptest.assert_array_equal(
+      bsplines.bspline3d(
+        np.array([0.0, 0.0, 0.0]),
+        control,
+        xknots,
+        yknots,
+        zknots,
+        degree,
+      ),
+      np.array([[5.0, 11.0, 1.0]])
+    )
+
+    nptest.assert_array_equal(
+      bsplines.bspline3d(
+        np.array([0.25, 0.0, 0.0]),
+        control,
+        xknots,
+        yknots,
+        zknots,
+        degree,
+      ),
+      np.array([[5.5, 11.0, 1.0]])
+    )
+
+    nptest.assert_array_equal(
+      bsplines.bspline3d(
+        np.array([0.0, 0.125, 0.0]),
+        control,
+        xknots,
+        yknots,
+        zknots,
+        degree,
+      ),
+      np.array([[5.0, 11.5, 1.0]])
+    )
+
+    nptest.assert_array_equal(
+      bsplines.bspline3d(
+        np.array([0.0, 0.0, 1./6]),
+        control,
+        xknots,
+        yknots,
+        zknots,
+        degree,
+      ),
+      np.array([[5.0, 11.0, 1.5]])
+    )
+
+    nptest.assert_array_equal(
+      bsplines.bspline3d(
+        np.array([0.25, 0.125, 1./6]),
+        control,
+        xknots,
+        yknots,
+        zknots,
+        degree,
+      ),
+      np.array([[5.5, 11.5, 1.5]])
+    )
+
+    nptest.assert_array_equal(
+      bsplines.bspline3d(
+        np.array([0.75, 0.875, 5./6]),
+        control,
+        xknots,
+        yknots,
+        zknots,
+        degree,
+      ),
+      np.array([[6.5, 14.5, 3.5]])
+    )
 
   def test_bspline1d_basis_derivs(self):
     # Compare to the JAX version.
