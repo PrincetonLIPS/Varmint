@@ -50,9 +50,19 @@ def mesh(*control):
 
 @jax.jit
 def divide00(num, denom):
-  ''' Divide such that 0/0 = 0. '''
+  ''' Divide such that 0/0 = 0.
+
+  The trick here is to do this in such a way that reverse-mode and forward-mode
+  automatic differentation via JAX still work reasonably.
+  '''
+
   force_zero = np.logical_and(num==0, denom==0)
   return np.where(force_zero, 0, num) / np.where(force_zero, 1, denom)
+
+def default_knots(degree, num_ctrl):
+  return np.hstack([np.zeros(degree),
+                    np.linspace(0, 1, num_ctrl - degree + 1),
+                    np.ones(degree)])
 
 @partial(jax.jit, static_argnums=(2,))
 def bspline1d_basis(u, knots, degree):
@@ -91,6 +101,9 @@ def bspline1d_basis(u, knots, degree):
   k2d = np.expand_dims(knots, tuple(range(len(u1d.shape))))
 
   if degree == 0:
+
+    # Modify knots so that when u=1.0 we get 1.0 rather than 0.0.
+    k2d = np.where(k2d == knots[-1], knots[-1]+np.finfo(u2d.dtype).eps, k2d)
 
     # The degree zero case is just the indicator function on the
     # half-open interval specified by the knots.
@@ -200,7 +213,27 @@ def bspline3d_basis(u, xknots, yknots, zknots, degree):
 
 @partial(jax.jit, static_argnums=(3,))
 def bspline1d(u, control, knots, degree):
-  ''' Evaluate a one-dimensional bspline function. '''
+  ''' Evaluate a one-dimensional bspline function.
+
+   - u: The locations at which to evaluate the basis functions, generally
+        assumed to be in the interval [0,1) although they really just need to
+        be consistent with the knot ranges. Can be an ndarray of any size.
+
+   - control: The control points.  The first dimension should have the same
+              size as the number of unique knots.
+
+   - knots: The knot vector. Should be non-decreasing and consistent with the
+            specified degree.  A one-dimensional ndarray.
+
+   - degree: The degree of the piecewise polynomials. Integer.
+
+  Returns:
+  --------
+   Returns an ndarray whose first dimension are the same as the first dimension
+   of u, but with the second dimension being the same as the second dimension
+   of the control point ndarray.
+  '''
+
   return bspline1d_basis(u, knots, degree) @ control
 
 @partial(jax.jit, static_argnums=(4,))

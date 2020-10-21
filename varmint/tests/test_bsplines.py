@@ -450,7 +450,7 @@ class TestBSplines(ut.TestCase):
         degree,
       ),
       np.array([[[0., 0., 0., 0.,],
-                 [0., 0., 0., 0.,]]])
+                 [0., 0., 0., 1.,]]])
     )
 
   def test_bspline2d_basis_values_2(self):
@@ -476,7 +476,9 @@ class TestBSplines(ut.TestCase):
         yknots,
         degree,
       ),
-      np.zeros((1,3,5)),
+      np.array([[[0., 0., 0., 0., 0.],
+                 [0., 0., 0., 0., 0.],
+                 [0., 0., 0., 0., 1.]]])
     )
 
     nptest.assert_array_equal(
@@ -541,7 +543,7 @@ class TestBSplines(ut.TestCase):
         zknots,
         degree,
       ),
-      np.zeros((1,2,4,10)),
+      jax.ops.index_add(np.zeros((1,2,4,10)), (0,1,3,9), 1.0),
     )
 
     nptest.assert_array_equal(
