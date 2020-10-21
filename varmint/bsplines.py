@@ -240,10 +240,15 @@ bspline2d_basis_derivs = bspline2d_basis_derivs_hand
 @partial(jax.jit, static_argnums=(4,))
 def bspline2d_derivs_hand(u, control, xknots, yknots, degree):
   ''' Derivatives of 2d spline functions. '''
-  return np.tensordot(
-    control,
-    bspline2d_basis_derivs(u, xknots, yknots, degree),
-    ((0,1), (1,2)), # FIXME
+
+  # This is slightly annoying because it gives transposed Jacobians.
+  return np.swapaxes(
+    np.tensordot(
+      bspline2d_basis_derivs(u, xknots, yknots, degree),
+      control,
+      ((1,2), (0,1)),
+    ),
+    1, 2, # exchange the last two axes
   )
 
 bspline2d_derivs_jax = jax.jit(

@@ -874,7 +874,6 @@ class TestBSplines(ut.TestCase):
 
     nptest.assert_array_almost_equal(res1, res2, decimal=5)
 
-  '''
   def test_bspline2d_derivs(self):
     # Make sure we get sizes we expect.
 
@@ -898,4 +897,3 @@ class TestBSplines(ut.TestCase):
     print(res1.shape, res2.shape)
 
     nptest.assert_array_almost_equal(res1, res2, decimal=5)
-  '''
