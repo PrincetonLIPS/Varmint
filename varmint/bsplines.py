@@ -7,7 +7,45 @@ import timeit
 from functools import partial
 
 def mesh(*control):
-  ''' Generate a control point mesh. '''
+  ''' Generate a control point mesh.
+
+  Parameters:
+  -----------
+
+  - *control: A variable number of 1d array objects.  These are turned into a
+              control mesh of that many dimensions.  So to create a 2D mesh,
+              you could give it a sequence of length J and a sequence of length
+              K; it will return an ndarray that is J x K x 2. If you want to
+              create a 3D mesh, you could give it three sequences of lengths
+              J, K, and M, respectively, and you'd get back an ndarray of size
+              J x K x M x 3.  The last dimension will always correspond to the
+              number of sequences provided.
+
+  Returns:
+  --------
+   Returns an ndarray object with a mesh of control points.
+
+  Examples:
+  ---------
+  >> mesh(np.arange(3), np.arange(4))
+      DeviceArray([[[0, 0],
+                    [0, 1],
+                    [0, 2],
+                    [0, 3]],
+
+                   [[1, 0],
+                    [1, 1],
+                    [1, 2],
+                    [1, 3]],
+
+                   [[2, 0],
+                    [2, 1],
+                    [2, 2],
+                    [2, 3]]], dtype=int32)
+
+  >> mesh(np.arange(3), np.arange(4), np.arange(5)).shape
+      (3, 4, 5, 3)
+  '''
   return np.stack(np.meshgrid(*control, indexing='ij'), axis=-1)
 
 @jax.jit
