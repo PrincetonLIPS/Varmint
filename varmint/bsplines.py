@@ -1,9 +1,14 @@
 import jax
 import jax.numpy    as np
+import numpy        as onp
 import numpy.random as npr
 import timeit
 
 from functools import partial
+
+def mesh(*control):
+  ''' Generate a control point mesh. '''
+  return np.stack(np.meshgrid(*control, indexing='ij'), axis=-1)
 
 @jax.jit
 def divide00(num, denom):
@@ -51,7 +56,7 @@ def bspline1d_basis(u, knots, degree):
 
     # The degree zero case is just the indicator function on the
     # half-open interval specified by the knots.
-    return (k2d[...,:-1] <= u2d) * (u2d < k2d[...,1:])
+    return (k2d[...,:-1] <= u2d) * (u2d < k2d[...,1:]) + 0.0
 
   else:
 
@@ -145,10 +150,11 @@ def bspline3d_basis(u, xknots, yknots, zknots, degree):
    Returns an ndarray of dimension N x J x K x L, where ret[n,:,:,:] is the
    tensor product of basis functions for x, y, and z, evaluated at u[n,:].
   '''
+  u2d = np.atleast_2d(u)
 
-  basis_x  = bspline1d_basis(u[:,0], xknots, degree)[:,:,np.newaxis,np.newaxis]
-  basis_y  = bspline1d_basis(u[:,1], yknots, degree)[:,np.newaxis,:,np.newaxis]
-  basis_z  = bspline1d_basis(u[:,2], zknots, degree)[:,np.newaxis,np.newaxis,:]
+  basis_x = bspline1d_basis(u2d[:,0], xknots, degree)[:,:,np.newaxis,np.newaxis]
+  basis_y = bspline1d_basis(u2d[:,1], yknots, degree)[:,np.newaxis,:,np.newaxis]
+  basis_z = bspline1d_basis(u2d[:,2], zknots, degree)[:,np.newaxis,np.newaxis,:]
 
   basis_xyz = basis_x * basis_y * basis_z
 
@@ -165,7 +171,6 @@ def bspline2d(u, control, xknots, yknots, degree):
 
   basis_xy = bspline2d_basis(u, xknots, yknots, degree)
 
-  # This is 3x slower for reasons I don't understand.
   return np.tensordot(basis_xy, control, ((1,2), (0,1)))
 
 @partial(jax.jit, static_argnums=(5,))
@@ -174,23 +179,41 @@ def bspline3d(u, control, xknots, yknots, zknots, degree):
 
   basis_xyz = bspline3d_basis(u, xknots, yknots, zknots, degree)
 
-  # This is 3x slower for reasons I don't understand.
   return np.tensordot(basis_xyz, control, ((1,2,3), (0,1,2)))
 
 @partial(jax.jit, static_argnums=(2,))
-def bspline1d_basis_derivs(u, knots, degree):
+def bspline1d_basis_derivs_hand(u, knots, degree):
   ''' Derivatives of basis functions '''
   d_basis = bspline1d_basis(u, knots, degree-1)
   v0 = divide00(d_basis[:,:-1] * degree, knots[degree:-1] - knots[:-degree-1])
   v1 = divide00(d_basis[:,1:] * degree, knots[degree+1:] - knots[1:-degree])
   return v0 - v1
 
-def bspline1d_derivs(u, control, knots, degree):
+bspline1d_basis_derivs_jax = jax.jit(
+  jax.vmap(
+    lambda *args: np.squeeze(jax.jacfwd(bspline1d_basis, argnums=0)(*args)),
+    (0, None, None),
+  ),
+  static_argnums=(2,)
+)
+
+# In this case the hand-coded one appears to be faster.
+bspline1d_basis_derivs = bspline1d_basis_derivs_hand
+
+def bspline1d_derivs_hand(u, control, knots, degree):
   ''' Evaluate the derivative of a one-dimensional bspline function. '''
   return bspline1d_basis_derivs(u, knots, degree) @ control
 
-partial(jax.jit, static_argnums=(2,))
-def bspline2d_basis_derivs(u, xknots, yknots, degree):
+bspline1d_derivs_jax = jax.jit(
+  jax.vmap(
+    lambda *args: np.squeeze(jax.jacfwd(bspline1d, argnums=0)(*args)),
+    (0, None, None, None),
+  ),
+  static_argnums=(3,)
+)
+
+@partial(jax.jit, static_argnums=(3,))
+def bspline2d_basis_derivs_hand(u, xknots, yknots, degree):
   ''' Derivatives of 2d basis functions '''
   u2d = np.atleast_2d(u)
 
@@ -203,24 +226,47 @@ def bspline2d_basis_derivs(u, xknots, yknots, degree):
                     basis_x[:,:,np.newaxis] * basis_y_du2[:,np.newaxis,:] ],
                   axis=3)
 
-def compare_1d_deriv_times():
+bspline2d_basis_derivs_jax = jax.jit(
+  jax.vmap(
+    lambda *args: np.squeeze(jax.jacfwd(bspline2d_basis, argnums=0)(*args)),
+    (0, None, None, None),
+  ),
+  static_argnums=(3,),
+)
+
+# Hand-coded appears slightly faster.
+bspline2d_basis_derivs = bspline2d_basis_derivs_hand
+
+@partial(jax.jit, static_argnums=(4,))
+def bspline2d_derivs_hand(u, control, xknots, yknots, degree):
+  ''' Derivatives of 2d spline functions. '''
+  return np.tensordot(
+    control,
+    bspline2d_basis_derivs(u, xknots, yknots, degree),
+    ((0,1), (1,2)), # FIXME
+  )
+
+bspline2d_derivs_jax = jax.jit(
+  jax.vmap(
+    lambda *args: np.squeeze(jax.jacfwd(bspline2d, argnums=0)(*args)),
+    (0, None, None, None, None),
+  ),
+  static_argnums=(4,),
+)
+
+def compare_1d_basis_deriv_times():
   npr.seed(1)
-  u           = npr.rand(100)
-  num_control = 10
+
+  u           = npr.rand(1000)
+  num_control = 100
   degree      = 3
   num_knots   = num_control + degree + 1
   knots = np.hstack([np.zeros(degree),
                      np.linspace(0, 1, num_knots - 2*degree),
                      np.ones(degree)])
 
-
-  df_basis_fn = jax.jit(jax.vmap(
-    jax.jacfwd(bspline1d_basis, argnums=0),
-    in_axes=(0, None, None),
-    ), static_argnums=(2,))
-
-  version1 = lambda : bspline1d_basis_derivs(u, knots, degree)
-  version2 = lambda : np.squeeze(df_basis_fn(u, knots, degree))
+  version1 = lambda : bspline1d_basis_derivs_hand(u, knots, degree)
+  version2 = lambda : bspline1d_basis_derivs_jax(u, knots, degree)
 
   version1_t = timeit.timeit(version1, number=1000)
   version2_t = timeit.timeit(version2, number=1000)
@@ -228,14 +274,27 @@ def compare_1d_deriv_times():
   print('Hand: %0.3fsec  JAX: %0.3fsec (%0.1fx)' % (version1_t, version2_t,
                                                     version2_t/version1_t))
 
-def compare_2d_deriv_times():
+def compare_1d_deriv_times():
   npr.seed(1)
 
-  df_basis_fn = jax.jit(jax.vmap(
-    jax.jacfwd(bspline2d_basis, argnums=0),
-    in_axes=(0, None, None, None),
-  ), static_argnums=(3,))
+  u           = npr.rand(100)
+  control     = npr.randn(10)
+  degree      = 3
+  num_knots   = control.shape[0] + degree + 1
+  knots = np.hstack([np.zeros(degree),
+                     np.linspace(0, 1, num_knots - 2*degree),
+                     np.ones(degree)])
 
+  version1 = lambda : bspline1d_derivs_hand(u, control, knots, degree)
+  version2 = lambda : bspline1d_derivs_jax(u, control, knots, degree)
+
+  version1_t = timeit.timeit(version1, number=1000)
+  version2_t = timeit.timeit(version2, number=1000)
+
+  print('Hand: %0.3fsec  JAX: %0.3fsec (%0.1fx)' % (version1_t, version2_t,
+                                                    version2_t/version1_t))
+
+def compare_2d_basis_deriv_times():
   npr.seed(1)
 
   u            = npr.rand(100,2)
@@ -251,8 +310,8 @@ def compare_2d_deriv_times():
                       np.linspace(0, 1, num_yknots - 2*degree),
                       np.ones(degree)])
 
-  version1 = lambda : bspline2d_basis_derivs(u, xknots, yknots, degree)
-  version2 = lambda : np.squeeze(df_basis_fn(u, xknots, yknots, degree))
+  version1 = lambda : bspline2d_basis_derivs_hand(u, xknots, yknots, degree)
+  version2 = lambda : bspline2d_basis_derivs_jax(u, xknots, yknots, degree)
 
   version1_t = timeit.timeit(version1, number=1000)
   version2_t = timeit.timeit(version2, number=1000)
