@@ -259,6 +259,9 @@ bspline2d_derivs_jax = jax.jit(
   static_argnums=(4,),
 )
 
+# Hand-coded appears slightly faster.
+bspline2d_derivs = bspline2d_derivs_hand
+
 def compare_1d_basis_deriv_times():
   npr.seed(1)
 
@@ -317,6 +320,30 @@ def compare_2d_basis_deriv_times():
 
   version1 = lambda : bspline2d_basis_derivs_hand(u, xknots, yknots, degree)
   version2 = lambda : bspline2d_basis_derivs_jax(u, xknots, yknots, degree)
+
+  version1_t = timeit.timeit(version1, number=1000)
+  version2_t = timeit.timeit(version2, number=1000)
+
+  print('Hand: %0.3fsec  JAX: %0.3fsec (%0.1fx)' % (version1_t, version2_t,
+                                                    version2_t/version1_t))
+
+def compare_2d_deriv_times():
+  npr.seed(1)
+
+  u            = npr.rand(100,2)
+  control      = npr.randn(10,11,2)
+  degree       = 3
+  num_xknots   = control.shape[0] + degree + 1
+  num_yknots   = control.shape[1] + degree + 1
+  xknots = np.hstack([np.zeros(degree),
+                      np.linspace(0, 1, num_xknots - 2*degree),
+                      np.ones(degree)])
+  yknots = np.hstack([np.zeros(degree),
+                      np.linspace(0, 1, num_yknots - 2*degree),
+                      np.ones(degree)])
+
+  version1 = lambda : bspline2d_derivs_hand(u, control, xknots, yknots, degree)
+  version2 = lambda : bspline2d_derivs_jax(u, control, xknots, yknots, degree)
 
   version1_t = timeit.timeit(version1, number=1000)
   version2_t = timeit.timeit(version2, number=1000)
