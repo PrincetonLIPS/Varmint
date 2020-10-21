@@ -6,6 +6,8 @@ import timeit
 
 from functools import partial
 
+from exceptions import SplineError
+
 def mesh(*control):
   ''' Generate a control point mesh.
 
@@ -91,6 +93,8 @@ def bspline1d_basis(u, knots, degree):
 
   # Determine the target size of the returned object.
   num_basis_funcs = knots.shape[0]-degree-1
+  if num_basis_funcs < 2:
+    raise SplineError('Degree inconsistent with number of knots.')
   ret_shape = u1d.shape + (num_basis_funcs,)
 
   # Set things up for broadcasting.
