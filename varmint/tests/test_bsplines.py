@@ -453,6 +453,68 @@ class TestBSplines(ut.TestCase):
                  [0., 0., 0., 0.,]]])
     )
 
+  def test_bspline2d_basis_values_2(self):
+
+    degree = 1
+    xknots = np.array([0.0, 0.0, 0.5, 1.0, 1.0])             # 3 control pts
+    yknots = np.array([0.0, 0.0, 0.25, 0.5, 0.75, 1.0, 1.0]) # 5 control pts
+
+    nptest.assert_array_equal(
+      bsplines.bspline2d_basis(
+        np.array([0.0, 0.0]),
+        xknots,
+        yknots,
+        degree,
+      ),
+      jax.ops.index_add(np.zeros((1,3,5)), (0,0,0), 1.0),
+    )
+
+    nptest.assert_array_equal(
+      bsplines.bspline2d_basis(
+        np.array([1.0, 1.0]),
+        xknots,
+        yknots,
+        degree,
+      ),
+      np.zeros((1,3,5)),
+    )
+
+    nptest.assert_array_equal(
+      bsplines.bspline2d_basis(
+        np.array([0.25, 0]),
+        xknots,
+        yknots,
+        degree,
+      ),
+      np.array([[[0.5, 0., 0., 0., 0.],
+                 [0.5, 0., 0., 0., 0.],
+                 [0., 0., 0., 0., 0.]]])
+    )
+
+    nptest.assert_array_equal(
+      bsplines.bspline2d_basis(
+        np.array([0.25, 0.125]),
+        xknots,
+        yknots,
+        degree,
+      ),
+      np.array([[[0.25, 0.25, 0., 0., 0.],
+                 [0.25, 0.25, 0., 0., 0.],
+                 [0., 0., 0., 0., 0.]]])
+    )
+
+    nptest.assert_array_equal(
+      bsplines.bspline2d_basis(
+        np.array([0.75, 0.375]),
+        xknots,
+        yknots,
+        degree,
+      ),
+      np.array([[[0., 0., 0., 0., 0.],
+                 [0., 0.25, 0.25, 0., 0.],
+                 [0., 0.25, 0.25, 0., 0.]]])
+    )
+
   def test_bspline3d_basis_values_1(self):
 
     degree = 0
