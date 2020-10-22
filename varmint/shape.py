@@ -1,11 +1,16 @@
 import jax
 import jax.numpy         as np
+import numpy             as onp
 import matplotlib.pyplot as plt
 
 from collections import namedtuple
 
 import bsplines
 
+# Create a numpy dtype with labels.
+ctrl2d = onp.dtype([('loc', onp.float64, (2,)), ('label', onp.str)])
+
+# Create a simple structure for patches.
 Patch2D = namedtuple(
   'Patch2D',
   [
@@ -23,8 +28,6 @@ class Shape2D:
 
   def __init__(self, *patches):
     self.patches = patches
-
-    # This is where you'd find all matching pairs of control points.
 
   def render(self, filename=None):
     fig = plt.figure()
@@ -59,12 +62,16 @@ class Shape2D:
 def main():
 
   # Create a rectangle.
+  r1_locs = bsplines.mesh(np.arange(10), np.arange(5))
+  r1_ctrl = onp.zeros(r1_locs.shape[:-1], dtype=ctrl2d)
+  r1_ctrl['loc'] = onp.array(r1_locs)
+
+  print(r1_ctrl)
+
   r1_deg    = 4
-  r1_ctrl   = bsplines.mesh(np.arange(10), np.arange(5))
   r1_xknots = bsplines.default_knots(r1_deg, r1_ctrl.shape[0])
   r1_yknots = bsplines.default_knots(r1_deg, r1_ctrl.shape[1])
   r1_patch  = Patch2D(r1_ctrl, r1_xknots, r1_yknots, r1_deg)
-  print(r1_xknots, r1_yknots)
 
   # Create another rectangle.
   r2_deg    = 3
