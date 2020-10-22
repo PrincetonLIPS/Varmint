@@ -817,7 +817,23 @@ class TestBSplines(ut.TestCase):
       np.array([[6.5, 14.5, 3.5]])
     )
 
-  def test_bspline1d_basis_derivs(self):
+  def test_bspline1d_basis_derivs_1(self):
+    # Compare to the JAX version.
+
+    u           = np.array([0.0, 1.0])
+    num_control = 10
+    degree      = 3
+    num_knots   = num_control + degree + 1
+    knots = np.hstack([np.zeros(degree),
+                       np.linspace(0, 1, num_knots - 2*degree),
+                       np.ones(degree)])
+
+    res1 = bsplines.bspline1d_basis_derivs_hand(u, knots, degree)
+    res2 = bsplines.bspline1d_basis_derivs_jax(u, knots, degree)
+
+    nptest.assert_array_almost_equal(res1, res2, decimal=5)
+
+  def test_bspline1d_basis_derivs_2(self):
     # Compare to the JAX version.
 
     npr.seed(1)
@@ -835,7 +851,23 @@ class TestBSplines(ut.TestCase):
 
     nptest.assert_array_almost_equal(res1, res2, decimal=5)
 
-  def test_bspline1d_derivs(self):
+  def test_bspline1d_derivs_1(self):
+    # Compare to the JAX version.
+
+    u           = np.array([0.0, 1.0])
+    control     = npr.randn(10)
+    degree      = 3
+    num_knots   = control.shape[0] + degree + 1
+    knots = np.hstack([np.zeros(degree),
+                       np.linspace(0, 1, num_knots - 2*degree),
+                       np.ones(degree)])
+
+    res1 = bsplines.bspline1d_derivs_hand(u, control, knots, degree)
+    res2 = bsplines.bspline1d_derivs_jax(u, control, knots, degree)
+
+    nptest.assert_array_almost_equal(res1, res2, decimal=5)
+
+  def test_bspline1d_derivs_2(self):
     # Compare to the JAX version.
 
     npr.seed(1)
@@ -853,15 +885,21 @@ class TestBSplines(ut.TestCase):
 
     nptest.assert_array_almost_equal(res1, res2, decimal=5)
 
-  def test_bspline2d_basis_derivs(self):
+  def test_bspline2d_basis_derivs_1(self):
     # Compare to the JAX version.
 
     npr.seed(1)
 
-    u            = npr.rand(5,2)
-    num_xcontrol = 4
-    num_ycontrol = 3
-    degree       = 1
+    u = np.array([
+      [0., 0.],
+      [1., 0.],
+      [0., 1.],
+      [1., 1.],
+    ])
+
+    num_xcontrol = 7
+    num_ycontrol = 6
+    degree       = 3
     num_xknots   = num_xcontrol + degree + 1
     num_yknots   = num_ycontrol + degree + 1
     xknots = np.hstack([np.zeros(degree),
@@ -876,7 +914,57 @@ class TestBSplines(ut.TestCase):
 
     nptest.assert_array_almost_equal(res1, res2, decimal=5)
 
-  def test_bspline2d_derivs(self):
+  def test_bspline2d_basis_derivs_2(self):
+    # Compare to the JAX version.
+
+    npr.seed(1)
+
+    u            = npr.rand(100,2)
+    num_xcontrol = 7
+    num_ycontrol = 6
+    degree       = 3
+    num_xknots   = num_xcontrol + degree + 1
+    num_yknots   = num_ycontrol + degree + 1
+    xknots = np.hstack([np.zeros(degree),
+                       np.linspace(0, 1, num_xknots - 2*degree),
+                       np.ones(degree)])
+    yknots = np.hstack([np.zeros(degree),
+                       np.linspace(0, 1, num_yknots - 2*degree),
+                       np.ones(degree)])
+
+    res1 = bsplines.bspline2d_basis_derivs_hand(u, xknots, yknots, degree)
+    res2 = bsplines.bspline2d_basis_derivs_jax(u, xknots, yknots, degree)
+
+    nptest.assert_array_almost_equal(res1, res2, decimal=5)
+
+  def test_bspline2d_derivs_1(self):
+    # Make sure we get sizes we expect.
+
+    u = np.array([
+      [0., 0.],
+      [1., 0.],
+      [0., 1.],
+      [1., 1.],
+    ])
+
+    control     = npr.randn(10, 11, 2)
+    degree      = 3
+    num_xknots  = control.shape[0] + degree + 1
+    num_yknots  = control.shape[1] + degree + 1
+
+    xknots = np.hstack([np.zeros(degree),
+                       np.linspace(0, 1, num_xknots - 2*degree),
+                       np.ones(degree)])
+    yknots = np.hstack([np.zeros(degree),
+                        np.linspace(0, 1, num_yknots - 2*degree),
+                        np.ones(degree)])
+
+    res1 = bsplines.bspline2d_derivs_hand(u, control, xknots, yknots, degree)
+    res2 = bsplines.bspline2d_derivs_jax(u, control, xknots, yknots, degree)
+
+    nptest.assert_array_almost_equal(res1, res2, decimal=5)
+
+  def test_bspline2d_derivs_2(self):
     # Make sure we get sizes we expect.
 
     npr.seed(1)
