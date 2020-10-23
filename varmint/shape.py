@@ -3,7 +3,10 @@ import jax.numpy         as np
 import numpy             as onp
 import matplotlib.pyplot as plt
 
-from exceptions import DimensionError
+from exceptions import (
+  DimensionError,
+  LabelError,
+  )
 
 import bsplines
 
@@ -23,6 +26,21 @@ class Patch2D:
         raise DimensionError('The labels must have shape %d x %d.' % (
           ctrl.shape[0], ctrl.shape[1]))
 
+  def has_label(self, label):
+    return onp.any(self.labels == label)
+
+  def label2idx(self, label):
+    rows, cols = onp.nonzero(self.labels == label)
+    if rows.shape[0] > 1 or cols.shape[0] > 1:
+      raise LabelError('More than one control point has label %s.' % (label))
+    elif rows.shape[0] == 1 or cols.shape[0] == 1:
+      raise LabelError('No control points have label %s.' % (label))
+    return rows[0], cols[0]
+
+  def label2ctrl(self, label):
+    row, col = self.label2idx(label)
+    return self.ctrl[row,col,:]
+
 class Shape2D:
   ''' Class for managing collections of 2D patches
 
@@ -30,6 +48,12 @@ class Shape2D:
 
   def __init__(self, *patches):
     self.patches = patches
+
+    self.check_labels()
+
+  def check_labels(self):
+    ''' Verify that the labels aren't crazy. '''
+    pass
 
   def render(self, filename=None):
     fig = plt.figure()
