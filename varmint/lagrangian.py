@@ -1,35 +1,33 @@
 import jax
-import jax.numpy as np
+import jax.numpy        as np
+import jax.numpy.linalg as npla
 import logging
 
-from exceptions import DimensionError
+from vmap_utils import *
 
-def generate_lagrangian(quad, ref_ctrl, degree, knots=None):
+def generate_lagrangian(quad, ref_shape, mat):
   ''' Generate a Lagrangian function for a deformation problem.
 
   Returns a function that uses quadrature to evaluate the Lagrangian associated
   with a particular deformation and generalized velocity, with the given
   reference configuration and b-spline parameters.
 
+  I'm taking D \in {2,3} to be the number of spatial dimensions.
+
   Parameters:
   -----------
-   - quad : An object that implements the Quadrature3D interface for the 3D cube
-            [0,1]^3.
+   - quad : An object that implements the appropriately-dimensioned Quadrature
+            object.
 
-   - ref_ctrl: An ndarray of size J x K x L x 3 that contains the control points
-               of the reference configuration.
+   - ref_shape: A representation of the reference object as a Shape2D or Shape3D
+                object.
 
-   - degree: A non-negative integer indicating the degree of the b-spline.
-
-   - knots: A three-tuple of knot ndarrays for x, y, and z dimensions. The
-            lengths of these vectors needs to make sense relative to the
-            provided degree and number of control points.  Each vector must be
-            non-decreasing and is assumed to go from 0 to 1 inclusive. If it is
-            not provided, the default is to generate uniformly distributed with
-            open knots at the endpoints.
+   - mat: A Material object.
 
   Returns:
   --------
+   FIXME: update for the Shape setup...
+
    Returns a function with the signature:
     (ndarray[J x K x L x 3], ndarray[J x K x L x 3]) -> float
    This function takes a set of deformation control points as generalized
@@ -37,44 +35,57 @@ def generate_lagrangian(quad, ref_ctrl, degree, knots=None):
    the associated Lagrangian as computed by quadrature and returns its value.
   '''
 
-  # Get the shape of the control points.
-  xdim, ydim, zdim, _ = ref_ctrl.shape
-  logging.debug('xdim=%d ydim=%d zdim=%d' % (xdim, ydim, zdim))
+  uu = quad.locs
 
-  # Compute the knots, if necessary.
-  if knots is None:
-    knots = []
-    for dd in range(3):
-      num_knots = ref_ctrl.shape[dd] + degree + 1
-      knots.append(np.hstack([np.zeros(degree),
-                              np.linspace(0, 1, num_knots - 2*degree),
-                              np.ones(degree)]))
-    knots = tuple(knots)
-    logging.info('Using default knots.')
-  else:
-    logging.debug('Using user-provided knots.')
-  if xdim != knots[0].shape[0]:
-    raise DimensionError(
-      'Unexpected number of x-dim knots vs. control points.'
-    )
-  if ydim != knots[1].shape[0]:
-    raise DimensionError(
-      'Unexpected number of y-dim knots vs. control points.'
-    )
-  if zdim != knots[2].shape[0]:
-    raise DimensionError(
-      'Unexpected number of z-dim knots vs. control points.'
-    )
+  # Precompute useful reference quantities.
+  ref_jacs     = ref_shape.jacobian(uu)
+  ref_jac_invs = map(vmap_inv, ref_jacs)
+  ref_jac_dets = map(vmap_det, ref_jacs)
 
-  # Get the quadrature points.
-  quadlocs = quad.locs
-  if len(quadlocs.shape) != 2:
-    raise DimensionError(
-      'Quadrature locations should be a 2-dimensional array.'
-    )
-  if quadlocs.shape[1] != 3:
-    raise DimensionError(
-      'Quadrature locations should be in 3D.'
+  def lagrangian(q, qdot):
+
+    # Maybe should be doing fancier flattening things here.
+    def_jacs = q
+    def_vels = qdot
+
+    # Compute the deformation gradients.
+    defgrads = map(vmap_dot, def_jacs, ref_jacs)
+
+    # Determinant of the reference configuration.
+    ref_jac_dets = map(vmap_det, def_jacs)
+
+    # Compute the energy density.
+    # FIXME: does map work with methods?
+    energy_density = map(
+      np.multiply,
+      map(
+        mat.energy, defgrads),
+      np.abs(ref_jac_dets)
     )
 
-  # Generate the bspline basis functions.
+    strain_energy = reduce(np.add, map(quad.compute, energy_density))
+
+    # Compute the mass density assuming uniform reference density.
+    mass_density = map(lambda rjd: rjd * material.density, np.abs(ref_jac_dets))
+
+    # TODO: compute gravitational potential
+
+    # TODO: compute mass matrix
+
+    # TODO: compute kinetic energy
+
+    # return lagrangian
+
+
+if __name__ == '__main__':
+  import shape3d
+  import materials
+
+  from constitutive import NeoHookean
+  from quadrature import Quad3D_TensorGaussLegendre
+
+  mat   = NeoHookean(materials.NinjaFlex)
+  quad  = Quad3D_TensorGaussLegendre(10)
+  shape = shape3d.test_shape1()
+
+  generate_lagrangian(quad, shape, mat)

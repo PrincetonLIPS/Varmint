@@ -2,6 +2,7 @@ import jax
 import jax.numpy         as np
 import numpy             as onp
 import matplotlib.pyplot as plt
+import logging
 
 from mpl_toolkits.mplot3d import Axes3D
 
@@ -22,6 +23,10 @@ class Patch3D:
     self.zknots = zknots
     self.deg    = deg
 
+    # Get the shape of the control points.
+    xdim, ydim, zdim, _ = ctrl.shape
+    logging.debug('xdim=%d ydim=%d zdim=%d' % (xdim, ydim, zdim))
+
     if labels is None:
       self.labels = onp.zeros((
         ctrl.shape[0],
@@ -32,6 +37,19 @@ class Patch3D:
       if labels.shape != ctrl.shape[:-1]:
         raise DimensionError('The labels must have shape %d x %d x %d.' \
                              % (ctrl.shape[0], ctrl.shape[1], ctrl.shape[2]))
+
+  def pytree(self):
+    return self.ctrl
+
+  def jacobian(self, u):
+    return bsplines.bspline3d_derivs(
+      u,
+      self.ctrl,
+      self.xknots,
+      self.yknots,
+      self.zknots,
+      self.deg,
+    )
 
   def has_label(self, label):
     return onp.any(self.labels == label)
@@ -61,6 +79,14 @@ class Shape3D:
   def check_labels(self):
     ''' Verify that the labels aren't crazy. '''
     pass
+
+  def pytree(self):
+    # May be better to do this with pytree registration in JAX.
+    # Need to handle constraints somehow.  Will revisit.
+    return [patch.pytree() for patch in self.patches]
+
+  def jacobian(self, u):
+    return [patch.jacobian(u) for patch in self.patches]
 
   def render_wireframe(self, filename=None):
     fig = plt.figure()
@@ -211,11 +237,11 @@ class Shape3D:
       plt.savefig(filename)
 
 
-def main():
+def test_shape1():
 
   # Create a rectangle.
   r1_deg    = 2
-  r1_ctrl   = bsplines.mesh(np.arange(10), np.arange(5), np.arange(4))
+  r1_ctrl   = bsplines.mesh(np.arange(10), np.arange(5), np.arange(4))+0.0
   r1_xknots = bsplines.default_knots(r1_deg, r1_ctrl.shape[0])
   r1_yknots = bsplines.default_knots(r1_deg, r1_ctrl.shape[1])
   r1_zknots = bsplines.default_knots(r1_deg, r1_ctrl.shape[2])
@@ -229,7 +255,7 @@ def main():
   r2_deg    = 2
   r2_ctrl   = bsplines.mesh(np.array([3,4,5,6]),
                             np.array([-4, -3, -2, -1, 0]),
-                            np.arange(4))
+                            np.arange(4))+0.0
   r2_xknots = bsplines.default_knots(r2_deg, r2_ctrl.shape[0])
   r2_yknots = bsplines.default_knots(r2_deg, r2_ctrl.shape[1])
   r2_zknots = bsplines.default_knots(r2_deg, r2_ctrl.shape[2])
@@ -261,7 +287,7 @@ def main():
   #u1_patch.labels[:,-1] = ['H', 'I', 'J']
 
   shape = Shape3D(r1_patch, r2_patch, u1_patch)
-  shape.render_surface()
+  return shape
 
 if __name__ == '__main__':
-  main()
+  test_shape1().render_surface()
