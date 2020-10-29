@@ -32,7 +32,9 @@ class Patch2D:
      - deg: The degree of the bspline.
 
      - labels: An optional M x N array of strings that allow constraints to be
-               specified across patches.
+               specified across patches. In general, labels are used to specify
+               coincidence constraints.  The exception is the special label
+               'FIXED' which is only used for fixing a control point in space.
     '''
     self.ctrl   = ctrl
     self.xknots = xknots
@@ -57,6 +59,8 @@ class Patch2D:
     --------
      True if one of the labels matches the string, otherwise False.
     '''
+    if label == 'FIXED':
+      raise LabelError('The FIXED label is reserved for "fixed" constraints.')
     return onp.any(self.labels == label)
 
   def label2idx(self, label):
@@ -76,6 +80,8 @@ class Patch2D:
      Throws a LabelError exception if the label is not present or more than one
      of the labels is present.
     '''
+    if label == 'FIXED':
+      raise LabelError('The FIXED label is reserved for "fixed" constraints.')
     rows, cols = onp.nonzero(self.labels == label)
     if rows.shape[0] > 1 or cols.shape[0] > 1:
       raise LabelError('More than one control point has label %s.' % (label))
@@ -100,5 +106,13 @@ class Patch2D:
      Throws a LabelError exception if the label is not present or more than one
      of the labels is present.
     '''
+    if label == 'FIXED':
+      raise LabelError('The FIXED label is reserved for "fixed" constraints.')
     row, col = self.label2idx(label)
     return self.ctrl[row,col,:]
+
+  def is_fixed(self, row, col):
+    return self.labels[row,col] == 'FIXED'
+
+  def get_fixed(self):
+    return onp.nonzero(self.labels == 'FIXED')
