@@ -111,6 +111,12 @@ class Patch2D:
     row, col = self.label2idx(label)
     return self.ctrl[row,col,:]
 
+  def get_labels(self):
+    rows, cols = onp.nonzero(onp.logical_and(self.labels != 'FIXED',
+                                             self.labels != ''))
+    labels = self.labels[rows, cols]
+    return labels, rows, cols
+
   def is_fixed(self, row, col):
     return self.labels[row,col] == 'FIXED'
 

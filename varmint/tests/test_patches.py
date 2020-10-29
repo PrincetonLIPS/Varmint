@@ -57,6 +57,12 @@ class Test_Patch2D_NoLabels(ut.TestCase):
     with self.assertRaises(LabelError):
       self.patch.label2ctrl('FIXED')
 
+  def test_get_labels(self):
+    labels, rows, cols = self.patch.get_labels()
+    self.assertEqual(len(labels), 0)
+    self.assertEqual(len(rows), 0)
+    self.assertEqual(len(cols), 0)
+
 class Test_Patch2D_Labels(ut.TestCase):
   ''' Test basic label functionality. '''
 
@@ -117,6 +123,20 @@ class Test_Patch2D_Labels(ut.TestCase):
     with self.assertRaises(LabelError):
       self.patch.label2ctrl('FIXED')
 
+  def test_get_labels(self):
+    labels, rows, cols = self.patch.get_labels()
+    self.assertEqual(len(labels), 5)
+    self.assertEqual(len(rows), 5)
+    self.assertEqual(len(cols), 5)
+
+    labdict = dict(zip(labels, zip(rows, cols)))
+    self.assertEqual(labdict['00'], (0, 0))
+    self.assertEqual(labdict['A'], (9, 0))
+    self.assertEqual(labdict['B'], (9, 1))
+    self.assertEqual(labdict['C'], (9, 2))
+    self.assertEqual(labdict['D'], (9, 3))
+
+
 class Test_Patch2D_Fixed(ut.TestCase):
   ''' Test special FIXED label functionality. '''
 
@@ -159,3 +179,9 @@ class Test_Patch2D_Fixed(ut.TestCase):
     self.assertEqual(len(cols), 3)
     nptest.assert_array_equal(rows, np.array([0, 1, 2]))
     nptest.assert_array_equal(cols, np.array([0, 2, 3]))
+
+  def test_get_labels(self):
+    labels, rows, cols = self.patch.get_labels()
+    self.assertEqual(len(labels), 0)
+    self.assertEqual(len(rows), 0)
+    self.assertEqual(len(cols), 0)
