@@ -9,9 +9,10 @@ import bsplines
 from patch      import Patch2D
 from exceptions import LabelError
 
-class TestPatches(ut.TestCase):
+class TestPatch2D(ut.TestCase):
 
-  def test_2d_1(self):
+  def test_1(self):
+    ''' Test basic functionality with no labels. '''
 
     deg    = 4
     ctrl   = bsplines.mesh(np.arange(10), np.arange(5))
@@ -36,7 +37,17 @@ class TestPatches(ut.TestCase):
     with self.assertRaises(LabelError):
       patch.label2ctrl('foo')
 
-  def test_2d_2(self):
+    with self.assertRaises(LabelError):
+      patch.has_label('FIXED')
+
+    with self.assertRaises(LabelError):
+      patch.label2idx('FIXED')
+
+    with self.assertRaises(LabelError):
+      patch.label2ctrl('FIXED')
+
+  def test_2(self):
+    ''' Test basic label functionality. '''
 
     deg    = 2
     ctrl   = bsplines.mesh(np.arange(10), np.arange(4))
@@ -62,3 +73,18 @@ class TestPatches(ut.TestCase):
 
     nptest.assert_array_equal(patch.label2ctrl('B'),
                               np.array([9.0, 1.0]))
+
+    with self.assertRaises(LabelError):
+      patch.label2idx('foo')
+
+    with self.assertRaises(LabelError):
+      patch.label2ctrl('foo')
+
+    with self.assertRaises(LabelError):
+      patch.has_label('FIXED')
+
+    with self.assertRaises(LabelError):
+      patch.label2idx('FIXED')
+
+    with self.assertRaises(LabelError):
+      patch.label2ctrl('FIXED')
