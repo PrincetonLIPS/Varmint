@@ -1,5 +1,6 @@
 import jax
 import jax.numpy         as np
+import numpy             as onp
 import matplotlib.pyplot as plt
 
 from exceptions import LabelError
@@ -78,7 +79,7 @@ class Patch2D:
     rows, cols = onp.nonzero(self.labels == label)
     if rows.shape[0] > 1 or cols.shape[0] > 1:
       raise LabelError('More than one control point has label %s.' % (label))
-    elif rows.shape[0] == 1 or cols.shape[0] == 1:
+    elif rows.shape[0] == 0 or cols.shape[0] == 0:
       raise LabelError('No control points have label %s.' % (label))
     return rows[0], cols[0]
 

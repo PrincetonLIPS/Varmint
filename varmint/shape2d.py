@@ -10,37 +10,6 @@ from exceptions import (
 
 import bsplines
 
-class Patch2D:
-  ''' Class for individual patches in two dimensions.
-  '''
-  def __init__(self, ctrl, xknots, yknots, deg, labels=None):
-    self.ctrl   = ctrl
-    self.xknots = xknots
-    self.yknots = yknots
-    self.deg    = deg
-
-    if labels is None:
-      self.labels = onp.zeros((ctrl.shape[0], ctrl.shape[1]), dtype='<U256')
-    else:
-      if labels.shape != ctrl.shape[:-1]:
-        raise DimensionError('The labels must have shape %d x %d.' % (
-          ctrl.shape[0], ctrl.shape[1]))
-
-  def has_label(self, label):
-    return onp.any(self.labels == label)
-
-  def label2idx(self, label):
-    rows, cols = onp.nonzero(self.labels == label)
-    if rows.shape[0] > 1 or cols.shape[0] > 1:
-      raise LabelError('More than one control point has label %s.' % (label))
-    elif rows.shape[0] == 1 or cols.shape[0] == 1:
-      raise LabelError('No control points have label %s.' % (label))
-    return rows[0], cols[0]
-
-  def label2ctrl(self, label):
-    row, col = self.label2idx(label)
-    return self.ctrl[row,col,:]
-
 class Shape2D:
   ''' Class for managing collections of 2D patches
 
