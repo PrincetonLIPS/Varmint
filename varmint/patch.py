@@ -112,13 +112,54 @@ class Patch2D:
     return self.ctrl[row,col,:]
 
   def get_labels(self):
+    ''' Get all the (non-FIXED) labels at once, along with their indices.
+
+    Returns:
+    --------
+     (labels, rows, cols) where they are each one-dimensional arrays with length
+     corresponding to the total number of labels.  So they could be length zero.
+     These can be usefully turned into a dictionary via:
+
+     >> zip(labels, zip(rows, cols))
+    '''
     rows, cols = onp.nonzero(onp.logical_and(self.labels != 'FIXED',
                                              self.labels != ''))
     labels = self.labels[rows, cols]
     return labels, rows, cols
 
   def is_fixed(self, row, col):
+    ''' A predicate to determine whether a particular control point, specified
+    by row and column index is a fixed location.
+    '''
     return self.labels[row,col] == 'FIXED'
 
   def get_fixed(self):
+    ''' Get all rows and columns of fixed control points. '''
     return onp.nonzero(self.labels == 'FIXED')
+
+  def flatten(self):
+    ''' Return a flattened version of the control points.
+
+    Returns:
+    --------
+    ctrl, labels
+    This function removes all the fixed control points and turns the remaining
+    ones into an array with shape N x 2 where N is the number of remaining
+    points.  It also returns the labels corresponding to those points.
+    '''
+    rows, cols = onp.nonzero(self.labels != 'FIXED')
+
+    return np.reshape(self.ctrl[rows,cols,:], (-1,2)), self.labels[rows,cols]
+
+  def unflatten(self, values):
+    ''' Takes flattened values and updates the internal data structure.
+    '''
+    rows, cols = onp.nonzero(self.labels != 'FIXED')
+
+    self.ctrl = jax.ops.index_update(
+      self.ctrl,
+      jax.ops.index[rows,cols,:],
+      values,
+    )
+
+    return self.ctrl

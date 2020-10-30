@@ -14,7 +14,7 @@ class Test_Patch2D_NoLabels(ut.TestCase):
 
   def setUp(self):
     deg    = 4
-    ctrl   = bsplines.mesh(np.arange(10), np.arange(5))
+    ctrl   = bsplines.mesh(np.arange(10.), np.arange(5.))
     xknots = bsplines.default_knots(deg, ctrl.shape[0])
     yknots = bsplines.default_knots(deg, ctrl.shape[1])
 
@@ -63,12 +63,43 @@ class Test_Patch2D_NoLabels(ut.TestCase):
     self.assertEqual(len(rows), 0)
     self.assertEqual(len(cols), 0)
 
+  def test_flatten(self):
+    values, labels = self.patch.flatten()
+    self.assertEqual(values.shape[0], 50)
+    self.assertEqual(values.shape[1], 2)
+    self.assertEqual(labels.shape[0], 50)
+
+    # Test x-major reshaping.
+    nptest.assert_array_equal(values[5,:], np.array([1.0, 0.0]))
+
+  def test_unflatten_basic(self):
+    old_ctrl = np.array(self.patch.ctrl)
+
+    ctrl, labels = self.patch.flatten()
+    self.patch.unflatten(ctrl)
+
+    nptest.assert_array_equal(old_ctrl, self.patch.ctrl)
+
+  def test_unflatten_modify(self):
+    old_ctrl = np.array(self.patch.ctrl)
+
+    npr.seed(1)
+
+    ctrl, _  = self.patch.flatten()
+    new_ctrl = np.array(npr.randn(*ctrl.shape), dtype=np.float32)
+
+    self.patch.unflatten(new_ctrl)
+
+    test_ctrl, _ = self.patch.flatten()
+
+    nptest.assert_array_equal(new_ctrl, test_ctrl)
+
 class Test_Patch2D_Labels(ut.TestCase):
   ''' Test basic label functionality. '''
 
   def setUp(self):
     deg    = 2
-    ctrl   = bsplines.mesh(np.arange(10), np.arange(4))
+    ctrl   = bsplines.mesh(np.arange(10.), np.arange(4.))
     xknots = bsplines.default_knots(deg, ctrl.shape[0])
     yknots = bsplines.default_knots(deg, ctrl.shape[1])
 
@@ -136,13 +167,35 @@ class Test_Patch2D_Labels(ut.TestCase):
     self.assertEqual(labdict['C'], (9, 2))
     self.assertEqual(labdict['D'], (9, 3))
 
+  def test_flatten(self):
+    values, labels = self.patch.flatten()
+    self.assertEqual(values.shape[0], 40)
+    self.assertEqual(values.shape[1], 2)
+    self.assertEqual(labels.shape[0], 40)
+
+    # Test x-major reshaping.
+    nptest.assert_array_equal(values[4,:], np.array([1.0, 0.0]))
+
+  def test_unflatten_modify(self):
+    old_ctrl = np.array(self.patch.ctrl)
+
+    npr.seed(1)
+
+    ctrl, _  = self.patch.flatten()
+    new_ctrl = np.array(npr.randn(*ctrl.shape), dtype=np.float32)
+
+    self.patch.unflatten(new_ctrl)
+
+    test_ctrl, _ = self.patch.flatten()
+
+    nptest.assert_array_equal(new_ctrl, test_ctrl)
 
 class Test_Patch2D_Fixed(ut.TestCase):
   ''' Test special FIXED label functionality. '''
 
   def setUp(self):
     deg    = 2
-    ctrl   = bsplines.mesh(np.arange(10), np.arange(4))
+    ctrl   = bsplines.mesh(np.arange(10.), np.arange(4.))
     xknots = bsplines.default_knots(deg, ctrl.shape[0])
     yknots = bsplines.default_knots(deg, ctrl.shape[1])
 
@@ -185,3 +238,26 @@ class Test_Patch2D_Fixed(ut.TestCase):
     self.assertEqual(len(labels), 0)
     self.assertEqual(len(rows), 0)
     self.assertEqual(len(cols), 0)
+
+  def test_flatten(self):
+    values, labels = self.patch.flatten()
+    self.assertEqual(values.shape[0], 37)
+    self.assertEqual(values.shape[1], 2)
+    self.assertEqual(labels.shape[0], 37)
+
+    # Test x-major reshaping.
+    nptest.assert_array_equal(values[4,:], np.array([1.0, 1.0]))
+
+  def test_unflatten_modify(self):
+    old_ctrl = np.array(self.patch.ctrl)
+
+    npr.seed(1)
+
+    ctrl, _  = self.patch.flatten()
+    new_ctrl = np.array(npr.randn(*ctrl.shape), dtype=np.float32)
+
+    self.patch.unflatten(new_ctrl)
+
+    test_ctrl, _ = self.patch.flatten()
+
+    nptest.assert_array_equal(new_ctrl, test_ctrl)
