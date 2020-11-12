@@ -35,6 +35,22 @@ class Shape2D:
 
     self.patches = patches
 
+  def flatten(self):
+    ''' Flatten a collection of patches into a vector.
+
+    The idea is to take this collection of 3-tensors and turn them into a
+    single vector, while also accounting for constraints.  There are two kinds
+    of constraints dealt with here: 1) "fixed" constraints, which place a
+    control point at a particular location in space, and 2) "coincident"
+    constraints, which place two or more control points from different patches
+    on the same location.
+    '''
+    pass
+
+  def unflatten(self):
+    pass
+
+
   def render(self, filename=None):
     fig = plt.figure()
     ax  = plt.axes()

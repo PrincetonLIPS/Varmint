@@ -5,76 +5,93 @@ import logging
 
 from vmap_utils import *
 
-def generate_lagrangian(quad, ref_shape, mat):
-  ''' Generate a Lagrangian function for a deformation problem.
+# How to do this in a sensible functional way?
+#
+# q is generalized coordinates, which in this case means the post-constraint
+# coordinates.
+#
+# qdot has the same dimensions as q.
+#
+# This function computes three energetic quantities: strain energy,
+# gravitational energy, and kinetic energy.
+#
+# The strain energy needs to get the deformation gradient at each quadrature
+# point in all patches.  This needs to be done by computing the Jacobian of
+# the deformation for each patch with respect to the parent domain. How do
+# we do this in a functional way?
+#
+# One approach: Shape2D interface gives you back a function that you can call
+# to get deformations and associated functions, rather than doing it itself.
+#
 
-  Returns a function that uses quadrature to evaluate the Lagrangian associated
-  with a particular deformation and generalized velocity, with the given
-  reference configuration and b-spline parameters.
-
-  I'm taking D \in {2,3} to be the number of spatial dimensions.
-
-  Parameters:
-  -----------
-   - quad : An object that implements the appropriately-dimensioned Quadrature
-            object.
-
-   - ref_shape: A representation of the reference object as a Shape2D or Shape3D
-                object.
-
-   - mat: A Material object.
-
-  Returns:
-  --------
-   FIXME: update for the Shape setup...
-
-   Returns a function with the signature:
-    (ndarray[J x K x L x 3], ndarray[J x K x L x 3]) -> float
-   This function takes a set of deformation control points as generalized
-   coordinates, as well as the associated generalized velocities.  It computes
-   the associated Lagrangian as computed by quadrature and returns its value.
-  '''
+def generate_lagrangian(quad, shape, mat):
 
   uu = quad.locs
 
+  # What all do we need?
+  # - ref jacobian wrt u
+  # - ref jac det
+  # - ref jac inv
+  # - def positions
+  # - def jacobian wrt u
+  # - def jacobian wrt q
+
+  # compute energies
+
+  # approaches:
+  # 1) get lists of all these quantities for each patch, at common parent pts.
+  # 2) generalize this by having each have its own quadrature pts
+  # 3) generalize this further by solving each with adaptive quadrature.
+  #    the downside of this is that the ref stuff may need to be recomputed
+
+  # Since the reference and deformed shape need to be homologous with respect
+  # to patches, etc., I think maybe there should be a single global "shape"
+  # object.  I don't think it makes sense for them to have different knots, etc.
+  # Probably each patch could also have its own quadrature object.
+  # It might be useful to think of ways to interface with quadrature in which
+  # you hand the quadrature object a function handle and it does its best to
+  # compute the result....
+
+  # Is this the right way to think about getting the flat rep?
+  # It seems like maybe should uncouple the shape rep from the actual control
+  # point values.  But then we also need this to represent constraints?
+  # Maybe better like: shape_flatten(ref_shape.init_ctrl) ?
+  # or ref_shape.init_flat() ?
+  ref_ctrl_flat = ref_shape.flattened()
+
+  # Hand back a non-side-effect-having function that takes a flattened ctrl
+  # vector, and quadrature locations, and returns the deformations at each quad
+  # point.  This could be a list of lists, or a large-ish tensor because every
+  # patch gets its own set of quadrature points.
+  ref_def_fn = ref_shape.get_ref_def_fn()
+
+  # Get the associated Jacobian function wrt to u.
+  ref_jac_u_fn = ref_shape.get_ref_jac_u_fn()
+
   # Precompute useful reference quantities.
-  ref_jacs     = ref_shape.jacobian(uu)
+  ref_jacs     = ref_jac_u_fn(ref_ctrl_flat, uu)
   ref_jac_invs = map(vmap_inv, ref_jacs)
   ref_jac_dets = map(vmap_det, ref_jacs)
 
   def lagrangian(q, qdot):
 
-    # Maybe should be doing fancier flattening things here.
-    def_jacs = q
-    def_vels = qdot
+    # Compute the jacobian of the deformed config.
+    # This function needs to come from somewhere.
+    def_jacs = def_jac_u_fn(def_ctrl_flat, uu)
 
-    # Compute the deformation gradients.
-    defgrads = map(vmap_dot, def_jacs, ref_jacs)
+    # Now get the deformation gradients.
+    # Probably need to map.
+    defgrads = vmap_dot(def_jacs, ref_jac_invs)
 
-    # Determinant of the reference configuration.
-    ref_jac_dets = map(vmap_det, def_jacs)
+    # Evaluate energy densities.
+    # This should also be of the "created function" variety.
+    energy_densities = mat.energy(defgrads) * np.abs(ref_jac_dets)
 
-    # Compute the energy density.
-    # FIXME: does map work with methods?
-    energy_density = map(
-      np.multiply,
-      map(
-        mat.energy, defgrads),
-      np.abs(ref_jac_dets)
-    )
+    # Now integrate these energy densities.
+    # Could loop over patches here and hand off functions to quadrature.
+    # I think right now it's better not to overthink the quadrature.
+    # Can explore adaptive quadrature down the road.
 
-    strain_energy = reduce(np.add, map(quad.compute, energy_density))
-
-    # Compute the mass density assuming uniform reference density.
-    mass_density = map(lambda rjd: rjd * material.density, np.abs(ref_jac_dets))
-
-    # TODO: compute gravitational potential
-
-    # TODO: compute mass matrix
-
-    # TODO: compute kinetic energy
-
-    # return lagrangian
 
 
 if __name__ == '__main__':
