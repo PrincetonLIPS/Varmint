@@ -7,8 +7,6 @@ from exceptions import LabelError
 
 import bsplines
 
-# TODO: how to fix control points in space?
-
 class Patch2D:
   ''' Class for individual patches in two dimensions.
 
@@ -17,7 +15,7 @@ class Patch2D:
   by control points.
   '''
 
-  def __init__(self, xknots, yknots, deg, labels=None):
+  def __init__(self, xknots, yknots, deg, labels=None, fixed=None):
     ''' Constructor for two dimensional patch.
 
     Parameters:
@@ -33,22 +31,27 @@ class Patch2D:
      - deg: The degree of the bspline.
 
      - labels: An optional M x N array of strings that allow constraints to be
-               specified across patches. In general, labels are used to specify
-               coincidence constraints.  The exception is the special label
-               'FIXED' which is only used for fixing a control point in space.
+               specified across patches. Labels are used to specify coincidence
+               constraints and to specify fixed locations in spae.
+
+     - fixed: A dictionary that maps labels to 2d locations, as appropriate.
     '''
     self.xknots = xknots
     self.yknots = yknots
     self.deg    = deg
+    self.fixed  = fixed
 
     M = self.xknots.shape[0]
-    N = self.yknots.shape[1]
-    
+    N = self.yknots.shape[0]
+
     if labels is None:
       self.labels = onp.zeros((M,N), dtype='<U256')
     else:
       if labels.shape != (M,N):
         raise DimensionError('The labels must have shape %d x %d.' % (M,N))
+      self.labels = labels
+
+    # TODO: sanity check fixed dictionary.
 
   def has_label(self, label):
     ''' Predicate for verifying that one of the control points has a label.
@@ -61,8 +64,6 @@ class Patch2D:
     --------
      True if one of the labels matches the string, otherwise False.
     '''
-    if label == 'FIXED':
-      raise LabelError('The FIXED label is reserved for "fixed" constraints.')
     return onp.any(self.labels == label)
 
   def label2idx(self, label):
@@ -82,8 +83,6 @@ class Patch2D:
      Throws a LabelError exception if the label is not present or more than one
      of the labels is present.
     '''
-    if label == 'FIXED':
-      raise LabelError('The FIXED label is reserved for "fixed" constraints.')
     rows, cols = onp.nonzero(self.labels == label)
     if rows.shape[0] > 1 or cols.shape[0] > 1:
       raise LabelError('More than one control point has label %s.' % (label))
@@ -92,7 +91,7 @@ class Patch2D:
     return rows[0], cols[0]
 
   def get_labels(self):
-    ''' Get all the (non-FIXED) labels at once, along with their indices.
+    ''' Get all the labels at once, along with their indices.
 
     Returns:
     --------
@@ -102,17 +101,10 @@ class Patch2D:
 
      >> zip(labels, zip(rows, cols))
     '''
-    rows, cols = onp.nonzero(onp.logical_and(self.labels != 'FIXED',
-                                             self.labels != ''))
+    rows, cols = onp.nonzero(self.labels != '')
     labels = self.labels[rows, cols]
     return labels, rows, cols
 
-  def is_fixed(self, row, col):
-    ''' A predicate to determine whether a particular control point, specified
-    by row and column index is a fixed location.
-    '''
-    return self.labels[row,col] == 'FIXED'
-
   def get_fixed(self):
-    ''' Get all rows and columns of fixed control points. '''
-    return onp.nonzero(self.labels == 'FIXED')
+    ''' Get the labels of all fixed control points. '''
+    return self.fixed.keys()
