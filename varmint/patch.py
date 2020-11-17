@@ -35,7 +35,8 @@ class Patch2D:
 
      - labels: An optional M x N array of strings that allow constraints to be
                specified across patches. Labels are used to specify coincidence
-               constraints and to specify fixed locations in spae.
+               constraints and to specify fixed locations in space.  Note that
+               they will get dimension-specific extensions appended to them.
 
      - fixed: A dictionary that maps labels to 2d locations, as appropriate.
     '''
@@ -71,7 +72,18 @@ class Patch2D:
         onp.array(['_x', '_y']),
       )
 
-    # TODO: sanity check fixed dictionary.
+    # Expand the fixed labels with dimensions.
+    self.fixed = {}
+    if fixed:
+      for label, value in fixed.items():
+        for ii, dim in enumerate(['_x', '_y']):
+          newlabel = label + dim
+          if not self.has_label(newlabel):
+            raise LabelError('Label %s not found' % (newlabel))
+          self.fixed[label + dim] = value[ii]
+      self.pretty_fixed = fixed
+    else:
+      self.pretty_fixed = {}
 
   def get_ctrl_shape(self):
     return self.num_xctrl, self.num_yctrl, 2
@@ -125,5 +137,5 @@ class Patch2D:
     return list(zip(labels, onp.column_stack(indices)))
 
   def get_fixed(self):
-    ''' Get the labels of all fixed control points. '''
-    return self.fixed.keys()
+    ''' Get all fixed control points. '''
+    return self.fixed

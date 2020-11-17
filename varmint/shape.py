@@ -38,7 +38,7 @@ class Shape2D:
   def patch_indices(self):
     start_idx = 0
     patch_indices = {}
-    for patch in patches:
+    for patch in self.patches:
       shape   = patch.get_ctrl_shape()
       size    = onp.prod(shape)
       indices = start_idx + onp.arange(size)
@@ -51,15 +51,31 @@ class Shape2D:
 
     # Gather all coincidences, label-wise.
     all_coincidence = {}
+
     for patch in self.patches:
 
       # TODO: This needs to be guaranteed to be deterministic.
       for label, indices in patch.get_labels():
         if label not in all_coincidence:
           all_coincidence[label] = []
-        all_coincidence[label].append((patch, indices))
+        all_coincidence[label].append((patch, tuple(indices)))
 
-    return all_coincidences
+    return all_coincidence
+
+  def get_fixed(self):
+    ''' Get all the fixed constraints. '''
+
+    all_fixed = {}
+    for patch in self.patches:
+      for label, value in patch.fixed:
+        if label in all_fixed:
+          if all_fixed[label] != value[ii]:
+            raise LabelError("Inconsistent fixed constraint %s: %f vs %f" \
+                             % (label, all_fixed[label], value[ii]))
+
+          all_fixed[label] = value[ii]
+
+    return all_fixed
 
   def flatten_matrix(self):
     ''' The matrix that reparameterizes to remove linear constraints. '''
@@ -70,35 +86,83 @@ class Shape2D:
     # Start with a big identity matrix.
     matrix = onp.eye(num_unflat)
 
-    # Accumulate a list of rows to remove.
+    # Accumulate the set of rows to remove.
     # Can't do it incrementally without breaking the indexing.
-    rows_to_delete = []
+    # Initialize with all the fixed constraints.
+    rows_to_delete = set() # set(self.get_fixed().keys()) temporary
+
+    patch_indices = self.patch_indices()
 
     # Loop over coincidence constraints.
     for label, entries in self.get_coincidences().items():
 
       # Delete all the entries except the first one.
       for patch, indices in entries[1:]:
-        rows_to_delete.append(patch_indices[patch][indices])
+        rows_to_delete.add(patch_indices[patch][indices])
 
-  def unflatten_ctrl(self, flat):
-    ''' Turn the flattened generalized coordinate vector back into control
-        points.
-    '''
-    # Can we resolve the constraints in one shot?
-    pass
+    return onp.delete(matrix, list(rows_to_delete), axis=0)
+
+  def unflatten_mat_vec(self):
+    ''' The linear transformation that recovers all control points. '''
+
+    # FIXME: This is a slow way to do it.
+    flat_mat = self.flatten_matrix()
+
+    matrix = onp.eye(flat_mat.shape[0])
+
+    deleted_rows = set()
+
+    patch_indices = self.patch_indices()
+
+    # Loop over coincidence constraints.
+    for label, entries in self.get_coincidences().items():
+
+      parent_patch = entries[0][0]
+      parent_index = patch_indices[parent_patch][entries[0][1]]
+
+      # We deleted all but the first one.
+      for patch, indices in entries[1:]:
+        deleted_rows.add((parent_index, patch_indices[patch][indices]))
+
+    # Get them in increasing order of destination.
+    for parent, child in sorted(list(deleted_rows), key=lambda x: x[1]):
+      print(child, parent)
+      matrix = onp.insert(matrix, child, 0, axis=0)
+      matrix[child,parent] = 1
+
+    return matrix
 
   def flatten_ctrl(self, ctrl):
     ''' Turn a list of control points into a flattened vector that accounts
         for constraints.
     '''
     unconstrained = np.hstack(map(np.ravel, ctrl))
+    flat_mat = self.flatten_matrix()
+    flattened = self.flatten_matrix() @ unconstrained
 
-    # Get all patch labels.
-    # Get fixed values.
-    # Turn these into a matrix and a vector reflecting equality constraints.
-    # Find the parameterization via SVD.
+    return flattened
 
+  def unflatten_ctrl(self, flat):
+    ''' Turn the flattened generalized coordinate vector back into control
+        points.
+    '''
+    unflat_mat = self.unflatten_mat_vec()
+    constrained = unflat_mat @ flat
+
+    plt.imshow(unflat_mat)
+    plt.show()
+
+
+    # Now, to reshape for each patch.
+    ctrl = []
+    start_idx = 0
+    for patch in self.patches:
+      size = patch.get_ctrl_shape()
+      end_idx = start_idx + onp.prod(size)
+      ctrl.append(np.reshape(constrained[start_idx:end_idx], size))
+      start_idx = end_idx
+
+    return ctrl
 
   def render(self, ctrl, filename=None):
     fig = plt.figure()
@@ -196,10 +260,16 @@ def main():
 
   shape = Shape2D(r1_patch, r2_patch, u1_patch)
 
-  print(shape.patch_indices())
+  ctrl = [r1_ctrl, r2_ctrl, u1_ctrl]
+  flat = shape.flatten_ctrl(ctrl)
 
+  unflat = shape.unflatten_ctrl(flat)
 
-  shape.render([r1_ctrl, r2_ctrl, u1_ctrl])
+  for ii in range(3):
+    print((ctrl[ii]-unflat[ii]).ravel())
+
+  #print(flat)
+  #shape.render(ctrl)
 
 if __name__ == '__main__':
   main()
