@@ -146,7 +146,6 @@ class Shape2D:
           continue
         ax.annotate(text, patch_ctrl[row,col,:])
 
-
     if filename is None:
       plt.show()
     else:
@@ -196,6 +195,10 @@ def main():
   u1_patch  = Patch2D(u1_xknots, u1_yknots, u1_deg, u1_labels)
 
   shape = Shape2D(r1_patch, r2_patch, u1_patch)
+
+  print(shape.patch_indices())
+
+
   shape.render([r1_ctrl, r2_ctrl, u1_ctrl])
 
 if __name__ == '__main__':
