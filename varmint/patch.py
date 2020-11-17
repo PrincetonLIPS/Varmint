@@ -7,6 +7,9 @@ from exceptions import LabelError
 
 import bsplines
 
+# TODO: this will own its quadrature points.
+# TODO: will also have its own material.
+
 class Patch2D:
   ''' Class for individual patches in two dimensions.
 
@@ -41,17 +44,33 @@ class Patch2D:
     self.deg    = deg
     self.fixed  = fixed
 
-    M = self.xknots.shape[0]
-    N = self.yknots.shape[0]
+    # Determine the number of control points.
+    num_xknots = self.xknots.shape[0]
+    num_yknots = self.yknots.shape[0]
+
+    self.num_xctrl  = num_xknots - self.deg - 1
+    self.num_yctrl  = num_yknots - self.deg - 1
 
     if labels is None:
-      self.labels = onp.zeros((M,N), dtype='<U256')
+      # Generate an empty label matrix.
+      self.labels = onp.zeros((self.num_xctrl,self.num_yctrl,2), dtype='<U256')
+
     else:
-      if labels.shape != (M,N):
-        raise DimensionError('The labels must have shape %d x %d.' % (M,N))
-      self.labels = labels
+      # Expand the given label matrix to include dimensions.
+      if labels.shape != (self.num_xctrl,self.num_yctrl):
+        raise DimensionError('The labels must have shape %d x %d.' \
+                             % (self.num_xctrl, self.num_yctrl))
+      self.labels = onp.tile(labels[:,:,np.newaxis], (1, 1, 2,))
+      rows, cols = onp.nonzero(labels)
+      self.labels[rows,cols,:] = onp.core.defchararray.add(
+        self.labels[rows,cols,:],
+        onp.array(['_x', '_y']),
+      )
 
     # TODO: sanity check fixed dictionary.
+
+  def get_ctrl_shape(self):
+    return self.num_xctrl, self.num_yctrl, 2
 
   def has_label(self, label):
     ''' Predicate for verifying that one of the control points has a label.
@@ -76,34 +95,30 @@ class Patch2D:
 
     Returns:
     --------
-     A tuple (row, col) indicating which control point has the label.
+     An index tuple indicating which control point has the label.
 
     Raises:
     -------
      Throws a LabelError exception if the label is not present or more than one
      of the labels is present.
     '''
-    rows, cols = onp.nonzero(self.labels == label)
-    if rows.shape[0] > 1 or cols.shape[0] > 1:
+    rows, cols, third = onp.nonzero(self.labels == label)
+    if rows.shape[0] > 1 or cols.shape[0] > 1 or third.shape[0] > 1:
       raise LabelError('More than one control point has label %s.' % (label))
-    elif rows.shape[0] == 0 or cols.shape[0] == 0:
+    elif rows.shape[0] == 0 or cols.shape[0] == 0 or third.shape[0] == 0:
       raise LabelError('No control points have label %s.' % (label))
-    return rows[0], cols[0]
+    return rows[0], cols[0], third[0]
 
   def get_labels(self):
     ''' Get all the labels at once, along with their indices.
 
     Returns:
     --------
-     (labels, rows, cols) where they are each one-dimensional arrays with length
-     corresponding to the total number of labels.  So they could be length zero.
-     These can be usefully turned into a dictionary via:
-
-     >> zip(labels, zip(rows, cols))
+     A list of (label, indices) tuples. Could be length zero.
     '''
-    rows, cols = onp.nonzero(self.labels != '')
-    labels = self.labels[rows, cols]
-    return labels, rows, cols
+    indices = onp.nonzero(self.labels != '')
+    labels  = self.labels[indices]
+    return list(zip(labels, onp.column_stack(indices)))
 
   def get_fixed(self):
     ''' Get the labels of all fixed control points. '''
