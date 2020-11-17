@@ -53,13 +53,17 @@ class Patch2D:
 
     if labels is None:
       # Generate an empty label matrix.
-      self.labels = onp.zeros((self.num_xctrl,self.num_yctrl,2), dtype='<U256')
+      self.pretty_labels = onp.zeros((self.num_xctrl, self.num_yctrl),
+                                     dtype='<U256')
+      self.labels = onp.zeros((self.num_xctrl, self.num_yctrl,2),
+                              dtype='<U256')
 
     else:
       # Expand the given label matrix to include dimensions.
       if labels.shape != (self.num_xctrl,self.num_yctrl):
         raise DimensionError('The labels must have shape %d x %d.' \
                              % (self.num_xctrl, self.num_yctrl))
+      self.pretty_labels = labels
       self.labels = onp.tile(labels[:,:,np.newaxis], (1, 1, 2,))
       rows, cols = onp.nonzero(labels)
       self.labels[rows,cols,:] = onp.core.defchararray.add(

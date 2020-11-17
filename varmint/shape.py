@@ -35,23 +35,72 @@ class Shape2D:
 
     self.patches = patches
 
-  def flatten(self):
-    ''' Flatten a collection of patches into a vector.
+  def patch_indices(self):
+    start_idx = 0
+    patch_indices = {}
+    for patch in patches:
+      shape   = patch.get_ctrl_shape()
+      size    = onp.prod(shape)
+      indices = start_idx + onp.arange(size)
+      patch_indices[patch] = onp.reshape(indices, shape)
+      start_idx += size
+    return patch_indices
 
-    The idea is to take this collection of 3-tensors and turn them into a
-    single vector, while also accounting for constraints.  There are two kinds
-    of constraints dealt with here: 1) "fixed" constraints, which place a
-    control point at a particular location in space, and 2) "coincident"
-    constraints, which place two or more control points from different patches
-    on the same location.
+  def get_coincidences(self):
+    ''' Compute the coincidence constraints. '''
+
+    # Gather all coincidences, label-wise.
+    all_coincidence = {}
+    for patch in self.patches:
+
+      # TODO: This needs to be guaranteed to be deterministic.
+      for label, indices in patch.get_labels():
+        if label not in all_coincidence:
+          all_coincidence[label] = []
+        all_coincidence[label].append((patch, indices))
+
+    return all_coincidences
+
+  def flatten_matrix(self):
+    ''' The matrix that reparameterizes to remove linear constraints. '''
+    num_unflat = 0
+    for patch in self.patches:
+      num_unflat += onp.prod(patch.get_ctrl_shape())
+
+    # Start with a big identity matrix.
+    matrix = onp.eye(num_unflat)
+
+    # Accumulate a list of rows to remove.
+    # Can't do it incrementally without breaking the indexing.
+    rows_to_delete = []
+
+    # Loop over coincidence constraints.
+    for label, entries in self.get_coincidences().items():
+
+      # Delete all the entries except the first one.
+      for patch, indices in entries[1:]:
+        rows_to_delete.append(patch_indices[patch][indices])
+
+  def unflatten_ctrl(self, flat):
+    ''' Turn the flattened generalized coordinate vector back into control
+        points.
     '''
+    # Can we resolve the constraints in one shot?
     pass
 
-  def unflatten(self):
-    pass
+  def flatten_ctrl(self, ctrl):
+    ''' Turn a list of control points into a flattened vector that accounts
+        for constraints.
+    '''
+    unconstrained = np.hstack(map(np.ravel, ctrl))
+
+    # Get all patch labels.
+    # Get fixed values.
+    # Turn these into a matrix and a vector reflecting equality constraints.
+    # Find the parameterization via SVD.
 
 
-  def render(self, filename=None):
+  def render(self, ctrl, filename=None):
     fig = plt.figure()
     ax  = plt.axes()
     ax.set_aspect('equal')
@@ -60,42 +109,42 @@ class Shape2D:
 
     rendered_labels = set()
 
-    for patch in self.patches:
+    for patch, patch_ctrl in zip(self.patches, ctrl):
 
       # Plot vertical lines.
-      for jj in range(patch.ctrl.shape[1]):
+      for jj in range(patch_ctrl.shape[1]):
         xx = bsplines.bspline1d(
           uu,
-          patch.ctrl[:,jj,:],
+          patch_ctrl[:,jj,:],
           patch.xknots,
           patch.deg,
         )
         ax.plot(xx[:,0], xx[:,1], 'k-')
 
       # Plot horizontal lines.
-      for ii in range(patch.ctrl.shape[0]):
+      for ii in range(patch_ctrl.shape[0]):
         yy = bsplines.bspline1d(
           uu,
-          patch.ctrl[ii,:,:],
+          patch_ctrl[ii,:,:],
           patch.yknots,
           patch.deg,
         )
         ax.plot(yy[:,0], yy[:,1], 'k-')
 
       # Plot the control points themselves.
-      ax.plot(patch.ctrl[:,:,0].ravel(), patch.ctrl[:,:,1].ravel(), 'k.')
+      ax.plot(patch_ctrl[:,:,0].ravel(), patch_ctrl[:,:,1].ravel(), 'k.')
 
       # Plot labels.
-      label_r, label_c = onp.where(patch.labels)
+      label_r, label_c = onp.where(patch.pretty_labels)
       for ii in range(len(label_r)):
         row = label_r[ii]
         col = label_c[ii]
-        text = patch.labels[row,col]
+        text = patch.pretty_labels[row,col]
         if text not in rendered_labels:
           rendered_labels.add(text)
         else:
           continue
-        ax.annotate(text, patch.ctrl[row,col,:])
+        ax.annotate(text, patch_ctrl[row,col,:])
 
 
     if filename is None:
@@ -111,18 +160,20 @@ def main():
   r1_ctrl   = bsplines.mesh(np.arange(10), np.arange(5))
   r1_xknots = bsplines.default_knots(r1_deg, r1_ctrl.shape[0])
   r1_yknots = bsplines.default_knots(r1_deg, r1_ctrl.shape[1])
-  r1_patch  = Patch2D(r1_ctrl, r1_xknots, r1_yknots, r1_deg)
-  r1_patch.labels[3:7,0]  = ['A', 'B', 'C', 'D']
-  r1_patch.labels[:3,-1]  = ['E', 'F', 'G']
-  r1_patch.labels[-3:,-1] = ['H', 'I', 'J']
+  r1_labels = onp.zeros((10,5), dtype='<U256')
+  r1_labels[3:7,0]  = ['A', 'B', 'C', 'D']
+  r1_labels[:3,-1]  = ['E', 'F', 'G']
+  r1_labels[-3:,-1] = ['H', 'I', 'J']
+  r1_patch  = Patch2D(r1_xknots, r1_yknots, r1_deg, r1_labels)
 
   # Create another rectangle.
   r2_deg    = 3
   r2_ctrl   = bsplines.mesh(np.array([3,4,5,6]), np.array([-4, -3, -2, -1, 0]))
   r2_xknots = bsplines.default_knots(r2_deg, r2_ctrl.shape[0])
   r2_yknots = bsplines.default_knots(r2_deg, r2_ctrl.shape[1])
-  r2_patch  = Patch2D(r2_ctrl, r2_xknots, r2_yknots, r2_deg)
-  r2_patch.labels[:,-1] = ['A', 'B', 'C', 'D']
+  r2_labels = onp.zeros((4,5), dtype='<U256')
+  r2_labels[:,-1] = ['A', 'B', 'C', 'D']
+  r2_patch  = Patch2D(r2_xknots, r2_yknots, r2_deg, r2_labels)
 
   # Bend a u-shaped thing around the top.
   u1_deg  = 2
@@ -139,12 +190,13 @@ def main():
   u1_ctrl   = u1_ctrl + center
   u1_xknots = bsplines.default_knots(u1_deg, u1_ctrl.shape[0])
   u1_yknots = bsplines.default_knots(u1_deg, u1_ctrl.shape[1])
-  u1_patch  = Patch2D(u1_ctrl, u1_xknots, u1_yknots, u1_deg)
-  u1_patch.labels[:,0]  = ['E', 'F', 'G']
-  u1_patch.labels[:,-1] = ['H', 'I', 'J']
+  u1_labels = onp.zeros((3,8), dtype='<U256')
+  u1_labels[:,0]  = ['E', 'F', 'G']
+  u1_labels[:,-1] = ['H', 'I', 'J']
+  u1_patch  = Patch2D(u1_xknots, u1_yknots, u1_deg, u1_labels)
 
   shape = Shape2D(r1_patch, r2_patch, u1_patch)
-  shape.render()
+  shape.render([r1_ctrl, r2_ctrl, u1_ctrl])
 
 if __name__ == '__main__':
   main()
