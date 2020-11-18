@@ -356,6 +356,50 @@ bspline3d_derivs_jax = jax.jit(
 )
 bspline3d_derivs = bspline3d_derivs_jax
 
+#
+# Derivatives with respect to control points.
+################################################################################
+def bspline1d_derivs_ctrl_hand(u, control, knots, degree):
+  return bspline1d_basis(u, knots, degree)
+bspline1d_derivs_ctrl_jax = jax.jit(
+  jax.vmap(
+    lambda *args: np.squeeze(jax.jacfwd(bspline1d, argnums=1)(*args)),
+    (0, None, None, None),
+  ),
+  static_argnums=(3,),
+)
+bspline1d_derivs_ctrl = bspline1d_derivs_ctrl_hand
+
+def bspline2d_derivs_ctrl_hand(u, control, xknots, yknots, degree):
+  basis = bspline2d_basis(
+    u, xknots, yknots, degree)[:,np.newaxis,:,:,np.newaxis]
+  zeros = np.zeros_like(basis)
+  return np.concatenate([np.concatenate([basis, zeros], axis=1),
+                         np.concatenate([zeros, basis], axis=1)],
+                         axis=4)
+
+bspline2d_derivs_ctrl_jax = jax.jit(
+  jax.vmap(
+    lambda *args: np.squeeze(jax.jacfwd(bspline2d, argnums=1)(*args)),
+    (0, None, None, None, None),
+  ),
+  static_argnums=(4,),
+)
+bspline2d_derivs_ctrl = bspline2d_derivs_ctrl_jax
+
+bspline3d_derivs_ctrl_jax = jax.jit(
+  jax.vmap(
+    lambda *args: np.squeeze(jax.jacfwd(bspline3d, argnums=1)(*args)),
+    (0, None, None, None, None, None),
+  ),
+  static_argnums=(5,),
+)
+bspline3d_derivs_ctrl = bspline3d_derivs_ctrl_jax
+
+
+#
+# Do some timing comparisons.
+################################################################################
 def compare_1d_basis_deriv_times():
   npr.seed(1)
 
@@ -389,6 +433,26 @@ def compare_1d_deriv_times():
 
   version1 = lambda : bspline1d_derivs_hand(u, control, knots, degree)
   version2 = lambda : bspline1d_derivs_jax(u, control, knots, degree)
+
+  version1_t = timeit.timeit(version1, number=1000)
+  version2_t = timeit.timeit(version2, number=1000)
+
+  print('Hand: %0.3fsec  JAX: %0.3fsec (%0.1fx)' % (version1_t, version2_t,
+                                                    version2_t/version1_t))
+
+def compare_1d_deriv_ctrl_times():
+  npr.seed(1)
+
+  u           = npr.rand(100)
+  control     = npr.randn(10)
+  degree      = 3
+  num_knots   = control.shape[0] + degree + 1
+  knots = np.hstack([np.zeros(degree),
+                     np.linspace(0, 1, num_knots - 2*degree),
+                     np.ones(degree)])
+
+  version1 = lambda : bspline1d_derivs_ctrl_hand(u, control, knots, degree)
+  version2 = lambda : bspline1d_derivs_ctrl_jax(u, control, knots, degree)
 
   version1_t = timeit.timeit(version1, number=1000)
   version2_t = timeit.timeit(version2, number=1000)
@@ -438,6 +502,32 @@ def compare_2d_deriv_times():
 
   version1 = lambda : bspline2d_derivs_hand(u, control, xknots, yknots, degree)
   version2 = lambda : bspline2d_derivs_jax(u, control, xknots, yknots, degree)
+
+  version1_t = timeit.timeit(version1, number=1000)
+  version2_t = timeit.timeit(version2, number=1000)
+
+  print('Hand: %0.3fsec  JAX: %0.3fsec (%0.1fx)' % (version1_t, version2_t,
+                                                    version2_t/version1_t))
+
+def compare_2d_deriv_ctrl_times():
+  npr.seed(1)
+
+  u            = npr.rand(1000,2)
+  control      = npr.randn(10,11,2)
+  degree       = 3
+  num_xknots   = control.shape[0] + degree + 1
+  num_yknots   = control.shape[1] + degree + 1
+  xknots = np.hstack([np.zeros(degree),
+                      np.linspace(0, 1, num_xknots - 2*degree),
+                      np.ones(degree)])
+  yknots = np.hstack([np.zeros(degree),
+                      np.linspace(0, 1, num_yknots - 2*degree),
+                      np.ones(degree)])
+
+  version1 = lambda : bspline2d_derivs_ctrl_hand(
+    u, control, xknots, yknots, degree)
+  version2 = lambda : bspline2d_derivs_ctrl_jax(
+    u, control, xknots, yknots, degree)
 
   version1_t = timeit.timeit(version1, number=1000)
   version2_t = timeit.timeit(version2, number=1000)
