@@ -46,15 +46,13 @@ class Shape2D:
       start_idx += size
     return patch_indices
 
-  def get_coincidences(self):
-    ''' Compute the coincidence constraints. '''
+  def get_coincidence(self):
+    ''' Collect the coincidence constraints. '''
 
-    # Gather all coincidences, label-wise.
+    # Gather all coincidence constraints, label-wise.
     all_coincidence = {}
 
     for patch in self.patches:
-
-      # TODO: This needs to be guaranteed to be deterministic.
       for label, indices in patch.get_labels():
         if label not in all_coincidence:
           all_coincidence[label] = []
@@ -67,78 +65,100 @@ class Shape2D:
 
     all_fixed = {}
     for patch in self.patches:
-      for label, value in patch.fixed:
+      for label, value in patch.get_fixed().items():
         if label in all_fixed:
-          if all_fixed[label] != value[ii]:
+          if all_fixed[label] != value:
             raise LabelError("Inconsistent fixed constraint %s: %f vs %f" \
-                             % (label, all_fixed[label], value[ii]))
+                             % (label, all_fixed[label], value))
 
-          all_fixed[label] = value[ii]
+        all_fixed[label] = value
 
     return all_fixed
 
-  def flatten_matrix(self):
-    ''' The matrix that reparameterizes to remove linear constraints. '''
+  def unflat_size(self):
     num_unflat = 0
     for patch in self.patches:
       num_unflat += onp.prod(patch.get_ctrl_shape())
+    return num_unflat
 
-    # Start with a big identity matrix.
-    matrix = onp.eye(num_unflat)
+  def flatten_mat(self):
 
-    # Accumulate the set of rows to remove.
-    # Can't do it incrementally without breaking the indexing.
-    # Initialize with all the fixed constraints.
-    rows_to_delete = set() # set(self.get_fixed().keys()) temporary
+    # Set of keys that are fixed to particular values.
+    fixed = self.get_fixed().keys()
 
     patch_indices = self.patch_indices()
 
-    # Loop over coincidence constraints.
-    for label, entries in self.get_coincidences().items():
+    # Indices to delete.
+    to_delete = set()
 
-      # Delete all the entries except the first one.
-      for patch, indices in entries[1:]:
-        rows_to_delete.add(patch_indices[patch][indices])
+    # Loop over all coincidence constraints.
+    for label, entries in self.get_coincidence().items():
 
-    return onp.delete(matrix, list(rows_to_delete), axis=0)
+      if label in fixed:
+        # If the label is in the fixed set, delete them all.
+        # Note that all fixed labels that are used should appear here.
+        for patch, indices in entries:
+          to_delete.add( patch_indices[patch][indices] )
+
+      else:
+
+        # Connect the entries to their global indices and sort.
+        index_list = sorted(map(
+          lambda ent: patch_indices[ent[0]][ent[1]], entries
+        ))
+
+        # Keep the smallest one, delete the rest.
+        to_delete.update(index_list[1:])
+
+    num_unflat = self.unflat_size()
+
+    # Return an identity matrix with those rows deleted.
+    return onp.delete(onp.eye(num_unflat), list(to_delete), axis=0)
 
   def unflatten_mat_vec(self):
     ''' The linear transformation that recovers all control points. '''
 
-    # FIXME: This is a slow way to do it.
-    flat_mat = self.flatten_matrix()
+    fixed = self.get_fixed()
 
-    matrix = onp.eye(flat_mat.shape[0])
-
-    deleted_rows = set()
+    # Start with an empty vector and the transpose of the flattening matrix.
+    unflat_mat = self.flatten_mat().T
+    unflat_vec = onp.zeros(unflat_mat.shape[0])
 
     patch_indices = self.patch_indices()
 
     # Loop over coincidence constraints.
-    for label, entries in self.get_coincidences().items():
+    for label, entries in self.get_coincidence().items():
 
-      parent_patch = entries[0][0]
-      parent_index = patch_indices[parent_patch][entries[0][1]]
+      if label in fixed:
+        # Leave zeros in the matrix and put these in the vector.
+        for patch, indices in entries:
+          unflat_vec[patch_indices[patch][indices]] = fixed[label]
 
-      # We deleted all but the first one.
-      for patch, indices in entries[1:]:
-        deleted_rows.add((parent_index, patch_indices[patch][indices]))
+      else:
 
-    # Get them in increasing order of destination.
-    for parent, child in sorted(list(deleted_rows), key=lambda x: x[1]):
-      print(child, parent)
-      matrix = onp.insert(matrix, child, 0, axis=0)
-      matrix[child,parent] = 1
+        # Connect the entries to their global indices and sort.
+        index_list = sorted(map(
+          lambda ent: patch_indices[ent[0]][ent[1]], entries
+        ))
 
-    return matrix
+        # Slightly tricky because we need to account for having deleted entries
+        # that were before the one we're referencing.
+        parent = onp.nonzero(unflat_mat[index_list[0],:])[0][0]
+
+        for child in index_list[1:]:
+          unflat_mat[child, parent] = 1
+
+    plt.imshow(unflat_mat)
+    plt.show()
+
+    return unflat_mat, unflat_vec
 
   def flatten_ctrl(self, ctrl):
     ''' Turn a list of control points into a flattened vector that accounts
         for constraints.
     '''
     unconstrained = np.hstack(map(np.ravel, ctrl))
-    flat_mat = self.flatten_matrix()
-    flattened = self.flatten_matrix() @ unconstrained
+    flattened = self.flatten_mat() @ unconstrained
 
     return flattened
 
@@ -146,12 +166,8 @@ class Shape2D:
     ''' Turn the flattened generalized coordinate vector back into control
         points.
     '''
-    unflat_mat = self.unflatten_mat_vec()
-    constrained = unflat_mat @ flat
-
-    plt.imshow(unflat_mat)
-    plt.show()
-
+    unflat_mat, unflat_vec = self.unflatten_mat_vec()
+    constrained = unflat_mat @ flat + unflat_vec
 
     # Now, to reshape for each patch.
     ctrl = []
@@ -219,7 +235,7 @@ class Shape2D:
 def main():
 
   # Create a rectangle.
-  r1_deg    = 4
+  r1_deg    = 2
   r1_ctrl   = bsplines.mesh(np.arange(10), np.arange(5))
   r1_xknots = bsplines.default_knots(r1_deg, r1_ctrl.shape[0])
   r1_yknots = bsplines.default_knots(r1_deg, r1_ctrl.shape[1])
@@ -227,16 +243,30 @@ def main():
   r1_labels[3:7,0]  = ['A', 'B', 'C', 'D']
   r1_labels[:3,-1]  = ['E', 'F', 'G']
   r1_labels[-3:,-1] = ['H', 'I', 'J']
-  r1_patch  = Patch2D(r1_xknots, r1_yknots, r1_deg, r1_labels)
+  r1_fixed = {
+    'E': [-1,5],
+  }
+  r1_patch  = Patch2D(r1_xknots, r1_yknots, r1_deg, r1_labels, r1_fixed)
 
   # Create another rectangle.
-  r2_deg    = 3
+  r2_deg    = 2
   r2_ctrl   = bsplines.mesh(np.array([3,4,5,6]), np.array([-4, -3, -2, -1, 0]))
   r2_xknots = bsplines.default_knots(r2_deg, r2_ctrl.shape[0])
   r2_yknots = bsplines.default_knots(r2_deg, r2_ctrl.shape[1])
   r2_labels = onp.zeros((4,5), dtype='<U256')
   r2_labels[:,-1] = ['A', 'B', 'C', 'D']
-  r2_patch  = Patch2D(r2_xknots, r2_yknots, r2_deg, r2_labels)
+  r2_labels[:,0]  = ['K', 'L', 'M', 'N']
+  r2_fixed  = {
+    'K': [3,-4],
+    'L': [4,-4],
+    'M': [5,-4],
+    'N': [6,-5],
+
+    # Fix these for testing coincidence+fixed.
+    'A': [2.5,-0.5],
+    # 'B': [4,0],
+  }
+  r2_patch  = Patch2D(r2_xknots, r2_yknots, r2_deg, r2_labels, r2_fixed)
 
   # Bend a u-shaped thing around the top.
   u1_deg  = 2
@@ -254,22 +284,25 @@ def main():
   u1_xknots = bsplines.default_knots(u1_deg, u1_ctrl.shape[0])
   u1_yknots = bsplines.default_knots(u1_deg, u1_ctrl.shape[1])
   u1_labels = onp.zeros((3,8), dtype='<U256')
-  u1_labels[:,0]  = ['E', 'F', 'G']
-  u1_labels[:,-1] = ['H', 'I', 'J']
-  u1_patch  = Patch2D(u1_xknots, u1_yknots, u1_deg, u1_labels)
+  u1_labels[:,-1]  = ['E', 'F', 'G']
+  u1_labels[:,0] = ['J', 'I', 'H']
+  u1_fixed = {
+    'H': [6,4.5],
+  }
+  u1_patch  = Patch2D(u1_xknots, u1_yknots, u1_deg, u1_labels, u1_fixed)
 
   shape = Shape2D(r1_patch, r2_patch, u1_patch)
 
   ctrl = [r1_ctrl, r2_ctrl, u1_ctrl]
+
   flat = shape.flatten_ctrl(ctrl)
 
   unflat = shape.unflatten_ctrl(flat)
 
-  for ii in range(3):
+  for ii in range(len(ctrl)):
     print((ctrl[ii]-unflat[ii]).ravel())
 
-  #print(flat)
-  #shape.render(ctrl)
+  shape.render(unflat)
 
 if __name__ == '__main__':
   main()
