@@ -153,32 +153,38 @@ class Shape2D:
 
     return unflat_mat, unflat_vec
 
-  def flatten_ctrl(self, ctrl):
-    ''' Turn a list of control points into a flattened vector that accounts
-        for constraints.
-    '''
-    unconstrained = np.hstack(map(np.ravel, ctrl))
-    flattened = self.flatten_mat() @ unconstrained
+  def flatten(self, ctrl, vels):
+    ravel_ctrl = np.hstack(map(np.ravel, ctrl))
+    ravel_vels = np.hstack(map(np.ravel, vels))
 
-    return flattened
+    flatten_mat = self.flatten_mat()
 
-  def unflatten_ctrl(self, flat):
-    ''' Turn the flattened generalized coordinate vector back into control
-        points.
-    '''
+    flat_ctrl = flatten_mat @ ravel_ctrl
+    flat_vels = flatten_mat @ ravel_ctrl
+
+    return flat_ctrl, flat_vels
+
+  def unflatten(self, flat_ctrl, flat_vels):
     unflat_mat, unflat_vec = self.unflatten_mat_vec()
-    constrained = unflat_mat @ flat + unflat_vec
+
+    # Fixed control points have zero velocity.
+    ravel_ctrl = unflat_mat @ flat_ctrl + unflat_vec
+    ravel_vels = unflat_mat @ flat_vels
 
     # Now, to reshape for each patch.
     ctrl = []
+    vels = []
     start_idx = 0
     for patch in self.patches:
       size = patch.get_ctrl_shape()
       end_idx = start_idx + onp.prod(size)
-      ctrl.append(np.reshape(constrained[start_idx:end_idx], size))
+
+      ctrl.append(np.reshape(ravel_ctrl[start_idx:end_idx], size))
+      vels.append(np.reshape(ravel_vels[start_idx:end_idx], size))
+
       start_idx = end_idx
 
-    return ctrl
+    return ctrl, vels
 
   def render(self, ctrl, filename=None):
     fig = plt.figure()
