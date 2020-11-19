@@ -301,9 +301,9 @@ def main():
 
   ctrl = [r1_ctrl, r2_ctrl, u1_ctrl]
 
-  flat = shape.flatten_ctrl(ctrl)
+  flat = shape.flatten(ctrl)
 
-  unflat = shape.unflatten_ctrl(flat)
+  unflat = shape.unflatten(flat)
 
   for ii in range(len(ctrl)):
     print((ctrl[ii]-unflat[ii]).ravel())

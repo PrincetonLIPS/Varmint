@@ -18,7 +18,16 @@ class Patch2D:
   by control points.
   '''
 
-  def __init__(self, xknots, yknots, deg, labels=None, fixed=None):
+  def __init__(
+      self,
+      xknots,
+      yknots,
+      deg,
+      material,
+      quad,
+      labels=None,
+      fixed=None,
+  ):
     ''' Constructor for two dimensional patch.
 
     Parameters:
@@ -33,17 +42,22 @@ class Patch2D:
 
      - deg: The degree of the bspline.
 
+    # FIXME
+
      - labels: An optional M x N array of strings that allow constraints to be
                specified across patches. Labels are used to specify coincidence
                constraints and to specify fixed locations in space.  Note that
                they will get dimension-specific extensions appended to them.
 
-     - fixed: A dictionary that maps labels to 2d locations, as appropriate.
+     - fixed: An optional dictionary that maps labels to 2d locations, as
+              appropriate.
     '''
-    self.xknots = xknots
-    self.yknots = yknots
-    self.deg    = deg
-    self.fixed  = fixed
+    self.xknots   = xknots
+    self.yknots   = yknots
+    self.deg      = deg
+    self.fixed    = fixed
+    self.material = material
+    self.quad     = quad
 
     # Determine the number of control points.
     num_xknots = self.xknots.shape[0]
@@ -84,6 +98,46 @@ class Patch2D:
       self.pretty_fixed = fixed
     else:
       self.pretty_fixed = {}
+
+  def get_deformation_fn(self):
+    def deformation_fn(u, ctrl):
+      return bsplines.bspline2d(
+        u,
+        ctrl,
+        self.xknots,
+        self.yknots,
+        self.deg
+      )
+    return deformation_fn
+
+  def get_jacobian_u_fn(self):
+    def jacobian_u_fn(u, ctrl):
+      return bsplines.bspline2d_derivs(
+        u,
+        ctrl,
+        self.xknots,
+        self.yknots,
+        self.deg
+      )
+    return jacobian_u_fn
+
+  def get_jacobian_ctrl_fn(self):
+    def jacobian_ctrl_fn(u, ctrl):
+      return bsplines.bspline2d_derivs_ctrl(
+        u,
+        ctrl,
+        self.xknots,
+        self.yknots,
+        self.deg,
+      )
+
+  def get_energy_fn(self):
+    return self.material.get_energy_fn()
+
+  def get_quad_fn(self):
+    def quad_fn(ordinates):
+      # Compute the sum
+      pass
 
   def get_ctrl_shape(self):
     return self.num_xctrl, self.num_yctrl, 2
