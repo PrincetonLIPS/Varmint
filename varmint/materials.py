@@ -13,6 +13,8 @@ class Material:
     elif '_lmbda' in dir(cls) and '_mu' in dir(cls):
       cls._E = 2 * cls._lmbda * (1 + cls._mu)
       return cls._E
+
+  @classmethod
   def youngs(cls):
     return cls.E()
 
@@ -25,6 +27,8 @@ class Material:
     elif '_lmbda' in dir(cls) and '_mu' in dir(cls):
       cls._nu = cls._lmbda / (2*(cls._lmbda + cls._mu))
       return cls._nu
+
+  @classmethod
   def poissons(cls):
     return cls.nu()
 
@@ -37,6 +41,8 @@ class Material:
     elif '_E' in dir(cls) and '_nu' in dir(cls):
       cls._lmbda = cls._nu * cls._E / ((1+cls._nu)*(1-2*cls._nu))
       return cls._lmbda
+
+  @classmethod
   def lame1(cls):
     return cls.lmbda()
 
@@ -49,6 +55,8 @@ class Material:
     elif '_E' in dir(cls) and '_nu' in dir(cls):
       cls._mu = cls._E / (2*(1+cls._nu))
       return cls._mu
+
+  @classmethod
   def shear(cls):
     return cls.mu()
 
@@ -65,6 +73,8 @@ class Material:
     elif '_lmbda' in dir(cls) and '_mu' in dir(cls):
       cls._K = cls._lmbda + 2 * cls._mu / 3
       return cls._K
+
+  @classmethod
   def bulk(cls):
     return cls.K()
 

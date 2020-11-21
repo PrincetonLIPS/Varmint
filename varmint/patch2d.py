@@ -100,29 +100,34 @@ class Patch2D:
     else:
       self.pretty_fixed = {}
 
+    self.compute_quad_points()
+
   def compute_quad_points(self):
 
     # Each knot span has its own quadrature.
     uniq_xknots = onp.unique(self.xknots)
     uniq_yknots = onp.unique(self.yknots)
 
-    offsets = bsplines.mesh(uniq_xknots[:-1], uniq_yknots[:-1])
+    xwidths = onp.diff(uniq_xknots)
+    ywidths = onp.diff(uniq_yknots)
 
     # We need the span volumes for performing integration later.
-    self.span_volumes = onp.diff(uniq_yknots)[np.newaxis,:] \
-      * onp.diff(uniq_xknots)[:,np.newaxis]
+    self.span_volumes = xwidths[:,np.newaxis] * ywidths[np.newaxis,:]
 
     # Ask quadpy for a quadrature scheme.
     scheme = quadpy.c2.get_good_scheme(self.quad_deg)
 
     # Change the domain from (-1,1)^2 to (0,1)^2
-    points = scheme.points/2 + 0.5
+    points = scheme.points.T/2 + 0.5
 
-    # Broadcast and shift the points to each knot span.
-    self.points = np.swapaxes(
-      points[np.newaxis,np.newaxis,:,:] + offsets[:,:,:,np.newaxis],
-      2, 3,
-    )
+    # Repeat the quadrature points for each knot span, scaled appropriately.
+    offset_mesh = bsplines.mesh(uniq_xknots[:-1], uniq_yknots[:-1])
+    width_mesh  = bsplines.mesh(xwidths, ywidths)
+
+    self.points = np.reshape(points[np.newaxis,np.newaxis,:,:] \
+                             * width_mesh[:,:,np.newaxis,:] \
+                             + offset_mesh[:,:,np.newaxis,:],
+                             (-1, 2))
 
     # Scale the weights to reflect the original change in volume.
     # We'll do this again when we actually perform quadrature.
@@ -130,9 +135,9 @@ class Patch2D:
     self.weights = np.reshape(scheme.weights, (1, 1, -1))/2
 
   def get_deformation_fn(self):
-    def deformation_fn(u, ctrl):
+    def deformation_fn(ctrl):
       return bsplines.bspline2d(
-        u,
+        self.points,
         ctrl,
         self.xknots,
         self.yknots,
@@ -141,9 +146,10 @@ class Patch2D:
     return deformation_fn
 
   def get_jacobian_u_fn(self):
-    def jacobian_u_fn(u, ctrl):
+    print(self.points.shape)
+    def jacobian_u_fn(ctrl):
       return bsplines.bspline2d_derivs(
-        u,
+        self.points,
         ctrl,
         self.xknots,
         self.yknots,
@@ -152,14 +158,15 @@ class Patch2D:
     return jacobian_u_fn
 
   def get_jacobian_ctrl_fn(self):
-    def jacobian_ctrl_fn(u, ctrl):
+    def jacobian_ctrl_fn(ctrl):
       return bsplines.bspline2d_derivs_ctrl(
-        u,
+        self.points,
         ctrl,
         self.xknots,
         self.yknots,
         self.spline_deg,
       )
+    return jacobian_ctrl_fn
 
   def get_energy_fn(self):
     return self.material.get_energy_fn()
@@ -167,9 +174,15 @@ class Patch2D:
   def get_quad_fn(self):
     def quad_fn(ordinates):
 
+      # Need to get into kind of a fancy shape to both broadcast correctly
+      # and to be able to sum in two stages with quadrature weights.
+      ords = np.reshape(ordinates,
+                        (*self.span_volumes.shape, -1, *ordinates.shape[1:]))
+
       # The transpose makes it possible to sum over additional dimensions.
-      return np.sum(np.sum(self.weights.T + ordinates.T, axis=0) \
-                    * self.span_volumes.T)
+      return np.sum(np.sum(self.weights.T + ords.T, axis=-3) \
+                    * self.span_volumes.T, axis=(-1,-2)).T
+
     return quad_fn
 
   def get_ctrl_shape(self):

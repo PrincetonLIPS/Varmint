@@ -157,7 +157,7 @@ class Shape2D:
     flatten_mat = self.flatten_mat()
 
     flat_ctrl = flatten_mat @ ravel_ctrl
-    flat_vels = flatten_mat @ ravel_ctrl
+    flat_vels = flatten_mat @ ravel_vels
 
     return flat_ctrl, flat_vels
 

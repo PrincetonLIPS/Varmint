@@ -50,6 +50,8 @@ def generate_lagrangian(shape, ref_ctrl):
     # This gives a list of control points and a list of velocities.
     def_ctrl, def_vels = shape.unflatten(q, qdot)
 
+    gravity = 9.81
+
     # It'd be nice to have a cleverer way to do this with map and friends,
     # but because the patches can have different numbers of control points,
     # we just have to live with doing it in a Python loop and live with the
@@ -63,11 +65,11 @@ def generate_lagrangian(shape, ref_ctrl):
       def_jacs = P[patch]['jacobian_u_fn'](def_ctrl[ii])
 
       # Compute the deformation gradients.
-      defgrads = vmap_dot(def_jacs, ref_jac_invs[ii])
+      defgrads = vmap_dot(def_jacs, P[patch]['ref_jac_invs'])
 
       # Get the strain energy density.
       strain_energy_density = P[patch]['energy_fn'](defgrads) \
-        * np.abs(ref_jac_dets[ii])
+        * np.abs(P[patch]['ref_jac_dets'])
 
       # Sum over the quadrature points.
       strain_potential = P[patch]['quad_fn'](strain_energy_density)
@@ -75,10 +77,10 @@ def generate_lagrangian(shape, ref_ctrl):
       # I'm going to assume each patch is uniform in the reference configuration.
       # Each patch might have a different density because it's a diff material.
       # This doesn't actually multiply because the ref_jac_dets are a list.
-      mass_density = patch.material.density * np.abs(ref_jac_dets[ii])
+      mass_density = patch.material.density() * np.abs(P[patch]['ref_jac_dets'])
 
       # Get the actual locations.
-      positions = P[patch]['deformation_fn'](def_ctrl)
+      positions = P[patch]['deformation_fn'](def_ctrl[ii])
 
       # Compute a gravitational energy density.
       # This won't work like this because they're arrays.
@@ -89,13 +91,30 @@ def generate_lagrangian(shape, ref_ctrl):
       # Jacobian of the deformed configuraton wrt control points.
       ctrl_jacs = P[patch]['jacobian_ctrl_fn'](def_ctrl[ii])
 
-      # Inertia matrix in control point space.
-      #ctrl_jacTjac = vmap_tensordot...
-      #mass_matrices = ...
+      # Mass matrix in control point space.
+      ctrl_jacTjac  = vmap_tensordot(ctrl_jacs, ctrl_jacs, (0,0))
+      mass_matrices = (ctrl_jacTjac.T * mass_density.T).T
+      mass_matrix   = P[patch]['quad_fn'](mass_matrices)
 
-      #mass_matrix = P[patch]['quad_fn'](mass_matrices)
+      # Compute the inertia with this matrix.
+      kinetic_energy = 0.5*np.tensordot(
+        np.tensordot(
+          mass_matrix,
+          def_vels[ii],
+          ((3,4,5), (0,1,2)),
+        ),
+        def_vels[ii],
+        ((0,1,2), (0,1,2)),
+      )
 
-      # big tensordot to get kinetic.
+      print(kinetic_energy, strain_potential, gravitational_potential)
+      tot_strain  += strain_potential
+      tot_gravity += gravitational_potential
+      tot_kinetic += kinetic_energy
+
+    return tot_kinetic - tot_strain - tot_gravity
+
+  return lagrangian
 
 if __name__ == '__main__':
   import patch2d
@@ -114,7 +133,7 @@ if __name__ == '__main__':
   num_xctrl = 10
   num_yctrl = 5
   ctrl = bsplines.mesh(np.linspace(0, length, num_xctrl),
-                           np.linspace(0, height, num_yctrl))
+                       np.linspace(0, height, num_yctrl))
 
   # Make the patch.
   spline_deg = 3
@@ -142,6 +161,8 @@ if __name__ == '__main__':
   shape = shape2d.Shape2D(patch)
   ref_ctrl = [ctrl]
 
-  #generate_lagrangian(shape, ctrl)
+  def_ctrl = [ctrl.copy()]
+  def_vels = [np.zeros_like(ctrl)]
+  q, qdot  = shape.flatten(def_ctrl, def_vels)
 
-  patch.compute_quad_points()
+  lagrangian = generate_lagrangian(shape, ref_ctrl)
