@@ -48,7 +48,7 @@ class NeoHookean:
     self.dims     = dims
     self.log      = log
 
-  def energy(self, defgrad):
+  def get_energy_fn(self):
     if self.dims == 2:
       if self.log:
         func = vmap_neohookean_energy2d_log
@@ -60,7 +60,11 @@ class NeoHookean:
       else:
         func = vmap_neohookean_energy3d
 
-    return func(defgrad, self.material.shear(), self.material.bulk())
+    return lambda defgrad: func(
+      defgrad,
+      self.material.shear(),
+      self.material.bulk(),
+    )
 
   def density(self):
     return self.material.density

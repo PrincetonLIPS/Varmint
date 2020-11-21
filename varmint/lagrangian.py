@@ -1,6 +1,7 @@
 import jax
 import jax.numpy        as np
 import jax.numpy.linalg as npla
+import numpy            as onp
 import logging
 
 from vmap_utils import *
@@ -97,14 +98,50 @@ def generate_lagrangian(shape, ref_ctrl):
       # big tensordot to get kinetic.
 
 if __name__ == '__main__':
+  import patch2d
   import shape2d
   import materials
+  import bsplines
 
   from constitutive import NeoHookean
   from quadrature import Quad3D_TensorGaussLegendre
 
-  mat   = NeoHookean(materials.NinjaFlex)
-  quad  = Quad3D_TensorGaussLegendre(10)
-  shape = shape3d.test_shape1()
+  mat   = NeoHookean(materials.NinjaFlex, dims=2)
 
-  generate_lagrangian(quad, shape, mat)
+  # Do this in mm?
+  length    = 25
+  height    = 5
+  num_xctrl = 10
+  num_yctrl = 5
+  ctrl = bsplines.mesh(np.linspace(0, length, num_xctrl),
+                           np.linspace(0, height, num_yctrl))
+
+  # Make the patch.
+  spline_deg = 3
+  quad_deg = 10
+  xknots = bsplines.default_knots(spline_deg, num_xctrl)
+  yknots = bsplines.default_knots(spline_deg, num_yctrl)
+  labels = onp.zeros((num_xctrl, num_yctrl), dtype='<U256')
+  labels[0,:] = ['A', 'B', 'C', 'D', 'E']
+  fixed = {
+    'A': ctrl[0,0,:],
+    'B': ctrl[0,1,:],
+    'C': ctrl[0,2,:],
+    'D': ctrl[0,3,:],
+    'E': ctrl[0,4,:],
+  }
+  patch = patch2d.Patch2D(
+    xknots,
+    yknots,
+    spline_deg,
+    mat,
+    quad_deg,
+    labels=labels,
+    fixed=fixed
+  )
+  shape = shape2d.Shape2D(patch)
+  ref_ctrl = [ctrl]
+
+  #generate_lagrangian(shape, ctrl)
+
+  patch.compute_quad_points()

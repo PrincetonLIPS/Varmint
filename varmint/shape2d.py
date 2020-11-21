@@ -10,7 +10,7 @@ from exceptions import (
 
 import bsplines
 
-from patch import Patch2D
+from patch2d import Patch2D
 
 class Shape2D:
   ''' Class for managing collections of 2D patches.
@@ -148,9 +148,6 @@ class Shape2D:
         for child in index_list[1:]:
           unflat_mat[child, parent] = 1
 
-    plt.imshow(unflat_mat)
-    plt.show()
-
     return unflat_mat, unflat_vec
 
   def flatten(self, ctrl, vels):
@@ -237,7 +234,38 @@ class Shape2D:
     else:
       plt.savefig(filename)
 
+def test_shape1():
+  ''' A simple rectangle, fixed at one end. '''
 
+  # Do this in mm?
+  length    = 25
+  height    = 5
+  num_xctrl = 10
+  num_yctrl = 5
+  ctrl = bsplines.mesh(np.linspace(0, length, num_xctrl),
+                       np.linspace(0, height, num_yctrl))
+
+  # Make the patch.
+  deg = 3
+  xknots = bsplines.default_knots(deg, num_xctrl)
+  yknots = bsplines.default_knots(deg, num_yctrl)
+  labels = onp.zeros((num_xctrl, num_yctrl), dtype='<U256')
+  labels[0,:] = ['A', 'B', 'C', 'D', 'E']
+  fixed = {
+    'A': ctrl[0,0,:],
+    'B': ctrl[0,1,:],
+    'C': ctrl[0,2,:],
+    'D': ctrl[0,3,:],
+    'E': ctrl[0,4,:],
+  }
+  patch = Patch2D(xknots, yknots, deg, None, None, labels=labels, fixed=fixed)
+
+  shape = Shape2D(patch)
+
+  return shape, [ctrl]
+
+
+'''
 def main():
 
   # Create a rectangle.
@@ -312,3 +340,4 @@ def main():
 
 if __name__ == '__main__':
   main()
+'''

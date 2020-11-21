@@ -2,6 +2,7 @@ import jax
 import jax.numpy         as np
 import numpy             as onp
 import matplotlib.pyplot as plt
+import quadpy
 
 from exceptions import LabelError
 
@@ -22,9 +23,9 @@ class Patch2D:
       self,
       xknots,
       yknots,
-      deg,
+      spline_deg,
       material,
-      quad,
+      quad_deg,
       labels=None,
       fixed=None,
   ):
@@ -40,7 +41,7 @@ class Patch2D:
                dimension. These are assumed to be in non-decreasing order from
                0.0 to 1.0.
 
-     - deg: The degree of the bspline.
+     - spline_deg: The degree of the bspline.
 
     # FIXME
 
@@ -52,19 +53,19 @@ class Patch2D:
      - fixed: An optional dictionary that maps labels to 2d locations, as
               appropriate.
     '''
-    self.xknots   = xknots
-    self.yknots   = yknots
-    self.deg      = deg
-    self.fixed    = fixed
-    self.material = material
-    self.quad     = quad
+    self.xknots     = xknots
+    self.yknots     = yknots
+    self.spline_deg = spline_deg
+    self.fixed      = fixed
+    self.material   = material
+    self.quad_deg   = quad_deg
 
     # Determine the number of control points.
     num_xknots = self.xknots.shape[0]
     num_yknots = self.yknots.shape[0]
 
-    self.num_xctrl  = num_xknots - self.deg - 1
-    self.num_yctrl  = num_yknots - self.deg - 1
+    self.num_xctrl  = num_xknots - self.spline_deg - 1
+    self.num_yctrl  = num_yknots - self.spline_deg - 1
 
     if labels is None:
       # Generate an empty label matrix.
@@ -99,6 +100,35 @@ class Patch2D:
     else:
       self.pretty_fixed = {}
 
+  def compute_quad_points(self):
+
+    # Each knot span has its own quadrature.
+    uniq_xknots = onp.unique(self.xknots)
+    uniq_yknots = onp.unique(self.yknots)
+
+    offsets = bsplines.mesh(uniq_xknots[:-1], uniq_yknots[:-1])
+
+    # We need the span volumes for performing integration later.
+    self.span_volumes = onp.diff(uniq_yknots)[np.newaxis,:] \
+      * onp.diff(uniq_xknots)[:,np.newaxis]
+
+    # Ask quadpy for a quadrature scheme.
+    scheme = quadpy.c2.get_good_scheme(self.quad_deg)
+
+    # Change the domain from (-1,1)^2 to (0,1)^2
+    points = scheme.points/2 + 0.5
+
+    # Broadcast and shift the points to each knot span.
+    self.points = np.swapaxes(
+      points[np.newaxis,np.newaxis,:,:] + offsets[:,:,:,np.newaxis],
+      2, 3,
+    )
+
+    # Scale the weights to reflect the original change in volume.
+    # We'll do this again when we actually perform quadrature.
+    # Reshape to look like what we'll need for broadcasting later.
+    self.weights = np.reshape(scheme.weights, (1, 1, -1))/2
+
   def get_deformation_fn(self):
     def deformation_fn(u, ctrl):
       return bsplines.bspline2d(
@@ -106,7 +136,7 @@ class Patch2D:
         ctrl,
         self.xknots,
         self.yknots,
-        self.deg
+        self.spline_deg
       )
     return deformation_fn
 
@@ -117,7 +147,7 @@ class Patch2D:
         ctrl,
         self.xknots,
         self.yknots,
-        self.deg
+        self.spline_deg
       )
     return jacobian_u_fn
 
@@ -128,7 +158,7 @@ class Patch2D:
         ctrl,
         self.xknots,
         self.yknots,
-        self.deg,
+        self.spline_deg,
       )
 
   def get_energy_fn(self):
@@ -136,8 +166,11 @@ class Patch2D:
 
   def get_quad_fn(self):
     def quad_fn(ordinates):
-      # Compute the sum
-      pass
+
+      # The transpose makes it possible to sum over additional dimensions.
+      return np.sum(np.sum(self.weights.T + ordinates.T, axis=0) \
+                    * self.span_volumes.T)
+    return quad_fn
 
   def get_ctrl_shape(self):
     return self.num_xctrl, self.num_yctrl, 2
