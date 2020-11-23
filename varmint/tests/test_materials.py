@@ -3,7 +3,7 @@ import unittest as ut
 from materials import *
 from exceptions import *
 
-class Test_Material_Base(ut.TestCase):
+class Test_Material(ut.TestCase):
 
   def test_props_1(self):
     class NewMat(Material):

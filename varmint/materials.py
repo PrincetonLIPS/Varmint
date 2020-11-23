@@ -1,9 +1,6 @@
 
 from exceptions import *
 
-# TODO: throw errors when bits are missing
-# TODO: compute all pairs
-
 class classproperty(object):
   ''' Make it so that there can be class-level properties. '''
   def __init__(self, f):
@@ -17,15 +14,19 @@ class Material:
   The core functionality of this class is to implement relationships between
   commonly used material parameters, specifically:
 
-  Young's modulus:
+  Young's modulus (GPa)
 
-  Poisson's ratio:
+  Poisson's ratio (unitless, in (0, 0.5))
 
-  Lame's first parameter:
+  Lame's first parameter: (GPa)
 
-  Shear modulus:
+  Shear modulus: (GPa)
 
-  Bulk modulus:
+  Bulk modulus: (GPa)
+
+  Materials can be specified either with a Young's/Poisson's pair or with a
+  Lame-first/shear pair.  These are _E/_nu and _lmbda/_mu, respectively.
+  This class also requires density to be specified in grams per cubic cm.
 
   '''
 
