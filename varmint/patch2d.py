@@ -129,10 +129,12 @@ class Patch2D:
                              + offset_mesh[:,:,np.newaxis,:],
                              (-1, 2))
 
-    # Scale the weights to reflect the original change in volume.
-    # We'll do this again when we actually perform quadrature.
-    # Reshape to look like what we'll need for broadcasting later.
-    self.weights = np.reshape(scheme.weights, (1, 1, -1))/2
+    # FIXME: Why don't I have to divide this by 4 to accommodate the change in
+    # interval?
+    self.weights = np.reshape(scheme.weights, (1, 1, -1))
+
+  def num_quad_pts(self):
+    return self.points.shape[0]
 
   def get_deformation_fn(self):
     def deformation_fn(ctrl):
@@ -146,7 +148,6 @@ class Patch2D:
     return deformation_fn
 
   def get_jacobian_u_fn(self):
-    print(self.points.shape)
     def jacobian_u_fn(ctrl):
       return bsplines.bspline2d_derivs(
         self.points,
@@ -180,7 +181,7 @@ class Patch2D:
                         (*self.span_volumes.shape, -1, *ordinates.shape[1:]))
 
       # The transpose makes it possible to sum over additional dimensions.
-      return np.sum(np.sum(self.weights.T + ords.T, axis=-3) \
+      return np.sum(np.sum(self.weights.T * ords.T, axis=-3) \
                     * self.span_volumes.T, axis=(-1,-2)).T
 
     return quad_fn

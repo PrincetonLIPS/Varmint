@@ -7,21 +7,28 @@ import unittest      as ut
 
 import bsplines
 
-from patch      import Patch2D
-from exceptions import LabelError
+from constitutive import NeoHookean2D
+from materials    import NinjaFlex
+from patch2d      import Patch2D
+from exceptions   import LabelError
 
 class Test_Patch2D_NoLabels(ut.TestCase):
   ''' Test basic functionality with no labels. '''
 
   def setUp(self):
-    deg    = 4
-    xknots = bsplines.default_knots(deg, 10)
-    yknots = bsplines.default_knots(deg, 5)
+    spline_deg = 4
+    xknots     = bsplines.default_knots(spline_deg, 10)
+    yknots     = bsplines.default_knots(spline_deg, 5)
+    material   = NeoHookean2D(NinjaFlex)
+    quad_deg   = 10
 
-    self.patch = Patch2D(xknots, yknots, deg)
+    self.patch = Patch2D(xknots, yknots, spline_deg, material, quad_deg)
 
-  def test_deg(self):
-    self.assertEqual(self.patch.deg, 4)
+  def test_spline_deg(self):
+    self.assertEqual(self.patch.spline_deg, 4)
+
+  def test_quad_deg(self):
+    self.assertEqual(self.patch.quad_deg, 10)
 
   def test_knots(self):
     self.assertEqual(self.patch.xknots[0], 0)
@@ -41,6 +48,49 @@ class Test_Patch2D_NoLabels(ut.TestCase):
     labels = self.patch.get_labels()
     self.assertEqual(len(labels), 0)
 
+  def test_get_fixed(self):
+    fixed = self.patch.get_fixed()
+    self.assertEqual(len(fixed), 0)
+
+  def test_deformation_fn(self):
+    deformation_fn = self.patch.get_deformation_fn()
+    ctrl           = bsplines.mesh(np.arange(10), np.arange(5))
+    deformation    = deformation_fn(ctrl)
+    num_points     = self.patch.num_quad_pts()
+
+    self.assertEqual(deformation.shape, (num_points, 2))
+
+  def test_jacobian_u_fn(self):
+    jac_u_fn   = self.patch.get_jacobian_u_fn()
+    ctrl       = bsplines.mesh(np.arange(10), np.arange(5))
+    jac_u      = jac_u_fn(ctrl)
+    num_points = self.patch.num_quad_pts()
+
+    self.assertEqual(jac_u.shape, (num_points, 2, 2))
+
+  def test_jacobian_ctrl_fn(self):
+    jac_ctrl_fn = self.patch.get_jacobian_ctrl_fn()
+    ctrl        = bsplines.mesh(np.arange(10.), np.arange(5.))
+    jac_ctrl    = jac_ctrl_fn(ctrl)
+    num_points  = self.patch.num_quad_pts()
+
+    self.assertEqual(jac_ctrl.shape, (num_points, 2, 10, 5, 2))
+
+  def test_energy_fn(self):
+    energy_fn = self.patch.get_energy_fn()
+    defgrad   = np.array([np.eye(2)])
+
+    self.assertEqual(energy_fn(defgrad), 0.0)
+
+  def test_quad_fn(self):
+    quad_fn    = self.patch.get_quad_fn()
+    num_points = self.patch.num_quad_pts()
+    ordinates  = 2*np.ones(num_points)
+
+    self.assertAlmostEqual(quad_fn(ordinates), 2.0)
+
+
+"""
 class Test_Patch2D_Labels(ut.TestCase):
   ''' Test basic label functionality. '''
 
@@ -102,3 +152,4 @@ class Test_Patch2D_Fixed(ut.TestCase):
 
   # TODO: Had to remove all these when I changed the interface. :-(
   pass
+"""
