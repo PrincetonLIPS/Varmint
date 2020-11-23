@@ -9,3 +9,10 @@ class SplineError(Exception):
 class LabelError(Exception):
   ''' Throw these if labels aren't working correctly. '''
   pass
+
+class UnitsError(Exception):
+  ''' Throw if something seems surprising about a quantity with known units. '''
+  pass
+
+class MaterialError(Exception):
+  ''' Throw if something weird happens with the material model. '''
