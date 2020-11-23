@@ -137,6 +137,12 @@ class Patch2D:
     return self.points.shape[0]
 
   def get_deformation_fn(self):
+    ''' Get a function that produces deformations
+
+    Takes in control points and returns a deformation for each quad point.
+
+    This is assumed to be in cm.
+    '''
     def deformation_fn(ctrl):
       return bsplines.bspline2d(
         self.points,
@@ -148,6 +154,7 @@ class Patch2D:
     return deformation_fn
 
   def get_jacobian_u_fn(self):
+    ''' Take control points, return 2x2 Jacobians wrt quad points. '''
     def jacobian_u_fn(ctrl):
       return bsplines.bspline2d_derivs(
         self.points,
@@ -159,6 +166,7 @@ class Patch2D:
     return jacobian_u_fn
 
   def get_jacobian_ctrl_fn(self):
+    ''' Take control points, return Jacobian wrt control points. '''
     def jacobian_ctrl_fn(ctrl):
       return bsplines.bspline2d_derivs_ctrl(
         self.points,
@@ -170,6 +178,13 @@ class Patch2D:
     return jacobian_ctrl_fn
 
   def get_energy_fn(self):
+    ''' Get the energy density function associated with the material model.
+
+    The various material properties are in GPa, and Pa = N/m^3 so GPa is
+    billons of Newtons per cubic meter = GN/m^3.  To get a sense of how this
+    varies, it is roughly quadratic in the log of the scale of deformation
+    gradient.
+    '''
     return self.material.get_energy_fn()
 
   def get_quad_fn(self):

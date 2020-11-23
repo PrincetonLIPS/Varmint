@@ -41,7 +41,7 @@ vmap_neohookean_energy2d = jax.jit(
 
 class NeoHookean2D:
 
-  def __init__(self, material, log=False, thickness=1):
+  def __init__(self, material, log=True, thickness=1):
     ''' thickness in cm '''
     self.material  = material
     self.log       = log

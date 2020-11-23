@@ -54,7 +54,6 @@ class Test_NeoHookean2D_log(ut.TestCase):
       self.assertAlmostEqual(neohookean_energy2d_log(defgrad, shear, bulk), 0.0,
                              places=6)
 
-
 class Test_NeoHookean3D(ut.TestCase):
 
   def test_zero_energy(self):

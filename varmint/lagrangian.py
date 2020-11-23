@@ -50,7 +50,7 @@ def generate_lagrangian(shape, ref_ctrl):
     # This gives a list of control points and a list of velocities.
     def_ctrl, def_vels = shape.unflatten(q, qdot)
 
-    gravity = 9.81
+    gravity = 981.0 # cm/s^2
 
     # It'd be nice to have a cleverer way to do this with map and friends,
     # but because the patches can have different numbers of control points,
@@ -66,37 +66,50 @@ def generate_lagrangian(shape, ref_ctrl):
 
       # Compute the deformation gradients.
       defgrads = vmap_dot(def_jacs, P[patch]['ref_jac_invs'])
+      print(defgrads)
 
       # Get the strain energy density.
-      strain_energy_density = P[patch]['energy_fn'](defgrads) \
+      # Units are GPa = 10^9 J / m^3 in the reference configuration.
+      # Convert to J / cm^3 by multiplying by 10^3.
+      strain_energy_density = 1000 * P[patch]['energy_fn'](defgrads) \
         * np.abs(P[patch]['ref_jac_dets'])
+      print(strain_energy_density)
 
       # Sum over the quadrature points.
       strain_potential = P[patch]['quad_fn'](strain_energy_density)
 
-      # I'm going to assume each patch is uniform in the reference configuration.
-      # Each patch might have a different density because it's a diff material.
-      # This doesn't actually multiply because the ref_jac_dets are a list.
+      # I'm going to assume each patch is uniform in the reference
+      # configuration. Each patch might have a different density because it's
+      # a diff material. Densities are g / cm^3.
       mass_density = patch.material.density() * np.abs(P[patch]['ref_jac_dets'])
 
-      # Get the actual locations.
+      # Get the actual locations. These are in cm.
       positions = P[patch]['deformation_fn'](def_ctrl[ii])
 
-      # Compute a gravitational energy density.
-      # This won't work like this because they're arrays.
-      # We're doing this patchwise.
+      # Compute a gravitational energy density, in J / cm^3.
+      # position = cm
+      # gravity = cm / s^2
+      # mass_density = g / cm^3
+      # result = cm * (cm / s^2) * g / cm^3 = cm * (g * cm / s^2) / cm^3
+      # This is ergs per cubic centimeter, i.e., 10^-7 J / cm ^3, so we need to
+      # divide by 10^7 to put it into the same units as strain potential.
+      # Should we do this before or after the quadrature?
       grav_energy_density = positions[:,1] * gravity * mass_density
-      gravitational_potential = P[patch]['quad_fn'](grav_energy_density)
+      gravitational_potential = P[patch]['quad_fn'](grav_energy_density) / 10**7
 
       # Jacobian of the deformed configuraton wrt control points.
       ctrl_jacs = P[patch]['jacobian_ctrl_fn'](def_ctrl[ii])
 
       # Mass matrix in control point space.
+      # Control points are in cm and density is in g/cm^3 so this should work
+      # out to get a mass matrix with units of grams.
       ctrl_jacTjac  = vmap_tensordot(ctrl_jacs, ctrl_jacs, (0,0))
       mass_matrices = (ctrl_jacTjac.T * mass_density.T).T
       mass_matrix   = P[patch]['quad_fn'](mass_matrices)
 
       # Compute the inertia with this matrix.
+      # This should be g * cm/s * cm/s = g * cm^2 / s^2 = erg.
+      # So also divide by 10^7 to get Joules.
       kinetic_energy = 0.5*np.tensordot(
         np.tensordot(
           mass_matrix,
@@ -105,7 +118,7 @@ def generate_lagrangian(shape, ref_ctrl):
         ),
         def_vels[ii],
         ((0,1,2), (0,1,2)),
-      )
+      ) / 10**7
 
       print(kinetic_energy, strain_potential, gravitational_potential)
       tot_strain  += strain_potential
@@ -122,10 +135,9 @@ if __name__ == '__main__':
   import materials
   import bsplines
 
-  from constitutive import NeoHookean
-  from quadrature import Quad3D_TensorGaussLegendre
+  from constitutive import NeoHookean2D
 
-  mat   = NeoHookean(materials.NinjaFlex, dims=2)
+  mat   = NeoHookean2D(materials.NinjaFlex)
 
   # Do this in mm?
   length    = 25
