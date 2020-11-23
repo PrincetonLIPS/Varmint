@@ -18,7 +18,7 @@ vmap_neohookean_energy2d_log = jax.jit(
 def neohookean_energy3d_log(F, shear, bulk):
   I1 = np.trace(F.T @ F)
   J  = npla.det(F)
-  return (shear/2) * (I1 - 2 - 2*np.log(J)) + (bulk/2)*np.log(J)**2
+  return (shear/2) * (I1 - 3 - 2*np.log(J)) + (bulk/2)*(J-1)**2
 vmap_neohookean_energy3d_log = jax.jit(
   jax.vmap(
     neohookean_energy3d_log,
@@ -39,31 +39,41 @@ vmap_neohookean_energy2d = jax.jit(
   ),
 )
 
-# TODO: implement Tianju's 3d w/o logs.
+class NeoHookean2D:
 
-class NeoHookean:
-
-  def __init__(self, material, dims=3, log=False):
-    self.material = material
-    self.dims     = dims
-    self.log      = log
+  def __init__(self, material, log=False, thickness=1):
+    ''' thickness in cm '''
+    self.material  = material
+    self.log       = log
+    self.thickness = thickness
 
   def get_energy_fn(self):
-    if self.dims == 2:
-      if self.log:
-        func = vmap_neohookean_energy2d_log
-      else:
-        func = vmap_neohookean_energy2d
+    if self.log:
+      func = vmap_neohookean_energy2d_log
     else:
-      if self.log:
-        func = vmap_neohookean_energy3d_log
-      else:
-        func = vmap_neohookean_energy3d
+      func = vmap_neohookean_energy2d
 
     return lambda defgrad: func(
       defgrad,
-      self.material.shear(),
-      self.material.bulk(),
+      self.material.shear,
+      self.material.bulk,
+    )
+
+  def density(self):
+    # TODO: How should this interact with third dimension?
+    return self.material.density
+
+class NeoHookean3D:
+
+  def __init__(self, material):
+    self.material = material
+
+  def get_energy_fn(self):
+    func = vmap_neohookean_energy3d_log
+    return lambda defgrad: func(
+      defgrad,
+      self.material.shear,
+      self.material.bulk,
     )
 
   def density(self):
