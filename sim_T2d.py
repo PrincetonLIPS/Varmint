@@ -20,43 +20,66 @@ class WigglyMat(Material):
 
 mat = NeoHookean2D(WigglyMat)
 
-# Length units are centimeters.
-length    = 50
-height    = 2
-num_xctrl = 10
-num_yctrl = 5
-ctrl      = mesh(np.linspace(0, length, num_xctrl),
-                 np.linspace(0, height, num_yctrl))
-
-# Make the patch.
 spline_deg = 3
 quad_deg   = 10
-xknots     = default_knots(spline_deg, num_xctrl)
-yknots     = default_knots(spline_deg, num_yctrl)
-labels = onp.zeros((num_xctrl, num_yctrl), dtype='<U256')
-labels[0,:] = ['A', 'B', 'C', 'D', 'E']
-fixed = {
-  'A': ctrl[0,0,:],
-  'B': ctrl[0,1,:],
-  'C': ctrl[0,2,:],
-  'D': ctrl[0,3,:],
-  'E': ctrl[0,4,:],
+
+# Length units are centimeters.
+
+# Set up patch 1.
+p1_length    = 40
+p1_height    = 5
+p1_num_xctrl = 10
+p1_num_yctrl = 6
+p1_ctrl      = mesh(np.linspace(0, p1_length, p1_num_xctrl),
+                    np.linspace(0, p1_height, p1_num_yctrl))
+p1_xknots = default_knots(spline_deg, p1_num_xctrl)
+p1_yknots = default_knots(spline_deg, p1_num_yctrl)
+p1_labels = onp.zeros((p1_num_xctrl, p1_num_yctrl), dtype='<U256')
+p1_labels[0,:]  = ['A', 'B', 'C', 'D', 'E', 'F']
+p1_labels[-1,:] = ['G', 'H', 'I', 'J', 'K', 'L']
+p1_fixed = {
+  'A': p1_ctrl[0,0,:],
+  'B': p1_ctrl[0,1,:],
+  'C': p1_ctrl[0,2,:],
+  'D': p1_ctrl[0,3,:],
+  'E': p1_ctrl[0,4,:],
+  'F': p1_ctrl[0,5,:],
 }
-patch = Patch2D(
-  xknots,
-  yknots,
+patch1 = Patch2D(
+  p1_xknots,
+  p1_yknots,
   spline_deg,
   mat,
   quad_deg,
-  labels=labels,
-  fixed=fixed
+  labels=p1_labels,
+  fixed=p1_fixed
 )
-shape = Shape2D(patch)
+
+# Set up patch 2.
+p2_length    = 5
+p2_num_xctrl = 5
+p2_num_yctrl = 12
+p2_ctrl      = mesh(np.linspace(0, p2_length, p2_num_xctrl)+p1_length,
+                    np.array([-15, -10, -5, 0, 1, 2, 3, 4, 5, 10, 15, 20]))
+p2_xknots    = default_knots(spline_deg, p2_num_xctrl)
+p2_yknots    = default_knots(spline_deg, p2_num_yctrl)
+p2_labels    = onp.zeros((p2_num_xctrl, p2_num_yctrl), dtype='<U256')
+p2_labels[0,3:9] = ['G', 'H', 'I', 'J', 'K', 'L']
+patch2 = Patch2D(
+  p2_xknots,
+  p2_yknots,
+  spline_deg,
+  mat,
+  quad_deg,
+  labels=p2_labels,
+)
+
+shape = Shape2D(patch1, patch2)
 
 # Reference configuration and initial deformation/velocity.
-ref_ctrl = [ctrl]
-def_ctrl = [ctrl.copy()]
-def_vels = [np.zeros_like(ctrl)]
+ref_ctrl = [p1_ctrl, p2_ctrl]
+def_ctrl = [p1_ctrl.copy(), p2_ctrl.copy()]
+def_vels = [np.zeros_like(p1_ctrl), np.zeros_like(p2_ctrl)]
 q, qdot  = shape.flatten(def_ctrl, def_vels)
 
 # Get the Lagrangian and then convert to discrete Euler-Lagrange.
@@ -66,7 +89,7 @@ jac_del    = jax.jit(jax.jacfwd(disc_eulag, argnums=4))
 
 dt = 0.01
 t  = dt
-T  = 1.0
+T  = 3.0
 QQ = [ q.copy(), q.copy() ]
 VV = [ np.zeros_like(q), np.zeros_like(q) ]
 TT = [ 0.0, dt ]
@@ -97,4 +120,4 @@ while t < T:
 
 ctrl_seq = list(map(lambda qv: shape.unflatten(qv[0], qv[1])[0], zip(QQ,VV)))
 
-shape.create_movie(ctrl_seq, 'test.mp4', labels=True)
+shape.create_movie(ctrl_seq, 'T2d.mp4', labels=False)

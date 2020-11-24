@@ -327,36 +327,6 @@ class Shape2D:
     )
     anim.save(filename)
 
-def test_shape1():
-  ''' A simple rectangle, fixed at one end. '''
-
-  # Do this in mm?
-  length    = 25
-  height    = 5
-  num_xctrl = 10
-  num_yctrl = 5
-  ctrl = mesh(np.linspace(0, length, num_xctrl),
-              np.linspace(0, height, num_yctrl))
-
-  # Make the patch.
-  deg = 3
-  xknots = bsplines.default_knots(deg, num_xctrl)
-  yknots = bsplines.default_knots(deg, num_yctrl)
-  labels = onp.zeros((num_xctrl, num_yctrl), dtype='<U256')
-  labels[0,:] = ['A', 'B', 'C', 'D', 'E']
-  fixed = {
-    'A': ctrl[0,0,:],
-    'B': ctrl[0,1,:],
-    'C': ctrl[0,2,:],
-    'D': ctrl[0,3,:],
-    'E': ctrl[0,4,:],
-  }
-  patch = Patch2D(xknots, yknots, deg, None, None, labels=labels, fixed=fixed)
-
-  shape = Shape2D(patch)
-
-  return shape, [ctrl]
-
 
 '''
 def main():
