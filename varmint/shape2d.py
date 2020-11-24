@@ -3,14 +3,15 @@ import jax.numpy         as np
 import numpy             as onp
 import matplotlib.pyplot as plt
 
-from exceptions import (
+from .exceptions import (
   DimensionError,
   LabelError,
   )
-
-import bsplines
-
-from patch2d import Patch2D
+from .patch2d import Patch2D
+from .bsplines import (
+  bspline1d,
+  mesh,
+)
 
 class Shape2D:
   ''' Class for managing collections of 2D patches.
@@ -196,21 +197,21 @@ class Shape2D:
 
       # Plot vertical lines.
       for jj in range(patch_ctrl.shape[1]):
-        xx = bsplines.bspline1d(
+        xx = bspline1d(
           uu,
           patch_ctrl[:,jj,:],
           patch.xknots,
-          patch.deg,
+          patch.spline_deg,
         )
         ax.plot(xx[:,0], xx[:,1], 'k-')
 
       # Plot horizontal lines.
       for ii in range(patch_ctrl.shape[0]):
-        yy = bsplines.bspline1d(
+        yy = bspline1d(
           uu,
           patch_ctrl[ii,:,:],
           patch.yknots,
-          patch.deg,
+          patch.spline_deg,
         )
         ax.plot(yy[:,0], yy[:,1], 'k-')
 
@@ -242,8 +243,8 @@ def test_shape1():
   height    = 5
   num_xctrl = 10
   num_yctrl = 5
-  ctrl = bsplines.mesh(np.linspace(0, length, num_xctrl),
-                       np.linspace(0, height, num_yctrl))
+  ctrl = mesh(np.linspace(0, length, num_xctrl),
+              np.linspace(0, height, num_yctrl))
 
   # Make the patch.
   deg = 3

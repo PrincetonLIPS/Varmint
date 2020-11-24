@@ -4,7 +4,7 @@ import jax.numpy.linalg as npla
 import numpy            as onp
 import logging
 
-from vmap_utils import *
+from .vmap_utils import *
 
 def generate_lagrangian(shape, ref_ctrl):
 
@@ -66,14 +66,12 @@ def generate_lagrangian(shape, ref_ctrl):
 
       # Compute the deformation gradients.
       defgrads = vmap_dot(def_jacs, P[patch]['ref_jac_invs'])
-      print(defgrads)
 
       # Get the strain energy density.
       # Units are GPa = 10^9 J / m^3 in the reference configuration.
       # Convert to J / cm^3 by multiplying by 10^3.
       strain_energy_density = 1000 * P[patch]['energy_fn'](defgrads) \
         * np.abs(P[patch]['ref_jac_dets'])
-      print(strain_energy_density)
 
       # Sum over the quadrature points.
       strain_potential = P[patch]['quad_fn'](strain_energy_density)
@@ -120,7 +118,6 @@ def generate_lagrangian(shape, ref_ctrl):
         ((0,1,2), (0,1,2)),
       ) / 10**7
 
-      print(kinetic_energy, strain_potential, gravitational_potential)
       tot_strain  += strain_potential
       tot_gravity += gravitational_potential
       tot_kinetic += kinetic_energy
@@ -128,53 +125,3 @@ def generate_lagrangian(shape, ref_ctrl):
     return tot_kinetic - tot_strain - tot_gravity
 
   return lagrangian
-
-if __name__ == '__main__':
-  import patch2d
-  import shape2d
-  import materials
-  import bsplines
-
-  from constitutive import NeoHookean2D
-
-  mat   = NeoHookean2D(materials.NinjaFlex)
-
-  # Do this in mm?
-  length    = 25
-  height    = 5
-  num_xctrl = 10
-  num_yctrl = 5
-  ctrl = bsplines.mesh(np.linspace(0, length, num_xctrl),
-                       np.linspace(0, height, num_yctrl))
-
-  # Make the patch.
-  spline_deg = 3
-  quad_deg = 10
-  xknots = bsplines.default_knots(spline_deg, num_xctrl)
-  yknots = bsplines.default_knots(spline_deg, num_yctrl)
-  labels = onp.zeros((num_xctrl, num_yctrl), dtype='<U256')
-  labels[0,:] = ['A', 'B', 'C', 'D', 'E']
-  fixed = {
-    'A': ctrl[0,0,:],
-    'B': ctrl[0,1,:],
-    'C': ctrl[0,2,:],
-    'D': ctrl[0,3,:],
-    'E': ctrl[0,4,:],
-  }
-  patch = patch2d.Patch2D(
-    xknots,
-    yknots,
-    spline_deg,
-    mat,
-    quad_deg,
-    labels=labels,
-    fixed=fixed
-  )
-  shape = shape2d.Shape2D(patch)
-  ref_ctrl = [ctrl]
-
-  def_ctrl = [ctrl.copy()]
-  def_vels = [np.zeros_like(ctrl)]
-  q, qdot  = shape.flatten(def_ctrl, def_vels)
-
-  lagrangian = generate_lagrangian(shape, ref_ctrl)

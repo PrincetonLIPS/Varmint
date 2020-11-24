@@ -6,7 +6,7 @@ import timeit
 
 from functools import partial
 
-from exceptions import SplineError
+from .exceptions import SplineError
 
 def mesh(*control):
   ''' Generate a control point mesh.

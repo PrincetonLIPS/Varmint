@@ -1,5 +1,5 @@
 
-from exceptions import *
+from .exceptions import *
 
 class classproperty(object):
   ''' Make it so that there can be class-level properties. '''

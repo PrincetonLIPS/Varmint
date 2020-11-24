@@ -4,9 +4,13 @@ import numpy             as onp
 import matplotlib.pyplot as plt
 import quadpy
 
-from exceptions import LabelError
-
-import bsplines
+from .exceptions import LabelError
+from .bsplines import (
+  mesh,
+  bspline2d,
+  bspline2d_derivs,
+  bspline2d_derivs_ctrl,
+)
 
 # TODO: this will own its quadrature points.
 # TODO: will also have its own material.
@@ -121,8 +125,8 @@ class Patch2D:
     points = scheme.points.T/2 + 0.5
 
     # Repeat the quadrature points for each knot span, scaled appropriately.
-    offset_mesh = bsplines.mesh(uniq_xknots[:-1], uniq_yknots[:-1])
-    width_mesh  = bsplines.mesh(xwidths, ywidths)
+    offset_mesh = mesh(uniq_xknots[:-1], uniq_yknots[:-1])
+    width_mesh  = mesh(xwidths, ywidths)
 
     self.points = np.reshape(points[np.newaxis,np.newaxis,:,:] \
                              * width_mesh[:,:,np.newaxis,:] \
@@ -144,7 +148,7 @@ class Patch2D:
     This is assumed to be in cm.
     '''
     def deformation_fn(ctrl):
-      return bsplines.bspline2d(
+      return bspline2d(
         self.points,
         ctrl,
         self.xknots,
@@ -156,7 +160,7 @@ class Patch2D:
   def get_jacobian_u_fn(self):
     ''' Take control points, return 2x2 Jacobians wrt quad points. '''
     def jacobian_u_fn(ctrl):
-      return bsplines.bspline2d_derivs(
+      return bspline2d_derivs(
         self.points,
         ctrl,
         self.xknots,
@@ -168,7 +172,7 @@ class Patch2D:
   def get_jacobian_ctrl_fn(self):
     ''' Take control points, return Jacobian wrt control points. '''
     def jacobian_ctrl_fn(ctrl):
-      return bsplines.bspline2d_derivs_ctrl(
+      return bspline2d_derivs_ctrl(
         self.points,
         ctrl,
         self.xknots,
