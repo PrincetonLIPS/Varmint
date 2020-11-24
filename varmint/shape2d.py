@@ -3,6 +3,8 @@ import jax.numpy         as np
 import numpy             as onp
 import matplotlib.pyplot as plt
 
+from matplotlib.animation import FuncAnimation
+
 from .exceptions import (
   DimensionError,
   LabelError,
@@ -184,56 +186,146 @@ class Shape2D:
 
     return ctrl, vels
 
-  def render(self, ctrl, filename=None):
-    fig = plt.figure()
-    ax  = plt.axes()
+  def create_movie(
+      self,
+      ctrl_seq,
+      filename,
+      labels=False,
+      fig_kwargs={},
+  ):
+
+    # Get extrema of control points.
+    min_x = np.inf
+    max_x = -np.inf
+    min_y = np.inf
+    max_y = -np.inf
+    for ctrl in ctrl_seq:
+      for patch_ctrl in ctrl:
+        min_x = float(np.minimum(np.min(patch_ctrl[:,:,0]), min_x))
+        max_x = float(np.maximum(np.max(patch_ctrl[:,:,0]), max_x))
+        min_y = float(np.minimum(np.min(patch_ctrl[:,:,1]), min_y))
+        max_y = float(np.maximum(np.max(patch_ctrl[:,:,1]), max_y))
+
+    # Pad each end by 10%.
+    pad_x = 0.1 * (max_x - min_x)
+    pad_y = 0.1 * (max_y - min_y)
+    min_x -= pad_x
+    max_x += pad_x
+    min_y -= pad_y
+    max_y += pad_y
+
+    # Set up the figure and axes.
+    fig = plt.figure(**fig_kwargs)
+    ax  = plt.axes(xlim=(min_x, max_x), ylim=(min_y, max_y))
     ax.set_aspect('equal')
 
-    uu = np.linspace(0, 1, 1002)[1:-1]
+    # Things we need to both initialize and update.
+    objects = {}
+    uu = np.linspace(1e-6, 1-1e-6, 100)
 
-    rendered_labels = set()
+    def init():
 
-    for patch, patch_ctrl in zip(self.patches, ctrl):
+      # Render the first time step.
+      for patch, patch_ctrl in zip(self.patches, ctrl_seq[0]):
 
-      # Plot vertical lines.
-      for jj in range(patch_ctrl.shape[1]):
-        xx = bspline1d(
-          uu,
-          patch_ctrl[:,jj,:],
-          patch.xknots,
-          patch.spline_deg,
-        )
-        ax.plot(xx[:,0], xx[:,1], 'k-')
+        # Plot vertical lines.
+        for jj in range(patch_ctrl.shape[1]):
+          xx = bspline1d(
+            uu,
+            patch_ctrl[:,jj,:],
+            patch.xknots,
+            patch.spline_deg,
+          )
+          xline, = ax.plot(xx[:,0], xx[:,1], 'b-')
+          objects[(patch,'x',jj)] = xline
 
-      # Plot horizontal lines.
-      for ii in range(patch_ctrl.shape[0]):
-        yy = bspline1d(
-          uu,
-          patch_ctrl[ii,:,:],
-          patch.yknots,
-          patch.spline_deg,
-        )
-        ax.plot(yy[:,0], yy[:,1], 'k-')
+        # Plot horizontal lines.
+        for ii in range(patch_ctrl.shape[0]):
+          yy = bspline1d(
+            uu,
+            patch_ctrl[ii,:,:],
+            patch.yknots,
+            patch.spline_deg,
+          )
+          yline, = ax.plot(yy[:,0], yy[:,1], 'b-')
+          objects[(patch,'y',ii)] = yline
 
-      # Plot the control points themselves.
-      ax.plot(patch_ctrl[:,:,0].ravel(), patch_ctrl[:,:,1].ravel(), 'k.')
+        # Plot the control points themselves.
+        cpts, = ax.plot(patch_ctrl[:,:,0].ravel(),
+                        patch_ctrl[:,:,1].ravel(), 'b.')
+        objects[(patch,'c')] = cpts
 
-      # Plot labels.
-      label_r, label_c = onp.where(patch.pretty_labels)
-      for ii in range(len(label_r)):
-        row = label_r[ii]
-        col = label_c[ii]
-        text = patch.pretty_labels[row,col]
-        if text not in rendered_labels:
-          rendered_labels.add(text)
-        else:
-          continue
-        ax.annotate(text, patch_ctrl[row,col,:])
+        if labels:
+          # Plot labels.
+          rendered_labels = set()
 
-    if filename is None:
-      plt.show()
-    else:
-      plt.savefig(filename)
+          label_r, label_c = onp.where(patch.pretty_labels)
+          for ii in range(len(label_r)):
+            row = label_r[ii]
+            col = label_c[ii]
+            text = patch.pretty_labels[row,col]
+            if text not in rendered_labels:
+              rendered_labels.add(text)
+            else:
+              continue
+            ann = ax.annotate(text, patch_ctrl[row,col,:])
+            objects[(patch,'a',ii)] = ann
+
+      return objects.values()
+
+    def update(tt):
+
+      for patch, patch_ctrl in zip(self.patches, ctrl_seq[tt]):
+
+        # Plot vertical lines.
+        for jj in range(patch_ctrl.shape[1]):
+          xx = bspline1d(
+            uu,
+            patch_ctrl[:,jj,:],
+            patch.xknots,
+            patch.spline_deg,
+          )
+          objects[(patch,'x',jj)].set_data(xx[:,0], xx[:,1])
+
+        # Plot horizontal lines.
+        for ii in range(patch_ctrl.shape[0]):
+          yy = bspline1d(
+            uu,
+            patch_ctrl[ii,:,:],
+            patch.yknots,
+            patch.spline_deg,
+          )
+          objects[(patch,'y',ii)].set_data(yy[:,0], yy[:,1])
+
+        objects[(patch,'c')].set_data(patch_ctrl[:,:,0].ravel(),
+                                      patch_ctrl[:,:,1].ravel())
+
+        if labels:
+          rendered_labels = set()
+
+          # Plot labels.
+          label_r, label_c = onp.where(patch.pretty_labels)
+          for ii in range(len(label_r)):
+            row = label_r[ii]
+            col = label_c[ii]
+            text = patch.pretty_labels[row,col]
+            if text not in rendered_labels:
+              rendered_labels.add(text)
+            else:
+              continue
+            objects[(patch,'a',ii)].xy = patch_ctrl[row,col,:]
+
+      return objects.values()
+
+    anim = FuncAnimation(
+      fig,
+      update,
+      init_func=init,
+      frames=len(ctrl_seq),
+      interval=100,
+      blit=True,
+    )
+    anim.save(filename)
 
 def test_shape1():
   ''' A simple rectangle, fixed at one end. '''

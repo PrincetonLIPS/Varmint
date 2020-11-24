@@ -95,7 +95,6 @@ while t < T:
   VV.append((q3-q2)/dt)
   t = t2 + dt
 
-CC = list(map(lambda qv: shape.unflatten(qv[0], qv[1]), zip(QQ,VV)))
+ctrl_seq = list(map(lambda qv: shape.unflatten(qv[0], qv[1])[0], zip(QQ,VV)))
 
-# TODO: make movie
-shape.render(CC[60][0])
+shape.create_movie(ctrl_seq, 'test.mp4', labels=True)
