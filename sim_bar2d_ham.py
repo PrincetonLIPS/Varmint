@@ -12,6 +12,7 @@ from varmint.constitutive import NeoHookean2D
 from varmint.bsplines     import mesh, default_knots
 from varmint.lagrangian   import generate_lagrangian
 from varmint.discretize   import discretize_hamiltonian
+from varmint.levmar       import levenberg_marquardt
 
 class WigglyMat(Material):
   _E = 0.001
@@ -64,6 +65,17 @@ lagrangian = generate_lagrangian(shape, ref_ctrl)
 Ld_dq1, Ld_dq2 = discretize_hamiltonian(lagrangian)
 Ld_dq1_jac = jax.jit(jax.jacfwd(Ld_dq1, argnums=1))
 
+minfunc  = jax.jit(lambda p0, q0, q1, dt: np.sum((p0+Ld_dq1(q0, q1, dt))**2))
+dminfunc = jax.jit(jax.grad(minfunc, argnums=2))
+hessvec  = jax.jit(jax.grad(
+  lambda p0, q0, q1, dt, v: dminfunc(p0, q0, q1, dt) @ v,
+  argnums=2,
+))
+hessian  = jax.jit(jax.jacfwd(
+  lambda p0, q0, q1, dt: dminfunc(p0, q0, q1, dt),
+  argnums=2,
+))
+
 dt = 0.01
 t  = dt
 T  = 1.0
@@ -79,13 +91,38 @@ while TT[-1] < T:
   t0 = time.time()
 
   # Solve for the next q.
-  res = spopt.least_squares(
-    lambda q_1: PP[-1] + Ld_dq1(QQ[-1], q_1, dt), # should be zero
-    QQ[-1], # initialize at current location
-    lambda q_1: Ld_dq1_jac(QQ[-1], q_1, dt), # Jacobian
-    method='lm',
-  )
+  if True:
+    if False:
+      res = spopt.least_squares(
+        lambda q_1: PP[-1] + Ld_dq1(QQ[-1], q_1, dt), # should be zero
+        QQ[-1], # initialize at current location
+        lambda q_1: Ld_dq1_jac(QQ[-1], q_1, dt), # Jacobian
+        method='lm',
+      )
+    else:
+      res = levenberg_marquardt(
+        lambda q_1: PP[-1] + Ld_dq1(QQ[-1], q_1, dt), # should be zero
+        QQ[-1], # initialize at current location
+        lambda q_1: Ld_dq1_jac(QQ[-1], q_1, dt), # Jacobian
+        init_lamb=0.1,
+      )
+  elif False:
+    res = spopt.minimize(
+      lambda q1: minfunc(PP[-1], QQ[-1], q1, dt),
+      QQ[-1],
+      jac=lambda q1: dminfunc(PP[-1], QQ[-1], q1, dt),
+      hess=lambda q1: hessian(PP[-1], QQ[-1], q1, dt),
+      # hessp=lambda q1, v: hessvec(PP[-1], QQ[-1], q1, dt, v),
+      method='Newton-CG',
+    )
+
+  print(Ld_dq1(QQ[-1], res.x, dt) + PP[-1])
+  print(minfunc(PP[-1], QQ[-1], res.x, dt))
+
   t1 = time.time()
+  print('\t%s' % (res.success))
+  print('\t%d' % (res.nfev))
+  print('\t%s' % (res.message))
   print('\t%0.3f sec' % (t1-t0))
   QQ.append(res.x)
 
