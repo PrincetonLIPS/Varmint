@@ -1,8 +1,70 @@
 import jax
-import jax.numpy        as np
-import jax.numpy.linalg as npla
+import jax.numpy         as np
+import jax.numpy.linalg  as npla
+import matplotlib.pyplot as plt
 
 from scipy.optimize import OptimizeResult
+
+# Moré, J.J., 1978. The Levenberg-Marquardt algorithm: implementation
+# and theory. In Numerical analysis (pp. 105-116). Springer, Berlin,
+# Heidelberg.
+
+def norm(v):
+  return np.sqrt(np.sum(v**2))
+
+def phi(alpha, D, J, f, delta):
+  ''' Eq. 5.2 '''
+
+  # Slow, but just seeing how to make this work.
+  return norm(D @ npla.solve(J.T @ J + alpha * D.T @ D, J.T @ f)) - delta
+
+def lm_param( D, J, f, delta, sigma=0.1 ):
+  ''' Determine the \lambda parameter in L-M as discussed by Moré. '''
+
+  vg_phi = jax.value_and_grad(phi, argnums=0)
+
+  phi0, dphi0 = vg_phi(0., D, J, f, delta)
+
+  if phi0 <= 0:
+    return 0.0
+
+  # D is diagonal...
+  iD = npla.inv(D)
+
+  upper = norm((J @ iD).T @ f) / delta
+  #print(upper)
+
+  # TODO: if J is low-rank, use lower=0
+  lower = - phi0 / dphi0
+  #print(lower)
+
+  # start with alpha = 0?
+  alpha = 0.0
+
+  while True:
+    print('\t\talpha = %f' % (alpha))
+    print('\t\t[%f, %f]' % (lower, upper))
+
+    if alpha <= lower or alpha >= upper:
+      alpha = np.maximum( 0.001 * upper, np.sqrt(upper * lower) )
+    #print(alpha)
+
+    phik, dphik = vg_phi(alpha, D, J, f, delta)
+    if phik < 0:
+      upper = alpha
+
+    print('\t\tphi(alpha) = %f (vs %f)' % (phik, sigma*delta))
+
+    if np.abs(phik) < sigma*delta:
+      #print('done! %f' % (phik))
+      print('\t\talpha = %f' % (alpha))
+      return alpha
+
+    lower = np.maximum(lower, alpha - phik/dphik)
+    print('\t\t[%f, %f]' % (lower, upper))
+
+    alpha = alpha - ( (phik + delta)/delta ) * ( phik/dphik )
+    #print(alpha)
 
 def levenberg_marquardt(
     fun,
@@ -17,6 +79,8 @@ def levenberg_marquardt(
 ):
   ''' Minimize the sum of squares of f(x) with respect to x. '''
 
+  sigma = 0.1
+
   # Initialize lambda to its default.
   lamb = init_lamb
 
@@ -28,94 +92,113 @@ def levenberg_marquardt(
   x   = x0
   dx  = np.inf
   fx  = fun(x)
-  err = np.sqrt(np.mean(fx**2))
+  Jx  = jacfun(x)
+
+  # Choose initial matrix D.
+  D = np.diag(np.sqrt(np.diag(Jx.T @ Jx)))
+
+  # Choose initial step bound.
+  factor = 1.0
+  delta = factor * norm(D @ x)
 
   while True:
     nit += 1
+    print('\nIteration %d %f nfev=%d  njev=%d' % (nit, norm(fx), nfev, njev))
+    print('\tdelta = %f' % (delta))
+
+    print('\t%f vs %f' % (norm(D @ npla.solve(Jx.T@Jx, Jx.T@fx)), (1+sigma)*delta))
+
+    lamb = lm_param(D, Jx, fx, delta)
+    print('\tlambda = %f' % (lamb))
 
     # Precompute Jacobian-related quantities.
-    Jx   = jacfun(x)
+    # Move this around to not recompute.
+    #Jx   = jacfun(x)
     JTJ  = Jx.T @ Jx
     dJTJ = np.diag(np.diag(JTJ))
     JTfx = Jx.T @ fx
+
+    # Solve the pseudo-inverse system with the given lamb.
+    p = -npla.lstsq(JTJ + lamb*(D.T@D), JTfx)[0]
+
+    print('\t%f <= %f <= %f' % ((1-sigma)*delta, norm(D @ p), (1+sigma)*delta))
+
+    # Check ftol
+    if (norm(Jx @ p)/norm(fx))**2 + 2 * lamb * (norm(D @ p)/norm(fx))**2 <= ftol:
+      print('ftol reached nfev=%d  njev=%d' % (nfev, njev))
+      return x
+
+    # Evaluate the quality of this location.
+    new_x   = x + p
+    new_fx  = fun(new_x)
+    new_Jx  = jacfun(new_x)
+    nfev += 1
     njev += 1
 
-    # TODO: if JTfx is zero, this is messy.
+    # much savings to be had here...
+    numer = 1-(norm(new_fx)/norm(fx))**2
+    denom = (norm(Jx @ p)/norm(fx))**2 + 2*lamb*(norm(D @ p)/norm(fx))**2
+    rho = numer / denom
+    print('\trho = %f' % (rho))
 
-    while True:
+    if rho <= 0.25:
 
-      # Solve the pseudo-inverse system with the given lamb.
-      # step = npla.solve(JTJ + lamb*dJTJ, JTfx)
-      step, _, _, _ = npla.lstsq(JTJ + lamb*dJTJ, JTfx)
+      # So many recomputations...
+      gamma = -((norm(Jx @ p)/norm(fx))**2 + lamb * (norm(D @ p)/norm(fx))**2)
+      print('\tgamma = %f' % (gamma))
 
-      # Evaluate the quality of this location.
-      new_x   = x - step
-      new_fx  = fun(new_x)
-      new_err = np.sqrt(np.mean(new_fx**2))
-      nfev += 1
+      mu = 0.5 * gamma / (gamma + 0.5*(1-(norm(new_fx)/norm(fx))**2))
 
-      # Apply the L-M heuristic.
-      if new_err > err:
-        # Increase lamb and don't update.
-        lamb = lamb * lambfac
+      mu = np.clip(mu, 0.1, 0.5)
 
-      else:
-        # Decrease lamb and update.
-        lamb = lamb / lambfac
-        dx   = np.sqrt(np.mean((x - new_x)**2))
-        x    = new_x
-        fx   = new_fx
-        err  = new_err
-        break
+      print('\tmu = %f' % (mu))
 
-    # Matching scipy.optimize.least_squares.
-    # 0 : the maximum number of function evaluations is exceeded.
-    # 1 : gtol termination condition is satisfied.
-    # 2 : ftol termination condition is satisfied.
-    # 3 : xtol termination condition is satisfied.
-    # 4 : Both ftol and xtol termination conditions are satisfied
+    if rho > 0.0001:
+      x  = new_x
+      fx = new_fx
+      Jx = new_Jx
 
-    if err < ftol:
-      message = 'Error tolerance achived'
-      success = True
-      status  = 2
-      break
+    if rho <= 0.25:
+      delta = delta * mu
+    elif (rho <= 0.75 and lamb == 0) or (rho > 0.75):
+      delta = 2 * norm(D @ p)
 
-    elif dx < xtol:
-      message = 'Solution tolerance achieved'
-      success = True
-      status  = 3
-      break
+    D = np.diag(np.maximum(np.diag(D), np.sqrt(np.diag(Jx.T @ Jx))))
 
-    elif np.sqrt(np.mean(Jx**2)) < gtol:
-      message = 'Jacobian tolerance achieved'
-      success = True
-      status  = 1
-      break
+    if delta <= xtol * norm(D @ x):
+      print('xtol reached nfev=%d  njev=%d' % (nfev, njev))
+      return x
 
-    elif nit >= max_niters:
-      message = 'Maximum number of iterations reached'
-      success = False
-      status  = 0
-      break
 
-  result = OptimizeResult(
-    x       = x,
-    success = success,
-    status  = status,
-    message = message,
-    fun     = fx,
-    nfev    = nfev,
-    njev    = njev,
-    nit     = nit,
-  )
+#D = 25
+#y = np.arange(D)+1
+#fun = lambda x: x**3 - y
+#jacfun = jax.jacfwd(fun)
+#x = levenberg_marquardt(fun, np.ones(D), jacfun)
+#print(x)
+#print(res)
 
-  return result
+def p1(x):
+  theta = (1/(2*np.pi)) * np.arctan(x[1]/x[0])
+  if x[0] < 0:
+    theta = theta + 0.5
+  return np.array([
+    10*(x[2] - 10*theta),
+    10*(np.sqrt(x[0]**2 + x[1]**2) - 1),
+    x[2],
+  ])
+jac_p1 = jax.jacfwd(p1)
+x0 = np.array([-1., 0., 0.])
+x = levenberg_marquardt(p1, 10*x0, jac_p1)
+print(x, norm(p1(x)))
 
-D = 25
-y = np.arange(D)+1
-fun = lambda x: x**3 - y
-jacfun = jax.jacfwd(fun)
-
-res = levenberg_marquardt(fun, np.ones(D), jacfun)
-print(res)
+'''
+def p4(x):
+  ti = (np.arange(20)+1.0) * 0.2
+  fi = (x[0] + x[1]*ti - np.exp(ti))**2 + (x[2] + x[3]*np.sin(ti) - np.cos(ti))**2
+  return fi
+jac_p4 = jax.jacfwd(p4)
+x0 = np.array([25.0, 5.0, -5.0, 1.0])
+x = levenberg_marquardt(p4, x0, jac_p4)
+print(x, norm(p4(x)))
+'''
