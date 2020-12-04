@@ -56,12 +56,19 @@ def lm_param(delta, diagD, Ux, diagSx, Vx, Fx, sigma=0.1):
   return alpha, p
 
 LMState = namedtuple('LMState', [
-  'x', 'Fx', 'nFx', 'Jx', 'Ux', 'diagSx', 'VxT', 'diagD',
+  'x', 'args', 'Fx', 'nFx', 'Jx', 'Ux', 'diagSx', 'VxT', 'diagD',
   'delta', 'hit_xtol', 'hit_ftol', 'nit', 'nfev', 'njev'
 ])
 
 
-def get_lmfunc(fun, maxiters=100, xtol=1e-8, ftol=1e-8, factor=100.0, sigma=0.1):
+def get_lmfunc(
+    fun,
+    maxiters=100,
+    xtol=1e-8,
+    ftol=1e-8,
+    factor=100.0,
+    sigma=0.1,
+):
 
   # Compute and jit the Jacobian function.
   jacfun = jax.jit(jax.jacfwd(fun))
@@ -90,7 +97,7 @@ def get_lmfunc(fun, maxiters=100, xtol=1e-8, ftol=1e-8, factor=100.0, sigma=0.1)
 
     # Evaluate the function at this new location.
     new_x   = state.x + p
-    new_Fx  = fun(new_x)
+    new_Fx  = fun(new_x, state.args)
     new_nFx = npla.norm(new_Fx)
 
     # Track function evaluations.
@@ -132,7 +139,7 @@ def get_lmfunc(fun, maxiters=100, xtol=1e-8, ftol=1e-8, factor=100.0, sigma=0.1)
     # This becomes the new state if we improved.
     x, Fx, nFx, Jx, njev = jax.lax.cond(
         improved,
-        lambda _: (new_x, new_Fx, new_nFx, jacfun(new_x), state.njev+1),
+        lambda _: (new_x, new_Fx, new_nFx, jacfun(new_x, state.args), state.njev+1),
         lambda _: (state.x, state.Fx, state.nFx, state.Jx, state.njev),
         None,
     )
@@ -156,6 +163,7 @@ def get_lmfunc(fun, maxiters=100, xtol=1e-8, ftol=1e-8, factor=100.0, sigma=0.1)
     # Return the full state.
     return LMState(
       x        = x,
+      args     = state.args,
       Fx       = Fx,
       nFx      = nFx,
       Jx       = Jx,
@@ -172,16 +180,16 @@ def get_lmfunc(fun, maxiters=100, xtol=1e-8, ftol=1e-8, factor=100.0, sigma=0.1)
     )
 
   @jax.jit
-  def optfun(x0):
+  def optfun(x0, args):
     # Initialize counts.
     nit  = 0
     nfev = 1
     njev = 1
 
     # Initialize.
-    Fx    = fun(x0)
+    Fx    = fun(x0, args)
     nFx   = npla.norm(Fx)
-    Jx    = jacfun(x0)
+    Jx    = jacfun(x0, args)
     diagD = npla.norm(Jx, axis=0)
     delta = factor * npla.norm(diagD * x0)
     delta = jax.lax.cond(delta == 0, lambda _: factor, lambda _: delta, None)
@@ -191,6 +199,7 @@ def get_lmfunc(fun, maxiters=100, xtol=1e-8, ftol=1e-8, factor=100.0, sigma=0.1)
 
     init_state = LMState(
       x        = x0,
+      args     = args,
       Fx       = Fx,
       nFx      = nFx,
       Jx       = Jx,
@@ -212,38 +221,38 @@ def get_lmfunc(fun, maxiters=100, xtol=1e-8, ftol=1e-8, factor=100.0, sigma=0.1)
 
   return optfun
 
-#D = 25
-#y = np.arange(D)+1
-#fun = lambda x: x**3 - y
-#jacfun = jax.jacfwd(fun)
-#x = levenberg_marquardt(fun, np.ones(D), jacfun)
-#print(x)
-#print(res)
+import timeit
+import numpy.random as npr
 
 @jax.jit
-def p1(x):
+def p1(x, z):
   theta = (1/(2*np.pi)) * np.arctan(x[1]/x[0])
   theta = np.where(x[0] < 0, theta + 0.5, theta)
   return np.array([
     10*(x[2] - 10*theta),
     10*(np.sqrt(x[0]**2 + x[1]**2) - 1),
     x[2],
-  ])
+  ])*z
 jac_p1 = jax.jit(jax.jacfwd(p1))
 x0 = np.array([-1., 0., 0.])
 
 
+optfun = get_lmfunc(p1)
+res = optfun(x0,1.0)
+print(res.nFx, res.x)
+
+print(timeit.repeat(lambda :optfun(x0, npr.rand()), repeat=5, number=1))
+
+
 @jax.jit
-def p4(x):
-  ti = (np.arange(20)+1.0) * 0.2
+def p4(x, z):
+  ti = (np.arange(20)+1.0) * 0.2 * z
   fi = (x[0] + x[1]*ti - np.exp(ti))**2 + (x[2] + x[3]*np.sin(ti) - np.cos(ti))**2
   return fi
 jac_p4 = jax.jit(jax.jacfwd(p4))
 
-import timeit
-
 optfun = get_lmfunc(p4)
-print(optfun(x0).nFx)
+print(optfun(x0, 1.0).nFx)
 
 
-print(timeit.repeat(lambda :optfun(x0), repeat=5, number=1))
+print(timeit.repeat(lambda :optfun(x0, 1.0), repeat=5, number=1))
