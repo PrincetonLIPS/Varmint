@@ -3,172 +3,214 @@ import jax.numpy         as np
 import jax.numpy.linalg  as npla
 import matplotlib.pyplot as plt
 
+from collections    import namedtuple
 from scipy.optimize import OptimizeResult
+
+import jax.profiler
 
 # Moré, J.J., 1978. The Levenberg-Marquardt algorithm: implementation
 # and theory. In Numerical analysis (pp. 105-116). Springer, Berlin,
 # Heidelberg.
 
-def norm(v):
-  return np.sqrt(np.sum(v**2))
+def p_solve(lamb, diagD, Ux, diagSx, Vx, Fx):
+  mid_solve = np.diag(diagSx / (diagSx**2 + lamb))
+  p = -(Vx @ mid_solve @ Ux.T @ Fx) / diagD
+  return p
+def phi(alpha, diagD, Ux, diagSx, Vx, Fx, delta):
+  p = p_solve(alpha, diagD, Ux, diagSx, Vx, Fx)
+  return npla.norm(diagD * p) - delta, p
+phi_valgrad = jax.jit(jax.value_and_grad(phi, argnums=0, has_aux=True))
 
-def phi(alpha, D, J, f, delta):
-  ''' Eq. 5.2 '''
+@jax.jit
+def lm_param(delta, diagD, Ux, diagSx, Vx, Fx, sigma=0.1):
+  (phi_0, p), dphi_0 = phi_valgrad(0.0, diagD, Ux, diagSx, Vx, Fx, delta)
 
-  # Slow, but just seeing how to make this work.
-  return norm(D @ npla.solve(J.T @ J + alpha * D.T @ D, J.T @ f)) - delta
+  # Initial bounds as in More'.
+  upper = npla.norm((Fx.T @ Ux) * diagSx) / delta
+  lower = - phi_0 / dphi_0
+  alpha = np.array(0.0)
 
-def lm_param( D, J, f, delta, sigma=0.1 ):
-  ''' Determine the \lambda parameter in L-M as discussed by Moré. '''
+  init_val = (alpha, lower, upper, phi_0, p)
 
-  vg_phi = jax.value_and_grad(phi, argnums=0)
+  def cond_fun(val):
+    alpha, lower, upper, phi_k, p = val
+    return np.logical_and(np.logical_or(alpha != 0.0, phi_k > 0.0), np.abs(phi_k) > sigma*delta)
 
-  phi0, dphi0 = vg_phi(0., D, J, f, delta)
+  def body_fun(val):
+    alpha, lower, upper, phi_k, p = val
 
-  if phi0 <= 0:
-    return 0.0
+    alpha = np.where(np.logical_or(alpha <= lower, alpha >= upper),
+                     np.maximum( 0.001 * upper, np.sqrt(upper * lower) ),
+                     alpha)
 
-  # D is diagonal...
-  iD = npla.inv(D)
+    (phi_k, p), dphi_k = phi_valgrad(alpha, diagD, Ux, diagSx, Vx, Fx, delta)
 
-  upper = norm((J @ iD).T @ f) / delta
-  #print(upper)
+    upper = np.where(phi_k < 0.0, alpha, upper)
+    lower = np.maximum(lower, alpha - phi_k/dphi_k)
+    alpha = alpha - ( (phi_k + delta)/delta ) * ( phi_k/dphi_k )
 
-  # TODO: if J is low-rank, use lower=0
-  lower = - phi0 / dphi0
-  #print(lower)
+    return (alpha, lower, upper, phi_k, p)
 
-  # start with alpha = 0?
-  alpha = 0.0
+  alpha, _, _, _, p = jax.lax.while_loop(cond_fun, body_fun, init_val)
 
-  while True:
-    print('\t\talpha = %f' % (alpha))
-    print('\t\t[%f, %f]' % (lower, upper))
+  return alpha, p
 
-    if alpha <= lower or alpha >= upper:
-      alpha = np.maximum( 0.001 * upper, np.sqrt(upper * lower) )
-    #print(alpha)
+LMState = namedtuple('LMState', [
+  'x', 'Fx', 'nFx', 'Jx', 'Ux', 'diagSx', 'VxT', 'diagD',
+  'delta', 'hit_xtol', 'hit_ftol', 'nit', 'nfev', 'njev'
+])
 
-    phik, dphik = vg_phi(alpha, D, J, f, delta)
-    if phik < 0:
-      upper = alpha
 
-    print('\t\tphi(alpha) = %f (vs %f)' % (phik, sigma*delta))
+def get_lmfunc(fun, maxiters=100, xtol=1e-8, ftol=1e-8, factor=100.0, sigma=0.1):
 
-    if np.abs(phik) < sigma*delta:
-      #print('done! %f' % (phik))
-      print('\t\talpha = %f' % (alpha))
-      return alpha
+  # Compute and jit the Jacobian function.
+  jacfun = jax.jit(jax.jacfwd(fun))
 
-    lower = np.maximum(lower, alpha - phik/dphik)
-    print('\t\t[%f, %f]' % (lower, upper))
+  @jax.jit
+  def cond_fun(state):
+    return np.logical_not(np.logical_or(
+        np.logical_or(state.hit_xtol, state.hit_ftol),
+        state.nit >= maxiters,
+    ))
 
-    alpha = alpha - ( (phik + delta)/delta ) * ( phik/dphik )
-    #print(alpha)
+  @jax.jit
+  def body_fun(state):
 
-def levenberg_marquardt(
-    fun,
-    x0,
-    jacfun,
-    init_lamb = 0.001,
-    ftol = 1e-8,
-    xtol = 1e-8,
-    gtol = 1e-8,
-    lambfac = 10,
-    max_niters = 100,
-):
-  ''' Minimize the sum of squares of f(x) with respect to x. '''
+    # Compute lambda.
+    lamb, p = lm_param(
+      state.delta,
+      state.diagD,
+      state.Ux,
+      state.diagSx,
+      state.VxT.T,
+      state.Fx,
+      sigma,
+    )
+    sqrt_lamb = np.sqrt(lamb)
 
-  sigma = 0.1
+    # Evaluate the function at this new location.
+    new_x   = state.x + p
+    new_Fx  = fun(new_x)
+    new_nFx = npla.norm(new_Fx)
 
-  # Initialize lambda to its default.
-  lamb = init_lamb
+    # Track function evaluations.
+    # FIXME do this later.
+    # new_nfev = state.nfev + 1
 
-  # Statistics to track.
-  nfev = 1
-  njev = 1
-  nit  = 0
+    # Compute rho, the measure of prediction accuracy: More' Eqn. 4.4
+    nJp = npla.norm(state.Jx @ p)
+    nDp = npla.norm(state.diagD * p)
+    rho = (1-(new_nFx/state.nFx)**2) / \
+      ((nJp/state.nFx)**2 + 2*((sqrt_lamb*nDp)/state.nFx)**2)
 
-  x   = x0
-  dx  = np.inf
-  fx  = fun(x)
-  Jx  = jacfun(x)
+    # Have we achived ftol? Look at this with the new norms.
+    hit_ftol = (nJp/state.nFx)**2 + 2*(sqrt_lamb*(nDp/state.nFx))**2 <= ftol
 
-  # Choose initial matrix D.
-  D = np.diag(np.sqrt(np.diag(Jx.T @ Jx)))
+    # SLOW: we only need these if rho <= 0.25.
+    # Compute gamma via More' (above Eqn. 4.5), should be in [-1,0]
+    gamma = -((nJp/state.nFx)**2 + (sqrt_lamb*(nDp/state.nFx))**2)
+    # Compute mu via More' Eqn. 4.5.
+    mu = np.clip(0.5*gamma / (gamma + 0.5*(1 - (new_nFx/state.nFx)**2)), 0.1, 0.5)
 
-  # Choose initial step bound.
-  factor = 1.0
-  delta = factor * norm(D @ x)
+    delta = jax.lax.cond(
+        rho <= 0.25,
+        lambda _: mu * state.delta,
+        lambda _: jax.lax.cond(
+            np.logical_or(np.logical_and(rho <= 0.75, lamb == 0.0), rho > 0.75),
+            lambda _: 2 * nDp,
+            lambda _: state.delta,
+            None,
+        ),
+        None,
+    )
 
-  while True:
-    nit += 1
-    print('\nIteration %d %f nfev=%d  njev=%d' % (nit, norm(fx), nfev, njev))
-    print('\tdelta = %f' % (delta))
+    # Have we achieved xtol? Look at this after changing delta.
+    hit_xtol = delta <= xtol * npla.norm(state.diagD * new_x)
 
-    print('\t%f vs %f' % (norm(D @ npla.solve(Jx.T@Jx, Jx.T@fx)), (1+sigma)*delta))
+    improved = rho > 0.0001
 
-    lamb = lm_param(D, Jx, fx, delta)
-    print('\tlambda = %f' % (lamb))
+    # This becomes the new state if we improved.
+    x, Fx, nFx, Jx, njev = jax.lax.cond(
+        improved,
+        lambda _: (new_x, new_Fx, new_nFx, jacfun(new_x), state.njev+1),
+        lambda _: (state.x, state.Fx, state.nFx, state.Jx, state.njev),
+        None,
+    )
 
-    # Precompute Jacobian-related quantities.
-    # Move this around to not recompute.
-    #Jx   = jacfun(x)
-    JTJ  = Jx.T @ Jx
-    dJTJ = np.diag(np.diag(JTJ))
-    JTfx = Jx.T @ fx
+    # Update the scaling if we improved.
+    diagD = jax.lax.cond(
+        improved,
+        lambda _: np.maximum(state.diagD, npla.norm(Jx, axis=0)),
+        lambda _: state.diagD,
+        None,
+    )
 
-    # Solve the pseudo-inverse system with the given lamb.
-    p = -npla.lstsq(JTJ + lamb*(D.T@D), JTfx)[0]
+    # Recompute the SVD if we improved.
+    Ux, diagSx, VxT = jax.lax.cond(
+        improved,
+        lambda _: npla.svd(Jx/diagD, full_matrices=False),
+        lambda _: (state.Ux, state.diagSx, state.VxT),
+        None,
+    )
 
-    print('\t%f <= %f <= %f' % ((1-sigma)*delta, norm(D @ p), (1+sigma)*delta))
+    # Return the full state.
+    return LMState(
+      x        = x,
+      Fx       = Fx,
+      nFx      = nFx,
+      Jx       = Jx,
+      Ux       = Ux,
+      diagSx   = diagSx,
+      VxT      = VxT,
+      diagD    = diagD,
+      delta    = delta,
+      hit_xtol = hit_xtol,
+      hit_ftol = hit_ftol,
+      nit      = state.nit + 1,
+      nfev     = state.nfev + 1,
+      njev     = njev,
+    )
 
-    # Check ftol
-    if (norm(Jx @ p)/norm(fx))**2 + 2 * lamb * (norm(D @ p)/norm(fx))**2 <= ftol:
-      print('ftol reached nfev=%d  njev=%d' % (nfev, njev))
-      return x
+  @jax.jit
+  def optfun(x0):
+    # Initialize counts.
+    nit  = 0
+    nfev = 1
+    njev = 1
 
-    # Evaluate the quality of this location.
-    new_x   = x + p
-    new_fx  = fun(new_x)
-    new_Jx  = jacfun(new_x)
-    nfev += 1
-    njev += 1
+    # Initialize.
+    Fx    = fun(x0)
+    nFx   = npla.norm(Fx)
+    Jx    = jacfun(x0)
+    diagD = npla.norm(Jx, axis=0)
+    delta = factor * npla.norm(diagD * x0)
+    delta = jax.lax.cond(delta == 0, lambda _: factor, lambda _: delta, None)
+    Ux, diagSx, VxT = npla.svd(Jx/diagD, full_matrices=False)
+    hit_xtol  = False
+    hit_ftol  = False
 
-    # much savings to be had here...
-    numer = 1-(norm(new_fx)/norm(fx))**2
-    denom = (norm(Jx @ p)/norm(fx))**2 + 2*lamb*(norm(D @ p)/norm(fx))**2
-    rho = numer / denom
-    print('\trho = %f' % (rho))
+    init_state = LMState(
+      x        = x0,
+      Fx       = Fx,
+      nFx      = nFx,
+      Jx       = Jx,
+      Ux       = Ux,
+      diagSx   = diagSx,
+      VxT      = VxT,
+      diagD    = diagD,
+      delta    = delta,
+      hit_xtol = hit_xtol,
+      hit_ftol = hit_ftol,
+      nit      = nit,
+      nfev     = nfev,
+      njev     = njev,
+    )
 
-    if rho <= 0.25:
+    return jax.lax.while_loop(
+        cond_fun, body_fun, init_state,
+    )
 
-      # So many recomputations...
-      gamma = -((norm(Jx @ p)/norm(fx))**2 + lamb * (norm(D @ p)/norm(fx))**2)
-      print('\tgamma = %f' % (gamma))
-
-      mu = 0.5 * gamma / (gamma + 0.5*(1-(norm(new_fx)/norm(fx))**2))
-
-      mu = np.clip(mu, 0.1, 0.5)
-
-      print('\tmu = %f' % (mu))
-
-    if rho > 0.0001:
-      x  = new_x
-      fx = new_fx
-      Jx = new_Jx
-
-    if rho <= 0.25:
-      delta = delta * mu
-    elif (rho <= 0.75 and lamb == 0) or (rho > 0.75):
-      delta = 2 * norm(D @ p)
-
-    D = np.diag(np.maximum(np.diag(D), np.sqrt(np.diag(Jx.T @ Jx))))
-
-    if delta <= xtol * norm(D @ x):
-      print('xtol reached nfev=%d  njev=%d' % (nfev, njev))
-      return x
-
+  return optfun
 
 #D = 25
 #y = np.arange(D)+1
@@ -178,27 +220,30 @@ def levenberg_marquardt(
 #print(x)
 #print(res)
 
+@jax.jit
 def p1(x):
   theta = (1/(2*np.pi)) * np.arctan(x[1]/x[0])
-  if x[0] < 0:
-    theta = theta + 0.5
+  theta = np.where(x[0] < 0, theta + 0.5, theta)
   return np.array([
     10*(x[2] - 10*theta),
     10*(np.sqrt(x[0]**2 + x[1]**2) - 1),
     x[2],
   ])
-jac_p1 = jax.jacfwd(p1)
+jac_p1 = jax.jit(jax.jacfwd(p1))
 x0 = np.array([-1., 0., 0.])
-x = levenberg_marquardt(p1, 10*x0, jac_p1)
-print(x, norm(p1(x)))
 
-'''
+
+@jax.jit
 def p4(x):
   ti = (np.arange(20)+1.0) * 0.2
   fi = (x[0] + x[1]*ti - np.exp(ti))**2 + (x[2] + x[3]*np.sin(ti) - np.cos(ti))**2
   return fi
-jac_p4 = jax.jacfwd(p4)
-x0 = np.array([25.0, 5.0, -5.0, 1.0])
-x = levenberg_marquardt(p4, x0, jac_p4)
-print(x, norm(p4(x)))
-'''
+jac_p4 = jax.jit(jax.jacfwd(p4))
+
+import timeit
+
+optfun = get_lmfunc(p4)
+print(optfun(x0).nFx)
+
+
+print(timeit.repeat(lambda :optfun(x0), repeat=5, number=1))
