@@ -34,7 +34,8 @@ def lm_param(delta, diagD, Ux, diagSx, Vx, Fx, sigma=0.1):
 
   def cond_fun(val):
     alpha, lower, upper, phi_k, p = val
-    return np.logical_and(np.logical_or(alpha != 0.0, phi_k > 0.0), np.abs(phi_k) > sigma*delta)
+    return np.logical_and(np.logical_or(alpha != 0.0, phi_k > 0.0),
+                          np.abs(phi_k) > sigma*delta)
 
   def body_fun(val):
     alpha, lower, upper, phi_k, p = val
@@ -69,6 +70,61 @@ def get_lmfunc(
     factor=100.0,
     sigma=0.1,
 ):
+  ''' Generate a Levenberg-Marquardt optimizer for a problem.
+
+  This is a function that takes in a function and returns a nonlinear least
+  squares optimizer for it. The idea is that you're solving multiple problems
+  from a single parametric family and so this gives you a nice JIT-ed function
+  for solving them.
+
+  Parameters:
+  ----------
+   - fun: The function whose residuals you wish to optimize.  Must be able to
+          be JIT-ed.  Takes two arguments.  The first one is the vector of
+          inputs we're finding the optimal values for.  The second one is some
+          arbitrary vector that specifies variable behavior.  This should be
+          a fixed size and make JAX happy in all the right ways.
+
+   - maxiters: The maximum number of L-M iterations per optimization.
+               Default is 100.
+
+   - xtol: The tolerance in changes to the input. Default is 1e-8.
+
+   - ftol: The tolerance in changes to the residuals. Default is 1e-8.
+
+   - factor: Magic number to set the initial scale.  Default is 100.
+             Probably don't change this.
+
+   - sigma: Magic number to determine the allowable error in the trust region.
+            Default is 0.1.  Probably don't change this.
+
+  Returns:
+  -------
+   This function returns a function that is called with an initial value for
+   the optimization problem, and additional arguments to the residual function.
+   The function solve the problem (or not) to the specified termination
+   conditions and returns an LMSState namedtuple, in which the following
+   fields are interesting:
+
+    - x:        The returned solution
+
+    - Fx:       The final residuals
+
+    - nFx:      The norm of the final residuals.
+
+    - Jx:       The final Jacobian matrix.
+
+    - hit_xtol: Whether the xtol criterion was achieved.
+
+    - hit_ftol: Whether the ftol criterion was achieved.
+
+    - nit:      The number of iterations.
+
+    - nfev:     The number of function evaluations.
+
+    - njev:     The number of Jacobian evaluations.
+
+  '''
 
   # Compute and jit the Jacobian function.
   jacfun = jax.jit(jax.jacfwd(fun))
