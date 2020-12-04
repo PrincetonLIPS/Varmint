@@ -113,15 +113,17 @@ def get_lmfunc(
     # Have we achived ftol? Look at this with the new norms.
     hit_ftol = (nJp/state.nFx)**2 + 2*(sqrt_lamb*(nDp/state.nFx))**2 <= ftol
 
-    # SLOW: we only need these if rho <= 0.25.
     # Compute gamma via More' (above Eqn. 4.5), should be in [-1,0]
-    gamma = -((nJp/state.nFx)**2 + (sqrt_lamb*(nDp/state.nFx))**2)
+    gamma_fn = lambda: -((nJp/state.nFx)**2 + (sqrt_lamb*(nDp/state.nFx))**2)
+
     # Compute mu via More' Eqn. 4.5.
-    mu = np.clip(0.5*gamma / (gamma + 0.5*(1 - (new_nFx/state.nFx)**2)), 0.1, 0.5)
+    mu_fn = lambda gamma: np.clip(0.5*gamma / \
+                                  (gamma + 0.5*(1 - (new_nFx/state.nFx)**2)),
+                                  0.1, 0.5)
 
     delta = jax.lax.cond(
         rho <= 0.25,
-        lambda _: mu * state.delta,
+        lambda _: state.delta * mu_fn(gamma_fn()),
         lambda _: jax.lax.cond(
             np.logical_or(np.logical_and(rho <= 0.75, lamb == 0.0), rho > 0.75),
             lambda _: 2 * nDp,
@@ -139,7 +141,8 @@ def get_lmfunc(
     # This becomes the new state if we improved.
     x, Fx, nFx, Jx, njev = jax.lax.cond(
         improved,
-        lambda _: (new_x, new_Fx, new_nFx, jacfun(new_x, state.args), state.njev+1),
+        lambda _: (new_x, new_Fx, new_nFx, jacfun(new_x, state.args),
+                   state.njev+1),
         lambda _: (state.x, state.Fx, state.nFx, state.Jx, state.njev),
         None,
     )
