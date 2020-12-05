@@ -4,7 +4,6 @@ import jax.numpy.linalg  as npla
 import matplotlib.pyplot as plt
 
 from collections    import namedtuple
-from scipy.optimize import OptimizeResult
 
 import jax.profiler
 
@@ -131,6 +130,7 @@ def get_lmfunc(
 
   @jax.jit
   def cond_fun(state):
+    # TODO: catch various bad situations like nans.
     return np.logical_not(np.logical_or(
         np.logical_or(state.hit_xtol, state.hit_ftol),
         state.nit >= maxiters,
@@ -274,44 +274,10 @@ def get_lmfunc(
       njev     = njev,
     )
 
+    # Report a more sophisticated success.
+
     return jax.lax.while_loop(
         cond_fun, body_fun, init_state,
     )
 
   return optfun
-
-import timeit
-import numpy.random as npr
-
-@jax.jit
-def p1(x, z):
-  theta = (1/(2*np.pi)) * np.arctan(x[1]/x[0])
-  theta = np.where(x[0] < 0, theta + 0.5, theta)
-  return np.array([
-    10*(x[2] - 10*theta),
-    10*(np.sqrt(x[0]**2 + x[1]**2) - 1),
-    x[2],
-  ])*z
-jac_p1 = jax.jit(jax.jacfwd(p1))
-x0 = np.array([-1., 0., 0.])
-
-
-optfun = get_lmfunc(p1)
-res = optfun(x0,1.0)
-print(res.nFx, res.x)
-
-print(timeit.repeat(lambda :optfun(x0, npr.rand()), repeat=5, number=1))
-
-
-@jax.jit
-def p4(x, z):
-  ti = (np.arange(20)+1.0) * 0.2 * z
-  fi = (x[0] + x[1]*ti - np.exp(ti))**2 + (x[2] + x[3]*np.sin(ti) - np.cos(ti))**2
-  return fi
-jac_p4 = jax.jit(jax.jacfwd(p4))
-
-optfun = get_lmfunc(p4)
-print(optfun(x0, 1.0).nFx)
-
-
-print(timeit.repeat(lambda :optfun(x0, 1.0), repeat=5, number=1))

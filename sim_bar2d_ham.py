@@ -12,7 +12,7 @@ from varmint.constitutive import NeoHookean2D
 from varmint.bsplines     import mesh, default_knots
 from varmint.lagrangian   import generate_lagrangian
 from varmint.discretize   import discretize_hamiltonian
-from varmint.levmar       import levenberg_marquardt
+from varmint.levmar       import get_lmfunc
 
 class WigglyMat(Material):
   _E = 0.001
@@ -24,7 +24,7 @@ mat = NeoHookean2D(WigglyMat)
 # Length units are centimeters.
 length    = 50
 height    = 2
-num_xctrl = 10
+num_xctrl = 25
 num_yctrl = 5
 ctrl      = mesh(np.linspace(0, length, num_xctrl),
                  np.linspace(0, height, num_yctrl))
@@ -76,6 +76,12 @@ hessian  = jax.jit(jax.jacfwd(
   argnums=2,
 ))
 
+@jax.jit
+def residual_fun(q1, args):
+  q0, p0, dt = args
+  return p0 + Ld_dq1(q0, q1, dt)
+optfun = get_lmfunc(residual_fun, maxiters=200)
+
 dt = 0.01
 t  = dt
 T  = 1.0
@@ -100,12 +106,7 @@ while TT[-1] < T:
         method='lm',
       )
     else:
-      res = levenberg_marquardt(
-        lambda q_1: PP[-1] + Ld_dq1(QQ[-1], q_1, dt), # should be zero
-        QQ[-1], # initialize at current location
-        lambda q_1: Ld_dq1_jac(QQ[-1], q_1, dt), # Jacobian
-        init_lamb=0.1,
-      )
+      res = optfun(QQ[-1], (QQ[-1], PP[-1], dt))
   elif False:
     res = spopt.minimize(
       lambda q1: minfunc(PP[-1], QQ[-1], q1, dt),
@@ -115,20 +116,17 @@ while TT[-1] < T:
       # hessp=lambda q1, v: hessvec(PP[-1], QQ[-1], q1, dt, v),
       method='Newton-CG',
     )
-
-  print(Ld_dq1(QQ[-1], res.x, dt) + PP[-1])
-  print(minfunc(PP[-1], QQ[-1], res.x, dt))
-
-  t1 = time.time()
-  print('\t%s' % (res.success))
-  print('\t%d' % (res.nfev))
-  print('\t%s' % (res.message))
-  print('\t%0.3f sec' % (t1-t0))
   QQ.append(res.x)
 
   # Get the new momentum.
-  PP.append( Ld_dq2(QQ[-2], QQ[-1], dt) )
+  PP.append( Ld_dq2(QQ[-2], QQ[-1], dt).block_until_ready() )
   TT.append(TT[-1]+dt)
+
+  t1 = time.time()
+  print('\t%d' % (res.nfev))
+  print('\t%d' % (res.njev))
+  print('\t%0.3f sec' % (t1-t0))
+
 
 ctrl_seq = list(map(lambda qv: shape.unflatten(qv[0], qv[1])[0], zip(QQ,PP)))
 
