@@ -6,7 +6,7 @@ import unittest      as ut
 
 from geomdl import BSpline
 
-import bsplines
+import varmint.bsplines as bsplines
 
 class TestBSplines(ut.TestCase):
 
@@ -459,7 +459,7 @@ class TestBSplines(ut.TestCase):
     xknots = np.array([0.0, 0.0, 0.5, 1.0, 1.0])             # 3 control pts
     yknots = np.array([0.0, 0.0, 0.25, 0.5, 0.75, 1.0, 1.0]) # 5 control pts
 
-    nptest.assert_array_equal(
+    nptest.assert_array_almost_equal(
       bsplines.bspline2d_basis(
         np.array([0.0, 0.0]),
         xknots,
@@ -469,7 +469,7 @@ class TestBSplines(ut.TestCase):
       jax.ops.index_add(np.zeros((1,3,5)), (0,0,0), 1.0),
     )
 
-    nptest.assert_array_equal(
+    nptest.assert_array_almost_equal(
       bsplines.bspline2d_basis(
         np.array([1.0, 1.0]),
         xknots,
@@ -481,7 +481,7 @@ class TestBSplines(ut.TestCase):
                  [0., 0., 0., 0., 1.]]])
     )
 
-    nptest.assert_array_equal(
+    nptest.assert_array_almost_equal(
       bsplines.bspline2d_basis(
         np.array([0.25, 0]),
         xknots,
@@ -493,7 +493,7 @@ class TestBSplines(ut.TestCase):
                  [0., 0., 0., 0., 0.]]])
     )
 
-    nptest.assert_array_equal(
+    nptest.assert_array_almost_equal(
       bsplines.bspline2d_basis(
         np.array([0.25, 0.125]),
         xknots,
@@ -505,7 +505,7 @@ class TestBSplines(ut.TestCase):
                  [0., 0., 0., 0., 0.]]])
     )
 
-    nptest.assert_array_equal(
+    nptest.assert_array_almost_equal(
       bsplines.bspline2d_basis(
         np.array([0.75, 0.375]),
         xknots,
@@ -599,7 +599,7 @@ class TestBSplines(ut.TestCase):
     ycontrol = np.arange(4)+11 # 11, 12, 13, 14
     control  = bsplines.mesh(xcontrol, ycontrol)
 
-    nptest.assert_array_equal(
+    nptest.assert_array_almost_equal(
       bsplines.bspline2d(
         np.array([0.0, 0.0]),
         control,
@@ -610,7 +610,7 @@ class TestBSplines(ut.TestCase):
       np.array([[5.0, 11.0]])
     )
 
-    nptest.assert_array_equal(
+    nptest.assert_array_almost_equal(
       bsplines.bspline2d(
         np.array([0.4, 0.0]),
         control,
@@ -621,7 +621,7 @@ class TestBSplines(ut.TestCase):
       np.array([[5.0, 11.0]])
     )
 
-    nptest.assert_array_equal(
+    nptest.assert_array_almost_equal(
       bsplines.bspline2d(
         np.array([0.4, 0.85]),
         control,
@@ -641,7 +641,7 @@ class TestBSplines(ut.TestCase):
     ycontrol = np.arange(5)+11 # 11, 12, 13, 14, 15
     control  = bsplines.mesh(xcontrol, ycontrol)
 
-    nptest.assert_array_equal(
+    nptest.assert_array_almost_equal(
       bsplines.bspline2d(
         np.array([0.0, 0.0]),
         control,
@@ -652,7 +652,7 @@ class TestBSplines(ut.TestCase):
       np.array([[5.0, 11.0]])
     )
 
-    nptest.assert_array_equal(
+    nptest.assert_array_almost_equal(
       bsplines.bspline2d(
         np.array([0.25, 0.0]),
         control,
@@ -663,7 +663,7 @@ class TestBSplines(ut.TestCase):
       np.array([[5.5, 11.0]])
     )
 
-    nptest.assert_array_equal(
+    nptest.assert_array_almost_equal(
       bsplines.bspline2d(
         np.array([0.0, 0.125]),
         control,
@@ -674,7 +674,7 @@ class TestBSplines(ut.TestCase):
       np.array([[5.0, 11.5]])
     )
 
-    nptest.assert_array_equal(
+    nptest.assert_array_almost_equal(
       bsplines.bspline2d(
         np.array([0.75, 0.875]),
         control,
@@ -697,7 +697,7 @@ class TestBSplines(ut.TestCase):
     zcontrol = np.arange(10)+1 # 1, 2, 3, ... , 10
     control  = bsplines.mesh(xcontrol, ycontrol, zcontrol)
 
-    nptest.assert_array_equal(
+    nptest.assert_array_almost_equal(
       bsplines.bspline3d(
         np.array([0.0, 0.0, 0.0]),
         control,
@@ -709,7 +709,7 @@ class TestBSplines(ut.TestCase):
       np.array([[5.0, 11.0, 1.0]])
     )
 
-    nptest.assert_array_equal(
+    nptest.assert_array_almost_equal(
       bsplines.bspline3d(
         np.array([0.4, 0.0, 0.15]),
         control,
@@ -721,7 +721,7 @@ class TestBSplines(ut.TestCase):
       np.array([[5.0, 11.0, 2.0]])
     )
 
-    nptest.assert_array_equal(
+    nptest.assert_array_almost_equal(
       bsplines.bspline3d(
         np.array([0.4, 0.85, 0.25]),
         control,
@@ -745,7 +745,7 @@ class TestBSplines(ut.TestCase):
     zcontrol = np.arange(4)+1 # 1, 2, 3, 4
     control  = bsplines.mesh(xcontrol, ycontrol, zcontrol)
 
-    nptest.assert_array_equal(
+    nptest.assert_array_almost_equal(
       bsplines.bspline3d(
         np.array([0.0, 0.0, 0.0]),
         control,
@@ -757,7 +757,7 @@ class TestBSplines(ut.TestCase):
       np.array([[5.0, 11.0, 1.0]])
     )
 
-    nptest.assert_array_equal(
+    nptest.assert_array_almost_equal(
       bsplines.bspline3d(
         np.array([0.25, 0.0, 0.0]),
         control,
@@ -769,7 +769,7 @@ class TestBSplines(ut.TestCase):
       np.array([[5.5, 11.0, 1.0]])
     )
 
-    nptest.assert_array_equal(
+    nptest.assert_array_almost_equal(
       bsplines.bspline3d(
         np.array([0.0, 0.125, 0.0]),
         control,
@@ -781,7 +781,7 @@ class TestBSplines(ut.TestCase):
       np.array([[5.0, 11.5, 1.0]])
     )
 
-    nptest.assert_array_equal(
+    nptest.assert_array_almost_equal(
       bsplines.bspline3d(
         np.array([0.0, 0.0, 1./6]),
         control,
@@ -793,7 +793,7 @@ class TestBSplines(ut.TestCase):
       np.array([[5.0, 11.0, 1.5]])
     )
 
-    nptest.assert_array_equal(
+    nptest.assert_array_almost_equal(
       bsplines.bspline3d(
         np.array([0.25, 0.125, 1./6]),
         control,
@@ -805,7 +805,7 @@ class TestBSplines(ut.TestCase):
       np.array([[5.5, 11.5, 1.5]])
     )
 
-    nptest.assert_array_equal(
+    nptest.assert_array_almost_equal(
       bsplines.bspline3d(
         np.array([0.75, 0.875, 5./6]),
         control,
@@ -831,7 +831,7 @@ class TestBSplines(ut.TestCase):
     res1 = bsplines.bspline1d_basis_derivs_hand(u, knots, degree)
     res2 = bsplines.bspline1d_basis_derivs_jax(u, knots, degree)
 
-    nptest.assert_array_almost_equal(res1, res2, decimal=5)
+    nptest.assert_array_almost_equal(res1, res2, decimal=4)
 
   def test_bspline1d_basis_derivs_2(self):
     # Compare to the JAX version.
@@ -849,7 +849,7 @@ class TestBSplines(ut.TestCase):
     res1 = bsplines.bspline1d_basis_derivs_hand(u, knots, degree)
     res2 = bsplines.bspline1d_basis_derivs_jax(u, knots, degree)
 
-    nptest.assert_array_almost_equal(res1, res2, decimal=5)
+    nptest.assert_array_almost_equal(res1, res2, decimal=4)
 
   def test_bspline1d_derivs_1(self):
     # Compare to the JAX version.
@@ -865,7 +865,7 @@ class TestBSplines(ut.TestCase):
     res1 = bsplines.bspline1d_derivs_hand(u, control, knots, degree)
     res2 = bsplines.bspline1d_derivs_jax(u, control, knots, degree)
 
-    nptest.assert_array_almost_equal(res1, res2, decimal=5)
+    nptest.assert_array_almost_equal(res1, res2, decimal=4)
 
   def test_bspline1d_derivs_2(self):
     # Compare to the JAX version.
@@ -883,7 +883,7 @@ class TestBSplines(ut.TestCase):
     res1 = bsplines.bspline1d_derivs_hand(u, control, knots, degree)
     res2 = bsplines.bspline1d_derivs_jax(u, control, knots, degree)
 
-    nptest.assert_array_almost_equal(res1, res2, decimal=5)
+    nptest.assert_array_almost_equal(res1, res2, decimal=4)
 
   def test_bspline1d_derivs_ctrl(self):
     # Compare to the JAX version.
@@ -901,7 +901,7 @@ class TestBSplines(ut.TestCase):
     res1 = bsplines.bspline1d_derivs_ctrl_hand(u, control, knots, degree)
     res2 = bsplines.bspline1d_derivs_ctrl_jax(u, control, knots, degree)
 
-    nptest.assert_array_almost_equal(res1, res2, decimal=5)
+    nptest.assert_array_almost_equal(res1, res2, decimal=4)
 
   def test_bspline2d_basis_derivs_1(self):
     # Compare to the JAX version.
@@ -930,7 +930,7 @@ class TestBSplines(ut.TestCase):
     res1 = bsplines.bspline2d_basis_derivs_hand(u, xknots, yknots, degree)
     res2 = bsplines.bspline2d_basis_derivs_jax(u, xknots, yknots, degree)
 
-    nptest.assert_array_almost_equal(res1, res2, decimal=5)
+    nptest.assert_array_almost_equal(res1, res2, decimal=4)
 
   def test_bspline2d_basis_derivs_2(self):
     # Compare to the JAX version.
@@ -953,7 +953,7 @@ class TestBSplines(ut.TestCase):
     res1 = bsplines.bspline2d_basis_derivs_hand(u, xknots, yknots, degree)
     res2 = bsplines.bspline2d_basis_derivs_jax(u, xknots, yknots, degree)
 
-    nptest.assert_array_almost_equal(res1, res2, decimal=5)
+    nptest.assert_array_almost_equal(res1, res2, decimal=4)
 
   def test_bspline2d_derivs_1(self):
     # Make sure we get sizes we expect.
@@ -980,7 +980,7 @@ class TestBSplines(ut.TestCase):
     res1 = bsplines.bspline2d_derivs_hand(u, control, xknots, yknots, degree)
     res2 = bsplines.bspline2d_derivs_jax(u, control, xknots, yknots, degree)
 
-    nptest.assert_array_almost_equal(res1, res2, decimal=5)
+    nptest.assert_array_almost_equal(res1, res2, decimal=4)
 
   def test_bspline2d_derivs_2(self):
     # Make sure we get sizes we expect.
@@ -1003,7 +1003,7 @@ class TestBSplines(ut.TestCase):
     res1 = bsplines.bspline2d_derivs_hand(u, control, xknots, yknots, degree)
     res2 = bsplines.bspline2d_derivs_jax(u, control, xknots, yknots, degree)
 
-    nptest.assert_array_almost_equal(res1, res2, decimal=5)
+    nptest.assert_array_almost_equal(res1, res2, decimal=4)
 
   def test_bspline2d_derivs_ctrl(self):
     # Make sure we get sizes we expect.
@@ -1028,4 +1028,4 @@ class TestBSplines(ut.TestCase):
     res2 = bsplines.bspline2d_derivs_ctrl_jax(
       u, control, xknots, yknots, degree)
 
-    nptest.assert_array_almost_equal(res1, res2, decimal=5)
+    nptest.assert_array_almost_equal(res1, res2, decimal=4)
