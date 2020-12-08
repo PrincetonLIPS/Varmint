@@ -14,6 +14,8 @@ from varmint.lagrangian   import generate_lagrangian
 from varmint.discretize   import discretize_hamiltonian
 from varmint.levmar       import get_lmfunc
 
+import jax.profiler
+
 class WigglyMat(Material):
   _E = 0.001
   _nu = 0.48
@@ -24,13 +26,13 @@ mat = NeoHookean2D(WigglyMat)
 # Length units are centimeters.
 length    = 50
 height    = 2
-num_xctrl = 25
+num_xctrl = 5
 num_yctrl = 5
 ctrl      = mesh(np.linspace(0, length, num_xctrl),
                  np.linspace(0, height, num_yctrl))
 
 # Make the patch.
-spline_deg = 3
+spline_deg = 4
 quad_deg   = 10
 xknots     = default_knots(spline_deg, num_xctrl)
 yknots     = default_knots(spline_deg, num_yctrl)
@@ -58,10 +60,12 @@ shape = Shape2D(patch)
 ref_ctrl = [ctrl]
 def_ctrl = [ctrl.copy()]
 def_vels = [np.zeros_like(ctrl)]
-q, qdot  = shape.flatten(def_ctrl, def_vels)
+q, qdot  = shape.get_flatten_fn()(def_ctrl, def_vels)
+
 
 # Get the Lagrangian and then convert to discrete Euler-Lagrange.
 lagrangian = generate_lagrangian(shape, ref_ctrl)
+
 Ld_dq1, Ld_dq2 = discretize_hamiltonian(lagrangian)
 Ld_dq1_jac = jax.jit(jax.jacfwd(Ld_dq1, argnums=1))
 
@@ -90,6 +94,8 @@ T  = 1.0
 QQ = [ q.copy() ]
 PP = [ np.zeros_like(q) ]
 TT = [ 0.0 ]
+
+server = jax.profiler.start_server(9999)
 
 while TT[-1] < T:
   print('\nt: %0.4f' % (TT[-1]))
@@ -127,7 +133,8 @@ while TT[-1] < T:
   print('\t%d' % (res.njev))
   print('\t%0.3f sec' % (t1-t0))
 
+unflatten = shape.get_unflatten_fn()
 
-ctrl_seq = list(map(lambda qv: shape.unflatten(qv[0], qv[1])[0], zip(QQ,PP)))
+ctrl_seq = list(map(lambda qv: unflatten(qv[0], qv[1])[0], zip(QQ,PP)))
 
 shape.create_movie(ctrl_seq, 'bar2d_ham.mp4', labels=True)

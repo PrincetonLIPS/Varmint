@@ -28,6 +28,8 @@ def generate_lagrangian(shape, ref_ctrl):
     P[patch]['ref_jac_dets'] = vmap_det(P[patch]['ref_jacs'])
     P[patch]['ref_jac_invs'] = vmap_inv(P[patch]['ref_jacs'])
 
+  unflatten = shape.get_unflatten_fn()
+
   def lagrangian(q, qdot):
     ''' Compute the Lagrangian in generalized coordinates.
 
@@ -48,7 +50,7 @@ def generate_lagrangian(shape, ref_ctrl):
 
     # Use the shape object to unflatten both the coordinates and the velocities.
     # This gives a list of control points and a list of velocities.
-    def_ctrl, def_vels = shape.unflatten(q, qdot)
+    def_ctrl, def_vels = unflatten(q, qdot)
 
     gravity = 981.0 # cm/s^2
 

@@ -50,7 +50,7 @@ def mesh(*control):
   '''
   return np.stack(np.meshgrid(*control, indexing='ij'), axis=-1)
 
-@jax.jit
+#@jax.jit
 def divide00(num, denom):
   ''' Divide such that 0/0 = 0.
 
@@ -66,7 +66,7 @@ def default_knots(degree, num_ctrl):
                     np.linspace(0, 1, num_ctrl - degree + 1),
                     np.ones(degree)])
 
-@partial(jax.jit, static_argnums=(2,))
+#@partial(jax.jit, static_argnums=(2,))
 def bspline1d_basis(u, knots, degree):
   ''' Computes b-spline basis functions in one dimension.
 
@@ -91,12 +91,6 @@ def bspline1d_basis(u, knots, degree):
   '''
   u1d = np.atleast_1d(u)
 
-  # Determine the target size of the returned object.
-  num_basis_funcs = knots.shape[0]-degree-1
-  if num_basis_funcs < 2:
-    raise SplineError('Degree inconsistent with number of knots.')
-  ret_shape = u1d.shape + (num_basis_funcs,)
-
   # Set things up for broadcasting.
   # Append a singleton dimension onto the u points.
   # Prepend the correct number of singleton dimensions onto knots.
@@ -112,6 +106,7 @@ def bspline1d_basis(u, knots, degree):
   # half-open interval specified by the knots.
   B = (k2d[...,:-1] <= u2d) * (u2d < k2d[...,1:]) + 0.0
 
+  # We expect degree to be small, so unrolling is tolerable.
   for deg in range(1,degree+1):
 
     # There are two halves.  The indexing is a little tricky.
@@ -121,6 +116,7 @@ def bspline1d_basis(u, knots, degree):
     # so much of this is just multiplying zero by things.
     # However, I think the vectorized implementation is worth
     # it for using things like JAX and GPUs.
+    # FIXME: Pretty sure I could do the denominator with one subtract.
     v0_num   = B[...,:-1] * (u2d - k2d[...,:-deg-1])
     v0_denom = k2d[...,deg:-1] - k2d[...,:-deg-1]
     v0       = divide00(v0_num, v0_denom)
@@ -133,7 +129,7 @@ def bspline1d_basis(u, knots, degree):
 
   return B
 
-@partial(jax.jit, static_argnums=(3,))
+#@partial(jax.jit, static_argnums=(3,))
 def bspline2d_basis(u, xknots, yknots, degree):
   ''' Compute b-spline basis functions in two dimensions as tensor products.
 
@@ -170,7 +166,7 @@ def bspline2d_basis(u, xknots, yknots, degree):
 
   return basis_xy
 
-@partial(jax.jit, static_argnums=(4,))
+#@partial(jax.jit, static_argnums=(4,))
 def bspline3d_basis(u, xknots, yknots, zknots, degree):
   ''' Compute b-spline basis functions in three dimensions as tensor products.
 
@@ -213,7 +209,7 @@ def bspline3d_basis(u, xknots, yknots, zknots, degree):
 
   return basis_xyz
 
-@partial(jax.jit, static_argnums=(3,))
+#@partial(jax.jit, static_argnums=(3,))
 def bspline1d(u, control, knots, degree):
   ''' Evaluate a one-dimensional bspline function.
 
@@ -238,7 +234,7 @@ def bspline1d(u, control, knots, degree):
 
   return bspline1d_basis(u, knots, degree) @ control
 
-@partial(jax.jit, static_argnums=(4,))
+#@partial(jax.jit, static_argnums=(4,))
 def bspline2d(u, control, xknots, yknots, degree):
   ''' Evaluate a two-dimensional bspline function. '''
 
@@ -246,7 +242,7 @@ def bspline2d(u, control, xknots, yknots, degree):
 
   return np.tensordot(basis_xy, control, ((1,2), (0,1)))
 
-@partial(jax.jit, static_argnums=(5,))
+#@partial(jax.jit, static_argnums=(5,))
 def bspline3d(u, control, xknots, yknots, zknots, degree):
   ''' Evaluate a three-dimensional bspline function. '''
 
@@ -254,7 +250,7 @@ def bspline3d(u, control, xknots, yknots, zknots, degree):
 
   return np.tensordot(basis_xyz, control, ((1,2,3), (0,1,2)))
 
-@partial(jax.jit, static_argnums=(2,))
+#@partial(jax.jit, static_argnums=(2,))
 def bspline1d_basis_derivs_hand(u, knots, degree):
   ''' Derivatives of basis functions '''
   d_basis = bspline1d_basis(u, knots, degree-1)
@@ -291,7 +287,7 @@ bspline1d_derivs_jax = jax.jit(
   static_argnums=(3,)
 )
 
-@partial(jax.jit, static_argnums=(3,))
+#@partial(jax.jit, static_argnums=(3,))
 def bspline2d_basis_derivs_hand(u, xknots, yknots, degree):
   ''' Derivatives of 2d basis functions '''
   u2d = np.atleast_2d(u)
@@ -320,7 +316,7 @@ bspline2d_basis_derivs_jax = jax.jit(
 # Hand-coded appears slightly faster.
 bspline2d_basis_derivs = bspline2d_basis_derivs_hand
 
-@partial(jax.jit, static_argnums=(4,))
+#@partial(jax.jit, static_argnums=(4,))
 def bspline2d_derivs_hand(u, control, xknots, yknots, degree):
   ''' Derivatives of 2d spline functions. '''
 
@@ -346,7 +342,7 @@ bspline2d_derivs_jax = jax.jit(
 )
 
 # Hand-coded appears slightly faster.
-bspline2d_derivs = bspline2d_derivs_jax
+bspline2d_derivs = bspline2d_derivs_hand
 
 # Don't bother coding the 3d derivatives by hand.
 bspline3d_basis_derivs_jax = jax.jit(

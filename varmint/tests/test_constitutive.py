@@ -6,8 +6,6 @@ from constitutive import *
 from materials    import *
 from exceptions   import *
 
-# TODO: add scaling
-
 class Test_NeoHookean2D(ut.TestCase):
 
   def test_zero_energy(self):

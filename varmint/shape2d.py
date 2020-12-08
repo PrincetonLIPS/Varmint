@@ -153,38 +153,46 @@ class Shape2D:
 
     return unflat_mat, unflat_vec
 
-  def flatten(self, ctrl, vels):
-    ravel_ctrl = np.hstack(map(np.ravel, ctrl))
-    ravel_vels = np.hstack(map(np.ravel, vels))
+  def get_flatten_fn(self):
 
     flatten_mat = self.flatten_mat()
 
-    flat_ctrl = flatten_mat @ ravel_ctrl
-    flat_vels = flatten_mat @ ravel_vels
+    def flatten(ctrl, vels):
+      ravel_ctrl = np.hstack(map(np.ravel, ctrl))
+      ravel_vels = np.hstack(map(np.ravel, vels))
 
-    return flat_ctrl, flat_vels
+      flat_ctrl = flatten_mat @ ravel_ctrl
+      flat_vels = flatten_mat @ ravel_vels
 
-  def unflatten(self, flat_ctrl, flat_vels):
+      return flat_ctrl, flat_vels
+
+    return flatten
+
+  def get_unflatten_fn(self):
     unflat_mat, unflat_vec = self.unflatten_mat_vec()
 
-    # Fixed control points have zero velocity.
-    ravel_ctrl = unflat_mat @ flat_ctrl + unflat_vec
-    ravel_vels = unflat_mat @ flat_vels
+    def unflatten(flat_ctrl, flat_vels):
 
-    # Now, to reshape for each patch.
-    ctrl = []
-    vels = []
-    start_idx = 0
-    for patch in self.patches:
-      size = patch.get_ctrl_shape()
-      end_idx = start_idx + onp.prod(size)
+      # Fixed control points have zero velocity.
+      ravel_ctrl = unflat_mat @ flat_ctrl + unflat_vec
+      ravel_vels = unflat_mat @ flat_vels
 
-      ctrl.append(np.reshape(ravel_ctrl[start_idx:end_idx], size))
-      vels.append(np.reshape(ravel_vels[start_idx:end_idx], size))
+      # Now, to reshape for each patch.
+      ctrl = []
+      vels = []
+      start_idx = 0
+      for patch in self.patches:
+        size = patch.get_ctrl_shape()
+        end_idx = start_idx + onp.prod(size)
 
-      start_idx = end_idx
+        ctrl.append(np.reshape(ravel_ctrl[start_idx:end_idx], size))
+        vels.append(np.reshape(ravel_vels[start_idx:end_idx], size))
 
-    return ctrl, vels
+        start_idx = end_idx
+
+      return ctrl, vels
+
+    return unflatten
 
   def create_movie(
       self,
