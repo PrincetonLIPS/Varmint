@@ -46,6 +46,9 @@ class NeoHookean2D:
     self.material  = material
     self.log       = log
     self.thickness = thickness
+    self.shear     = self.material.shear
+    self.bulk      = self.material.bulk
+    self.density   = self.material.density
 
   def get_energy_fn(self):
     if self.log:
@@ -55,26 +58,29 @@ class NeoHookean2D:
 
     return lambda defgrad: func(
       defgrad,
-      self.material.shear,
-      self.material.bulk,
+      self.shear,
+      self.bulk,
     )
 
   def density(self):
     # TODO: How should this interact with third dimension?
-    return self.material.density
+    return self.density
 
 class NeoHookean3D:
 
   def __init__(self, material):
     self.material = material
+    self.shear    = self.material.shear
+    self.bulk     = self.material.bulk
+    self.density  = self.material.density
 
   def get_energy_fn(self):
     func = vmap_neohookean_energy3d_log
     return lambda defgrad: func(
       defgrad,
-      self.material.shear,
-      self.material.bulk,
+      self.shear,
+      self.bulk,
     )
 
   def density(self):
-    return self.material.density
+    return self.density

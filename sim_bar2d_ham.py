@@ -32,7 +32,7 @@ ctrl      = mesh(np.linspace(0, length, num_xctrl),
                  np.linspace(0, height, num_yctrl))
 
 # Make the patch.
-spline_deg = 4
+spline_deg = 3
 quad_deg   = 10
 xknots     = default_knots(spline_deg, num_xctrl)
 yknots     = default_knots(spline_deg, num_yctrl)
@@ -62,23 +62,22 @@ def_ctrl = [ctrl.copy()]
 def_vels = [np.zeros_like(ctrl)]
 q, qdot  = shape.get_flatten_fn()(def_ctrl, def_vels)
 
-
 # Get the Lagrangian and then convert to discrete Euler-Lagrange.
 lagrangian = generate_lagrangian(shape, ref_ctrl)
 
 Ld_dq1, Ld_dq2 = discretize_hamiltonian(lagrangian)
 Ld_dq1_jac = jax.jit(jax.jacfwd(Ld_dq1, argnums=1))
 
-minfunc  = jax.jit(lambda p0, q0, q1, dt: np.sum((p0+Ld_dq1(q0, q1, dt))**2))
-dminfunc = jax.jit(jax.grad(minfunc, argnums=2))
-hessvec  = jax.jit(jax.grad(
-  lambda p0, q0, q1, dt, v: dminfunc(p0, q0, q1, dt) @ v,
-  argnums=2,
-))
-hessian  = jax.jit(jax.jacfwd(
-  lambda p0, q0, q1, dt: dminfunc(p0, q0, q1, dt),
-  argnums=2,
-))
+#minfunc  = jax.jit(lambda p0, q0, q1, dt: np.sum((p0+Ld_dq1(q0, q1, dt))**2))
+#dminfunc = jax.jit(jax.grad(minfunc, argnums=2))
+#hessvec  = jax.jit(jax.grad(
+#  lambda p0, q0, q1, dt, v: dminfunc(p0, q0, q1, dt) @ v,
+#  argnums=2,
+#))
+#hessian  = jax.jit(jax.jacfwd(
+#  lambda p0, q0, q1, dt: dminfunc(p0, q0, q1, dt),
+#  argnums=2,
+#))
 
 @jax.jit
 def residual_fun(q1, args):
@@ -95,7 +94,7 @@ QQ = [ q.copy() ]
 PP = [ np.zeros_like(q) ]
 TT = [ 0.0 ]
 
-server = jax.profiler.start_server(9999)
+#server = jax.profiler.start_server(9999)
 
 while TT[-1] < T:
   print('\nt: %0.4f' % (TT[-1]))
@@ -122,7 +121,7 @@ while TT[-1] < T:
       # hessp=lambda q1, v: hessvec(PP[-1], QQ[-1], q1, dt, v),
       method='Newton-CG',
     )
-  QQ.append(res.x)
+  QQ.append(res.x.block_until_ready())
 
   # Get the new momentum.
   PP.append( Ld_dq2(QQ[-2], QQ[-1], dt).block_until_ready() )

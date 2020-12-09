@@ -171,6 +171,9 @@ class Shape2D:
   def get_unflatten_fn(self):
     unflat_mat, unflat_vec = self.unflatten_mat_vec()
 
+    sizes = [patch.get_ctrl_shape() for patch in self.patches]
+    lens  = [onp.prod(size) for size in sizes]
+
     def unflatten(flat_ctrl, flat_vels):
 
       # Fixed control points have zero velocity.
@@ -181,12 +184,11 @@ class Shape2D:
       ctrl = []
       vels = []
       start_idx = 0
-      for patch in self.patches:
-        size = patch.get_ctrl_shape()
-        end_idx = start_idx + onp.prod(size)
+      for ii, patch in enumerate(self.patches):
+        end_idx = start_idx + lens[ii]
 
-        ctrl.append(np.reshape(ravel_ctrl[start_idx:end_idx], size))
-        vels.append(np.reshape(ravel_vels[start_idx:end_idx], size))
+        ctrl.append(np.reshape(ravel_ctrl[start_idx:end_idx], sizes[ii]))
+        vels.append(np.reshape(ravel_vels[start_idx:end_idx], sizes[ii]))
 
         start_idx = end_idx
 

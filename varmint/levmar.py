@@ -274,10 +274,17 @@ def get_lmfunc(
       njev     = njev,
     )
 
-    # Report a more sophisticated success.
+    # FIXME: Report a more sophisticated success.
 
-    return jax.lax.while_loop(
+    #state = init_state
+    #while cond_fun(state):
+    #  state = body_fun(state)
+
+    state = jax.lax.while_loop(
         cond_fun, body_fun, init_state,
     )
+
+    return state
+
 
   return optfun

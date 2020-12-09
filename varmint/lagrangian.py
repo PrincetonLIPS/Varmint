@@ -30,6 +30,7 @@ def generate_lagrangian(shape, ref_ctrl):
 
   unflatten = shape.get_unflatten_fn()
 
+  #@jax.jit
   def lagrangian(q, qdot):
     ''' Compute the Lagrangian in generalized coordinates.
 
@@ -72,7 +73,7 @@ def generate_lagrangian(shape, ref_ctrl):
       # Get the strain energy density.
       # Units are GPa = 10^9 J / m^3 in the reference configuration.
       # Convert to J / cm^3 by multiplying by 10^3.
-      strain_energy_density = 1000 * P[patch]['energy_fn'](defgrads) \
+      strain_energy_density = P[patch]['energy_fn'](defgrads) \
         * np.abs(P[patch]['ref_jac_dets'])
 
       # Sum over the quadrature points.
@@ -81,7 +82,7 @@ def generate_lagrangian(shape, ref_ctrl):
       # I'm going to assume each patch is uniform in the reference
       # configuration. Each patch might have a different density because it's
       # a diff material. Densities are g / cm^3.
-      mass_density = patch.material.density() * np.abs(P[patch]['ref_jac_dets'])
+      mass_density = patch.material.density * np.abs(P[patch]['ref_jac_dets'])
 
       # Get the actual locations. These are in cm.
       positions = P[patch]['deformation_fn'](def_ctrl[ii])
@@ -95,7 +96,7 @@ def generate_lagrangian(shape, ref_ctrl):
       # divide by 10^7 to put it into the same units as strain potential.
       # Should we do this before or after the quadrature?
       grav_energy_density = positions[:,1] * gravity * mass_density
-      gravitational_potential = P[patch]['quad_fn'](grav_energy_density) / 10**7
+      gravitational_potential = P[patch]['quad_fn'](grav_energy_density)
 
       # Jacobian of the deformed configuraton wrt control points.
       ctrl_jacs = P[patch]['jacobian_ctrl_fn'](def_ctrl[ii])
@@ -118,11 +119,11 @@ def generate_lagrangian(shape, ref_ctrl):
         ),
         def_vels[ii],
         ((0,1,2), (0,1,2)),
-      ) / 10**7
+      ) # * 1e-7
 
-      tot_strain  += strain_potential
-      tot_gravity += gravitational_potential
-      tot_kinetic += kinetic_energy
+      tot_strain  = tot_strain + strain_potential * 1e3
+      tot_gravity = tot_gravity + gravitational_potential * 1e-7
+      tot_kinetic = tot_kinetic + kinetic_energy * 1e-7
 
     return tot_kinetic - tot_strain - tot_gravity
 
