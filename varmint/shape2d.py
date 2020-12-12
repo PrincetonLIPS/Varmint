@@ -11,7 +11,7 @@ from .exceptions import (
   )
 from .patch2d import Patch2D
 from .bsplines import (
-  bspline1d,
+  bspline2d,
   mesh,
 )
 
@@ -231,55 +231,33 @@ class Shape2D:
 
     # Things we need to both initialize and update.
     objects = {}
-    uu = np.linspace(1e-6, 1-1e-6, 100)
+    N  = 100
+    uu = np.linspace(1e-6, 1-1e-6, N)
+    path = np.hstack([
+      np.vstack([uu[0]*np.ones(N), uu]),
+      np.vstack([uu, uu[-1]*np.ones(N)]),
+      np.vstack([uu[-1]*np.ones(N), uu[::-1]]),
+      np.vstack([uu[::-1], uu[0]*np.ones(N)]),
+    ]).T
 
     def init():
 
       # Render the first time step.
       for patch, patch_ctrl in zip(self.patches, ctrl_seq[0]):
 
-        # Plot vertical lines.
-        for jj in range(patch_ctrl.shape[1]):
-          xx = bspline1d(
-            uu,
-            patch_ctrl[:,jj,:],
-            patch.xknots,
-            patch.spline_deg,
-          )
-          xline, = ax.plot(xx[:,0], xx[:,1], 'b-')
-          objects[(patch,'x',jj)] = xline
-
-        # Plot horizontal lines.
-        for ii in range(patch_ctrl.shape[0]):
-          yy = bspline1d(
-            uu,
-            patch_ctrl[ii,:,:],
-            patch.yknots,
-            patch.spline_deg,
-          )
-          yline, = ax.plot(yy[:,0], yy[:,1], 'b-')
-          objects[(patch,'y',ii)] = yline
-
-        # Plot the control points themselves.
-        #cpts, = ax.plot(patch_ctrl[:,:,0].ravel(),
-        #                patch_ctrl[:,:,1].ravel(), 'b.')
-        #objects[(patch,'c')] = cpts
-
-        if labels:
-          # Plot labels.
-          rendered_labels = set()
-
-          label_r, label_c = onp.where(patch.pretty_labels)
-          for ii in range(len(label_r)):
-            row = label_r[ii]
-            col = label_c[ii]
-            text = patch.pretty_labels[row,col]
-            if text not in rendered_labels:
-              rendered_labels.add(text)
-            else:
-              continue
-            ann = ax.annotate(text, patch_ctrl[row,col,:])
-            objects[(patch,'a',ii)] = ann
+        locs = bspline2d(
+          path,
+          patch_ctrl,
+          patch.xknots,
+          patch.yknots,
+          patch.spline_deg,
+        )
+        # line, = ax.plot(locs[:,0], locs[:,1], 'b-')
+        poly, = ax.fill(locs[:,0], locs[:,1],
+                        facecolor='lightsalmon',
+                        edgecolor='orangered',
+                        linewidth=3)
+        objects[patch] = poly
 
       return objects.values()
 
@@ -287,43 +265,14 @@ class Shape2D:
 
       for patch, patch_ctrl in zip(self.patches, ctrl_seq[tt]):
 
-        # Plot vertical lines.
-        for jj in range(patch_ctrl.shape[1]):
-          xx = bspline1d(
-            uu,
-            patch_ctrl[:,jj,:],
-            patch.xknots,
-            patch.spline_deg,
-          )
-          objects[(patch,'x',jj)].set_data(xx[:,0], xx[:,1])
-
-        # Plot horizontal lines.
-        for ii in range(patch_ctrl.shape[0]):
-          yy = bspline1d(
-            uu,
-            patch_ctrl[ii,:,:],
-            patch.yknots,
-            patch.spline_deg,
-          )
-          objects[(patch,'y',ii)].set_data(yy[:,0], yy[:,1])
-
-        #objects[(patch,'c')].set_data(patch_ctrl[:,:,0].ravel(),
-        #                              patch_ctrl[:,:,1].ravel())
-
-        if labels:
-          rendered_labels = set()
-
-          # Plot labels.
-          label_r, label_c = onp.where(patch.pretty_labels)
-          for ii in range(len(label_r)):
-            row = label_r[ii]
-            col = label_c[ii]
-            text = patch.pretty_labels[row,col]
-            if text not in rendered_labels:
-              rendered_labels.add(text)
-            else:
-              continue
-            objects[(patch,'a',ii)].xy = patch_ctrl[row,col,:]
+        locs = bspline2d(
+          path,
+          patch_ctrl,
+          patch.xknots,
+          patch.yknots,
+          patch.spline_deg,
+        )
+        objects[patch].set_xy(locs)
 
       return objects.values()
 
@@ -336,81 +285,3 @@ class Shape2D:
       blit=True,
     )
     anim.save(filename)
-
-
-'''
-def main():
-
-  # Create a rectangle.
-  r1_deg    = 2
-  r1_ctrl   = bsplines.mesh(np.arange(10), np.arange(5))
-  r1_xknots = bsplines.default_knots(r1_deg, r1_ctrl.shape[0])
-  r1_yknots = bsplines.default_knots(r1_deg, r1_ctrl.shape[1])
-  r1_labels = onp.zeros((10,5), dtype='<U256')
-  r1_labels[3:7,0]  = ['A', 'B', 'C', 'D']
-  r1_labels[:3,-1]  = ['E', 'F', 'G']
-  r1_labels[-3:,-1] = ['H', 'I', 'J']
-  r1_fixed = {
-    'E': [-1,5],
-  }
-  r1_patch  = Patch2D(r1_xknots, r1_yknots, r1_deg, r1_labels, r1_fixed)
-
-  # Create another rectangle.
-  r2_deg    = 2
-  r2_ctrl   = bsplines.mesh(np.array([3,4,5,6]), np.array([-4, -3, -2, -1, 0]))
-  r2_xknots = bsplines.default_knots(r2_deg, r2_ctrl.shape[0])
-  r2_yknots = bsplines.default_knots(r2_deg, r2_ctrl.shape[1])
-  r2_labels = onp.zeros((4,5), dtype='<U256')
-  r2_labels[:,-1] = ['A', 'B', 'C', 'D']
-  r2_labels[:,0]  = ['K', 'L', 'M', 'N']
-  r2_fixed  = {
-    'K': [3,-4],
-    'L': [4,-4],
-    'M': [5,-4],
-    'N': [6,-5],
-
-    # Fix these for testing coincidence+fixed.
-    'A': [2.5,-0.5],
-    # 'B': [4,0],
-  }
-  r2_patch  = Patch2D(r2_xknots, r2_yknots, r2_deg, r2_labels, r2_fixed)
-
-  # Bend a u-shaped thing around the top.
-  u1_deg  = 2
-  band    = np.array([-4.5, -3.5, -2.5])
-  center  = np.array([4.5, 4])
-  u1_ctrl = np.zeros((3,8,2))
-  for ii, theta in enumerate(np.linspace(-np.pi, 0, 8)):
-    u1_ctrl = jax.ops.index_update(u1_ctrl,
-                                   jax.ops.index[:,ii,0],
-                                   band * np.cos(theta))
-    u1_ctrl = jax.ops.index_update(u1_ctrl,
-                                   jax.ops.index[:,ii,1],
-                                   band * np.sin(theta))
-  u1_ctrl   = u1_ctrl + center
-  u1_xknots = bsplines.default_knots(u1_deg, u1_ctrl.shape[0])
-  u1_yknots = bsplines.default_knots(u1_deg, u1_ctrl.shape[1])
-  u1_labels = onp.zeros((3,8), dtype='<U256')
-  u1_labels[:,-1]  = ['E', 'F', 'G']
-  u1_labels[:,0] = ['J', 'I', 'H']
-  u1_fixed = {
-    'H': [6,4.5],
-  }
-  u1_patch  = Patch2D(u1_xknots, u1_yknots, u1_deg, u1_labels, u1_fixed)
-
-  shape = Shape2D(r1_patch, r2_patch, u1_patch)
-
-  ctrl = [r1_ctrl, r2_ctrl, u1_ctrl]
-
-  flat = shape.flatten(ctrl)
-
-  unflat = shape.unflatten(flat)
-
-  for ii in range(len(ctrl)):
-    print((ctrl[ii]-unflat[ii]).ravel())
-
-  shape.render(unflat)
-
-if __name__ == '__main__':
-  main()
-'''
