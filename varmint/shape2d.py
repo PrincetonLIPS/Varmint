@@ -261,9 +261,9 @@ class Shape2D:
           objects[(patch,'y',ii)] = yline
 
         # Plot the control points themselves.
-        cpts, = ax.plot(patch_ctrl[:,:,0].ravel(),
-                        patch_ctrl[:,:,1].ravel(), 'b.')
-        objects[(patch,'c')] = cpts
+        #cpts, = ax.plot(patch_ctrl[:,:,0].ravel(),
+        #                patch_ctrl[:,:,1].ravel(), 'b.')
+        #objects[(patch,'c')] = cpts
 
         if labels:
           # Plot labels.
@@ -307,8 +307,8 @@ class Shape2D:
           )
           objects[(patch,'y',ii)].set_data(yy[:,0], yy[:,1])
 
-        objects[(patch,'c')].set_data(patch_ctrl[:,:,0].ravel(),
-                                      patch_ctrl[:,:,1].ravel())
+        #objects[(patch,'c')].set_data(patch_ctrl[:,:,0].ravel(),
+        #                              patch_ctrl[:,:,1].ravel())
 
         if labels:
           rendered_labels = set()
