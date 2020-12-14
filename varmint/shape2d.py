@@ -175,7 +175,6 @@ class Shape2D:
     lens  = [onp.prod(size) for size in sizes]
 
     def unflatten(flat_ctrl, flat_vels):
-
       # Fixed control points have zero velocity.
       ravel_ctrl = unflat_mat @ flat_ctrl + unflat_vec
       ravel_vels = unflat_mat @ flat_vels
@@ -257,7 +256,23 @@ class Shape2D:
                         facecolor='lightsalmon',
                         edgecolor='orangered',
                         linewidth=3)
-        objects[patch] = poly
+        objects[(patch, 'p')] = poly
+
+        if labels:
+          # Plot labels.
+          rendered_labels = set()
+
+          label_r, label_c = onp.where(patch.pretty_labels)
+          for ii in range(len(label_r)):
+            row = label_r[ii]
+            col = label_c[ii]
+            text = patch.pretty_labels[row,col]
+            if text not in rendered_labels:
+              rendered_labels.add(text)
+            else:
+              continue
+            ann = ax.annotate(text, patch_ctrl[row,col,:])
+            objects[(patch,'a',ii)] = ann
 
       return objects.values()
 
@@ -272,7 +287,24 @@ class Shape2D:
           patch.yknots,
           patch.spline_deg,
         )
-        objects[patch].set_xy(locs)
+        objects[(patch, 'p')].set_xy(locs)
+
+        if labels:
+          # Plot labels.
+          rendered_labels = set()
+
+          label_r, label_c = onp.where(patch.pretty_labels)
+          for ii in range(len(label_r)):
+            row = label_r[ii]
+            col = label_c[ii]
+            text = patch.pretty_labels[row,col]
+            if text not in rendered_labels:
+              rendered_labels.add(text)
+            else:
+              continue
+            ann = ax.annotate(text, patch_ctrl[row,col,:])
+            objects[(patch,'a',ii)] = ann
+
 
       return objects.values()
 
