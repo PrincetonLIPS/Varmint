@@ -129,6 +129,82 @@ def generate_lagrangian(shape, ref_ctrl):
 
   return lagrangian
 
+def generate_lagrangian_structured(shape, ref_ctrl):
+  ''' For when all the patches have the same control point shapes. '''
+
+  # Precompute quantities in the reference configuration.
+  # FIXME: sketchy because we're re-using just one patch's func.
+  ref_jacs = jax.vmap(shape.patches[0].get_jacobian_u_fn(), in_axes=(0,))(
+    ref_ctrl
+  )
+
+  # Is this really what you're supposed to do to map multiple axes?
+  # FIXME: make this a vectorize.
+  ref_jac_dets = jax.vmap(jax.vmap(npla.det, in_axes=(0,)), in_axes=(0,))(
+    ref_jacs,
+  )
+
+  # Yes, explicit inverse is bad, but then we get to precompute.
+  ref_jac_invs = jax.vmap(jax.vmap(npla.inv, in_axes=(0,)), in_axes=(0,))(
+    ref_jacs,
+  )
+
+  shape_unflatten = shape.get_unflatten_fn()
+  def unflatten(q, qdot):
+    ctrl, vels = shape_unflatten(q, qdot)
+    return np.array(ctrl), np.array(vels)
+
+  jacobian_u_fn  = shape.patches[0].get_jacobian_u_fn()
+  energy_fn      = shape.patches[0].get_energy_fn()
+  quad_fn        = shape.patches[0].get_quad_fn()
+  deformation_fn = shape.patches[0].get_deformation_fn()
+  jacobian_ctrl_fn = shape.patches[0].get_jacobian_ctrl_fn()
+
+  mat_densities = np.array([p.material.density for p in shape.patches])
+
+  gravity = 981.0 # cm/s^2
+
+  @jax.jit
+  def lagrangian(q, qdot):
+    def_ctrl, def_vels = unflatten(q, qdot)
+
+    def_jacs = jax.vmap(jacobian_u_fn, in_axes=(0,))(
+      def_ctrl
+    )
+
+    defgrads = jax.vmap(jax.vmap(np.dot, in_axes=(0,0,)), in_axes=(0,0,))(
+      def_jacs, ref_jac_invs,
+    )
+
+    strain_energy_density = jax.vmap(energy_fn, in_axes=(0,))(defgrads) \
+      * np.abs(ref_jac_dets)
+
+    strain_potential = np.sum(jax.vmap(quad_fn, in_axes=(0,))(
+      strain_energy_density
+    ))
+
+    mass_density = mat_densities[:,np.newaxis] * np.abs(ref_jac_dets)
+
+    positions = jax.vmap(deformation_fn, in_axes=(0,))(def_ctrl)
+
+    grav_energy_density = positions[:,:,1] * gravity * mass_density
+    gravity_potential = np.sum(jax.vmap(quad_fn, in_axes=(0,))(grav_energy_density))
+
+    ctrl_jacs = jax.vmap(jacobian_ctrl_fn, in_axes=(0,))(def_ctrl)
+
+    ctrl_jacTjac = jax.vmap(jax.vmap(np.tensordot, in_axes=(0,0,None)), in_axes=(0,0,None))(ctrl_jacs, ctrl_jacs, (0,0,))
+    mass_matrices = (ctrl_jacTjac.T * mass_density.T).T
+    mass_matrix = jax.vmap(quad_fn, in_axes=(0,))(mass_matrices)
+
+    kinetic_energy = np.sum(jax.vmap(lambda mm, vv: 0.5 * np.tensordot(
+      np.tensordot(mm, vv, ((3,4,5), (0,1,2))),
+      vv, ((0,1,2), (0,1,2))), in_axes=(0,0,))(mass_matrix, def_vels))
+
+    return 1e-7*kinetic_energy - 1e3*strain_potential - 1e-7*gravity_potential
+
+  return lagrangian
+
+
 def generate_energies(shape, ref_ctrl):
 
   # Precompute useful per-patch objects that never change.
