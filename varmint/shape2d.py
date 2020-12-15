@@ -255,7 +255,7 @@ class Shape2D:
         poly, = ax.fill(locs[:,0], locs[:,1],
                         facecolor='lightsalmon',
                         edgecolor='orangered',
-                        linewidth=3)
+                        linewidth=1)
         objects[(patch, 'p')] = poly
 
         if labels:
@@ -267,11 +267,11 @@ class Shape2D:
             row = label_r[ii]
             col = label_c[ii]
             text = patch.pretty_labels[row,col]
-            if text not in rendered_labels:
+            if True: #text not in rendered_labels:
               rendered_labels.add(text)
             else:
               continue
-            ann = ax.annotate(text, patch_ctrl[row,col,:])
+            ann = ax.annotate(text, patch_ctrl[row,col,:], size=6)
             objects[(patch,'a',ii)] = ann
 
       return objects.values()
@@ -298,11 +298,11 @@ class Shape2D:
             row = label_r[ii]
             col = label_c[ii]
             text = patch.pretty_labels[row,col]
-            if text not in rendered_labels:
+            if True: #text not in rendered_labels:
               rendered_labels.add(text)
             else:
               continue
-            ann = ax.annotate(text, patch_ctrl[row,col,:])
+            ann = ax.annotate(text, patch_ctrl[row,col,:], size=6)
             objects[(patch,'a',ii)] = ann
 
 

@@ -98,8 +98,10 @@ class Patch2D:
         for ii, dim in enumerate(['_x', '_y']):
           newlabel = label + dim
           if not self.has_label(newlabel):
-            raise LabelError('Label %s not found' % (newlabel))
-          self.fixed[label + dim] = value[ii]
+            continue
+            #raise LabelError('Label %s not found' % (newlabel))
+          else:
+            self.fixed[label + dim] = value[ii]
       self.pretty_fixed = fixed
     else:
       self.pretty_fixed = {}
