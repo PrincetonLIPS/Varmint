@@ -1,9 +1,9 @@
 import jax
 import jax.numpy         as np
 import jax.numpy.linalg  as npla
-import matplotlib.pyplot as plt
 
-from collections    import namedtuple
+from functools   import partial
+from collections import namedtuple
 
 import jax.profiler
 
@@ -11,28 +11,39 @@ import jax.profiler
 # and theory. In Numerical analysis (pp. 105-116). Springer, Berlin,
 # Heidelberg.
 
-def p_solve(lamb, diagD, Ux, diagSx, Vx, Fx):
-  mid_solve = np.diag(diagSx / (diagSx**2 + lamb))
-  p = -(Vx @ mid_solve @ Ux.T @ Fx) / diagD
+SVD = namedtuple('SVD', [
+  'U',
+  'diagS',
+  'Vt',
+])
+
+def p_solve(lamb, diagD, svd, Fx):
+  mid_solve = np.diag(svd.diagS / (svd.diagS**2 + lamb))
+  p = -(svd.Vt.T @ mid_solve @ svd.U.T @ Fx) / diagD
   return p
-def phi(alpha, diagD, Ux, diagSx, Vx, Fx, delta):
-  p = p_solve(alpha, diagD, Ux, diagSx, Vx, Fx)
+
+
+def phi(alpha, diagD, svd, Fx, delta):
+  p = p_solve(alpha, diagD, svd, Fx)
   return npla.norm(diagD * p) - delta, p
+
+
 phi_valgrad = jax.jit(jax.value_and_grad(phi, argnums=0, has_aux=True))
 
+
 @jax.jit
-def lm_param(delta, diagD, Ux, diagSx, Vx, Fx, sigma=0.1):
-  (phi_0, p), dphi_0 = phi_valgrad(0.0, diagD, Ux, diagSx, Vx, Fx, delta)
+def lm_param(delta, diagD, svd, Fx, sigma=0.1):
+  (phi_0, p), dphi_0 = phi_valgrad(0.0, diagD, svd, Fx, delta)
 
   # Initial bounds as in More'.
-  upper = npla.norm((Fx.T @ Ux) * diagSx) / delta
+  upper = npla.norm((Fx.T @ svd.U) * svd.diagS) / delta
   lower = - phi_0 / dphi_0
   alpha = np.array(0.0)
 
   init_val = (alpha, lower, upper, phi_0, p)
 
   def cond_fun(val):
-    alpha, lower, upper, phi_k, p = val
+    alpha, _, _, phi_k, _ = val
     return np.logical_and(np.logical_or(alpha != 0.0, phi_k > 0.0),
                           np.abs(phi_k) > sigma*delta)
 
@@ -43,7 +54,7 @@ def lm_param(delta, diagD, Ux, diagSx, Vx, Fx, sigma=0.1):
                      np.maximum( 0.001 * upper, np.sqrt(upper * lower) ),
                      alpha)
 
-    (phi_k, p), dphi_k = phi_valgrad(alpha, diagD, Ux, diagSx, Vx, Fx, delta)
+    (phi_k, p), dphi_k = phi_valgrad(alpha, diagD, svd, Fx, delta)
 
     upper = np.where(phi_k < 0.0, alpha, upper)
     lower = np.maximum(lower, alpha - phi_k/dphi_k)
@@ -55,11 +66,84 @@ def lm_param(delta, diagD, Ux, diagSx, Vx, Fx, sigma=0.1):
 
   return alpha, p
 
+
 LMState = namedtuple('LMState', [
-  'x', 'args', 'Fx', 'nFx', 'Jx', 'Ux', 'diagSx', 'VxT', 'diagD',
+  'x', 'args', 'Fx', 'nFx', 'Jx', 'svd', 'diagD',
   'delta', 'hit_xtol', 'hit_ftol', 'nit', 'nfev', 'njev'
 ])
 
+
+def _optfun(fun, jacfun, cond_fun, body_fun, factor, x0, args):
+
+  # Initialize.
+  Fx    = fun(x0, args)
+  nFx   = npla.norm(Fx)
+  Jx    = jacfun(x0, args)
+  diagD = npla.norm(Jx, axis=0)
+  delta = factor * npla.norm(diagD * x0)
+  delta = jax.lax.cond(delta == 0, lambda _: factor, lambda _: delta, None)
+
+  init_state = LMState(
+    x        = x0,
+    args     = args,
+    Fx       = Fx,
+    nFx      = nFx,
+    Jx       = Jx,
+    svd      = SVD(*npla.svd(Jx/diagD, full_matrices=False)),
+    diagD    = diagD,
+    delta    = delta,
+    hit_xtol = False,
+    hit_ftol = False,
+    nit      = 0,
+    nfev     = 1,
+    njev     = 1,
+  )
+
+  # FIXME: Report a more sophisticated success.
+
+  #state = init_state
+  #while cond_fun(state):
+  #  state = body_fun(state)
+
+  state = jax.lax.while_loop(
+    cond_fun, body_fun, init_state,
+  )
+
+  return state.x, state
+
+@partial(jax.custom_jvp, nondiff_argnums=(0,1,2,3,4,))
+def optfun(fun, jacfun, cond_fun, body_fun, factor, x0, args):
+  x_star, _ = _optfun(
+    fun,
+    jacfun,
+    cond_fun,
+    body_fun,
+    factor,
+    x0,
+    args,
+  )
+
+  # FIXME: I don't see how to get a result back through this without has_aux
+  # working for Jacobian computation.
+
+  return x_star
+
+@optfun.defjvp
+def optfun_jvp(fun, jacfun, cond_fun, body_fun, factor, primals, tangents):
+  x0, args = primals
+  _, arg_tans = tangents
+
+  x_star, res = _optfun(fun, jacfun, cond_fun, body_fun, factor, x0, args)
+  Jx_star = res.Jx # wrt first argument only
+
+  # Function in terms of args only.
+  fun_x_star = partial(fun, x_star)
+  _, tangents_out = jax.jvp(fun_x_star, (args,), (arg_tans,))
+
+  # Think harder about this.  Need to sum over parts os tangents right?
+  x_star_tans = -npla.solve(Jx_star, tangents_out)
+
+  return x_star, x_star_tans
 
 def get_lmfunc(
     fun,
@@ -68,6 +152,7 @@ def get_lmfunc(
     ftol=1e-8,
     factor=100.0,
     sigma=0.1,
+    full_result=False,
 ):
   ''' Generate a Levenberg-Marquardt optimizer for a problem.
 
@@ -96,6 +181,11 @@ def get_lmfunc(
 
    - sigma: Magic number to determine the allowable error in the trust region.
             Default is 0.1.  Probably don't change this.
+
+   - full_result: Whether to return the full result object. You cannot do this
+                  if you want to differentiate the result, unfortunately,
+                  because JAX has_aux doesn't work with many things. Defaults
+                  to False.
 
   Returns:
   -------
@@ -143,9 +233,7 @@ def get_lmfunc(
     lamb, p = lm_param(
       state.delta,
       state.diagD,
-      state.Ux,
-      state.diagSx,
-      state.VxT.T,
+      state.svd,
       state.Fx,
       sigma,
     )
@@ -212,10 +300,10 @@ def get_lmfunc(
     )
 
     # Recompute the SVD if we improved.
-    Ux, diagSx, VxT = jax.lax.cond(
+    svd = jax.lax.cond(
         improved,
-        lambda _: npla.svd(Jx/diagD, full_matrices=False),
-        lambda _: (state.Ux, state.diagSx, state.VxT),
+        lambda _: SVD(*npla.svd(Jx/diagD, full_matrices=False)),
+        lambda _: state.svd,
         None,
     )
 
@@ -226,9 +314,7 @@ def get_lmfunc(
       Fx       = Fx,
       nFx      = nFx,
       Jx       = Jx,
-      Ux       = Ux,
-      diagSx   = diagSx,
-      VxT      = VxT,
+      svd      = svd,
       diagD    = diagD,
       delta    = delta,
       hit_xtol = hit_xtol,
@@ -238,53 +324,7 @@ def get_lmfunc(
       njev     = njev,
     )
 
-  @jax.jit
-  def optfun(x0, args):
-    # Initialize counts.
-    nit  = 0
-    nfev = 1
-    njev = 1
+  if full_result:
+    return jax.jit(partial(_optfun, fun, jacfun, cond_fun, body_fun, factor))
 
-    # Initialize.
-    Fx    = fun(x0, args)
-    nFx   = npla.norm(Fx)
-    Jx    = jacfun(x0, args)
-    diagD = npla.norm(Jx, axis=0)
-    delta = factor * npla.norm(diagD * x0)
-    delta = jax.lax.cond(delta == 0, lambda _: factor, lambda _: delta, None)
-    Ux, diagSx, VxT = npla.svd(Jx/diagD, full_matrices=False)
-    hit_xtol  = False
-    hit_ftol  = False
-
-    init_state = LMState(
-      x        = x0,
-      args     = args,
-      Fx       = Fx,
-      nFx      = nFx,
-      Jx       = Jx,
-      Ux       = Ux,
-      diagSx   = diagSx,
-      VxT      = VxT,
-      diagD    = diagD,
-      delta    = delta,
-      hit_xtol = hit_xtol,
-      hit_ftol = hit_ftol,
-      nit      = nit,
-      nfev     = nfev,
-      njev     = njev,
-    )
-
-    # FIXME: Report a more sophisticated success.
-
-    #state = init_state
-    #while cond_fun(state):
-    #  state = body_fun(state)
-
-    state = jax.lax.while_loop(
-        cond_fun, body_fun, init_state,
-    )
-
-    return state
-
-
-  return optfun
+  return jax.jit(partial(optfun, fun, jacfun, cond_fun, body_fun, factor))
