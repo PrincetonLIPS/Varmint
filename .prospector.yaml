@@ -1,0 +1,7 @@
+pep8:
+  disable:
+    - E114
+
+pylint:
+  disable:
+    - W0311
