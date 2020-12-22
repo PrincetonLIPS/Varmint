@@ -78,3 +78,54 @@ class Test_LevenbergMarquardt_More(ut.TestCase):
     nptest.assert_array_almost_equal(res.Fx, np.zeros(3))
     self.assertLess(res.nFx, 1e-10)
     self.assertLess(res.nfev, 25)
+
+
+  def test_p4_1(self):
+
+    def p4(x):
+      ti = (np.arange(20)+1.0) * 0.2
+      fi = (x[0] + x[1]*ti - np.exp(ti))**2 \
+        + (x[2] + x[3]*np.sin(ti) - np.cos(ti))**2
+      return fi
+    arg_wrapper = lambda x, _: p4(x)
+
+    optfun = get_lmfunc(arg_wrapper, full_result=True)
+    x0 = np.array([25.0, 5.0, -5.0, 1.0])
+
+    _, res = optfun(x0, ())
+    self.assertLess(res.nFx, 293.0)
+    self.assertLess(res.nfev, 100)
+
+  def test_p4_10(self):
+
+    def p4(x):
+      ti = (np.arange(20)+1.0) * 0.2
+      fi = (x[0] + x[1]*ti - np.exp(ti))**2 \
+        + (x[2] + x[3]*np.sin(ti) - np.cos(ti))**2
+      return fi
+    arg_wrapper = lambda x, _: p4(x)
+
+    optfun = get_lmfunc(arg_wrapper, full_result=True)
+    x0 = 10 * np.array([25.0, 5.0, -5.0, 1.0])
+
+    _, res = optfun(x0, ())
+
+    self.assertLess(res.nFx, 293.0)
+    self.assertLess(res.nfev, 100)
+
+  def test_p4_100(self):
+
+    def p4(x):
+      ti = (np.arange(20)+1.0) * 0.2
+      fi = (x[0] + x[1]*ti - np.exp(ti))**2 \
+        + (x[2] + x[3]*np.sin(ti) - np.cos(ti))**2
+      return fi
+    arg_wrapper = lambda x, _: p4(x)
+
+    optfun = get_lmfunc(arg_wrapper, full_result=True)
+    x0 = 100 * np.array([25.0, 5.0, -5.0, 1.0])
+
+    _, res = optfun(x0, ())
+
+    self.assertLess(res.nFx, 293.0)
+    self.assertLess(res.nfev, 100)
