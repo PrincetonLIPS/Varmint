@@ -4,6 +4,7 @@ import jax.numpy     as np
 import numpy.random  as npr
 import numpy.testing as nptest
 
+from jax.test_util  import check_grads
 from varmint.levmar import *
 
 class Test_LevenbergMarquardt_More(ut.TestCase):
@@ -174,7 +175,7 @@ class Test_LevenbergMarquardt_Jacobian(ut.TestCase):
       return optfun(x0, (target,))
 
     npr.seed(1)
-    for ii in range(10):
+    for ii in range(100):
       target = npr.randn(5)
       x_star = opt_result(target)
 
@@ -182,8 +183,7 @@ class Test_LevenbergMarquardt_Jacobian(ut.TestCase):
 
 
   def test_quadratic_jacfwd_1(self):
-    ''' Forward-mode:
-    Verify that we get the identity Jacobian for the closed function.
+    ''' Forward-mode: Verify the identity Jacobian for the closed function.
     '''
 
     def quad(x, args):
@@ -199,7 +199,7 @@ class Test_LevenbergMarquardt_Jacobian(ut.TestCase):
     opt_result_jac = jax.jacfwd(opt_result)
 
     npr.seed(1)
-    for ii in range(10):
+    for ii in range(100):
       target = npr.randn(5)
       jac = opt_result_jac(target)
 
@@ -207,8 +207,7 @@ class Test_LevenbergMarquardt_Jacobian(ut.TestCase):
 
 
   def test_quadratic_jacfwd_2(self):
-    ''' Forward-mode:
-    Verify the Jacobian for a diagonal but non-linear situation.
+    ''' Forward-mode: Verify the Jacobian for a diagonal/non-linear situation.
     '''
 
     def quad(x, args):
@@ -224,7 +223,7 @@ class Test_LevenbergMarquardt_Jacobian(ut.TestCase):
     opt_result_jac = jax.jacfwd(opt_result)
 
     npr.seed(1)
-    for ii in range(10):
+    for ii in range(100):
       target = npr.randn(5)
       jac = opt_result_jac(target)
 
@@ -236,7 +235,7 @@ class Test_LevenbergMarquardt_Jacobian(ut.TestCase):
     Verify that we can use a non-diagonal Jacobian.
     '''
 
-    npr.randn(1)
+    npr.seed(1)
     A = npr.randn(5,5)
 
     def quad(x, args):
@@ -251,7 +250,7 @@ class Test_LevenbergMarquardt_Jacobian(ut.TestCase):
 
     opt_result_jac = jax.jacfwd(opt_result)
 
-    for ii in range(10):
+    for ii in range(100):
       target = npr.randn(5)
       jac = opt_result_jac(target)
 
@@ -259,11 +258,10 @@ class Test_LevenbergMarquardt_Jacobian(ut.TestCase):
 
 
   def test_quadratic_jacfwd_4(self):
-    ''' Forward-mode:
-    Verify non-diagonal Jacobian with larger output.
+    ''' Forward-mode: Verify non-diagonal Jacobian with larger output.
     '''
 
-    npr.randn(1)
+    npr.seed(1)
     A = npr.randn(5,4)
 
     def quad(x, args):
@@ -278,7 +276,7 @@ class Test_LevenbergMarquardt_Jacobian(ut.TestCase):
 
     opt_result_jac = jax.jacfwd(opt_result)
 
-    for ii in range(10):
+    for ii in range(100):
       target = npr.randn(4)
       jac = opt_result_jac(target)
 
@@ -286,11 +284,10 @@ class Test_LevenbergMarquardt_Jacobian(ut.TestCase):
 
 
   def test_quadratic_jacfwd_5(self):
-    ''' Foward-mode:
-    Verify non-diagonal Jacobian with larger input.
+    ''' Foward-mode: Verify non-diagonal Jacobian with larger input.
     '''
 
-    npr.randn(1)
+    npr.seed(1)
     A = npr.randn(5,6)
 
     def quad(x, args):
@@ -305,7 +302,7 @@ class Test_LevenbergMarquardt_Jacobian(ut.TestCase):
 
     opt_result_jac = jax.jacfwd(opt_result)
 
-    for ii in range(10):
+    for ii in range(100):
       target = npr.randn(6)
       jac = opt_result_jac(target)
 
@@ -313,8 +310,7 @@ class Test_LevenbergMarquardt_Jacobian(ut.TestCase):
 
 
   def test_quadratic_jacrev_1(self):
-    ''' Reverse-mode:
-    Verify that we get the identity Jacobian for the closed function.
+    ''' Reverse-mode: Verify the identity Jacobian for the closed function.
     '''
 
     def quad(x, args):
@@ -330,7 +326,7 @@ class Test_LevenbergMarquardt_Jacobian(ut.TestCase):
     opt_result_jac = jax.jacrev(opt_result)
 
     npr.seed(1)
-    for ii in range(10):
+    for ii in range(100):
       target = npr.randn(5)
       jac = opt_result_jac(target)
 
@@ -338,8 +334,7 @@ class Test_LevenbergMarquardt_Jacobian(ut.TestCase):
 
 
   def test_quadratic_jacrev_2(self):
-    ''' Reverse-mode:
-    Verify the Jacobian for a diagonal but non-linear situation.
+    ''' Reverse-mode: Verify the Jacobian for a diagonal/non-linear situation.
     '''
 
     def quad(x, args):
@@ -355,7 +350,7 @@ class Test_LevenbergMarquardt_Jacobian(ut.TestCase):
     opt_result_jac = jax.jacrev(opt_result)
 
     npr.seed(1)
-    for ii in range(10):
+    for ii in range(100):
       target = npr.randn(5)
       jac = opt_result_jac(target)
 
@@ -363,11 +358,10 @@ class Test_LevenbergMarquardt_Jacobian(ut.TestCase):
 
 
   def test_quadratic_jacrev_3(self):
-    ''' Reverse-mode:
-    Verify that we can use a non-diagonal Jacobian.
+    ''' Reverse-mode: Verify that we can use a non-diagonal Jacobian.
     '''
 
-    npr.randn(1)
+    npr.seed(1)
     A = npr.randn(5,5)
 
     def quad(x, args):
@@ -382,7 +376,7 @@ class Test_LevenbergMarquardt_Jacobian(ut.TestCase):
 
     opt_result_jac = jax.jacrev(opt_result)
 
-    for ii in range(10):
+    for ii in range(100):
       target = npr.randn(5)
       jac = opt_result_jac(target)
 
@@ -390,11 +384,10 @@ class Test_LevenbergMarquardt_Jacobian(ut.TestCase):
 
 
   def test_quadratic_jacrev_4(self):
-    ''' Reverse-mode:
-    Verify non-diagonal Jacobian with larger output.
+    ''' Reverse-mode: Verify non-diagonal Jacobian with larger output.
     '''
 
-    npr.randn(1)
+    npr.seed(1)
     A = npr.randn(5,4)
 
     def quad(x, args):
@@ -409,7 +402,7 @@ class Test_LevenbergMarquardt_Jacobian(ut.TestCase):
 
     opt_result_jac = jax.jacrev(opt_result)
 
-    for ii in range(10):
+    for ii in range(100):
       target = npr.randn(4)
       jac = opt_result_jac(target)
 
@@ -417,11 +410,10 @@ class Test_LevenbergMarquardt_Jacobian(ut.TestCase):
 
 
   def test_quadratic_jacrev_5(self):
-    ''' Reverse-mode:
-    Verify non-diagonal Jacobian with larger input.
+    ''' Reverse-mode: Verify non-diagonal Jacobian with larger input.
     '''
 
-    npr.randn(1)
+    npr.seed(1)
     A = npr.randn(5,6)
 
     def quad(x, args):
@@ -436,8 +428,131 @@ class Test_LevenbergMarquardt_Jacobian(ut.TestCase):
 
     opt_result_jac = jax.jacrev(opt_result)
 
-    for ii in range(10):
+    for ii in range(100):
       target = npr.randn(6)
       jac = opt_result_jac(target)
 
       nptest.assert_array_almost_equal(jac, A)
+
+
+  def test_quadratic_grad_1(self):
+    ''' Test basic gradient through L-M. '''
+
+    npr.seed(1)
+
+    def quad(x, args):
+      target, = args
+      return x - target
+
+    optfun = get_lmfunc(quad)
+
+    def opt_result(target):
+      x0 = np.zeros(5)
+      return optfun(x0, (target,))
+
+    # Made up function to take vector to scalar.
+    def loss(target):
+      return np.sum(opt_result(target)**2)
+
+    for ii in range(100):
+      target = npr.randn(5)
+      check_grads(loss, (target,), order=1, eps=1e-4)
+
+
+  def test_quadratic_grad_2(self):
+    ''' Test non-linear gradient through L-M. '''
+
+    npr.seed(1)
+
+    def quad(x, args):
+      target, = args
+      return x - target**2
+
+    optfun = get_lmfunc(quad)
+
+    def opt_result(target):
+      x0 = np.zeros(5)
+      return optfun(x0, (target,))
+
+    # Made up function to take vector to scalar.
+    def loss(target):
+      return np.sum(opt_result(target)**2)
+
+    for ii in range(100):
+      target = npr.randn(5)
+      check_grads(loss, (target,), order=1, eps=1e-2)
+
+
+  def test_quadratic_grad_3(self):
+    ''' Test gradient with non-diagonal Jacobian through L-M. '''
+
+    npr.seed(1)
+    A = npr.randn(5,5)
+
+    def quad(x, args):
+      target, = args
+      return x - A @ target
+
+    optfun = get_lmfunc(quad)
+
+    def opt_result(target):
+      x0 = np.zeros(5)
+      return optfun(x0, (target,))
+
+    # Made up function to take vector to scalar.
+    def loss(target):
+      return np.sum(opt_result(target)**2)
+
+    for ii in range(100):
+      target = npr.randn(5)
+      check_grads(loss, (target,), order=1, eps=1e-3)
+
+
+  def test_quadratic_grad_4(self):
+    ''' Test gradient with larger output. '''
+
+    npr.seed(1)
+    A = npr.randn(5,4)
+
+    def quad(x, args):
+      target, = args
+      return x - A @ target
+
+    optfun = get_lmfunc(quad)
+
+    def opt_result(target):
+      x0 = np.zeros(5)
+      return optfun(x0, (target,))
+
+    # Made up function to take vector to scalar.
+    def loss(target):
+      return np.sum(opt_result(target)**2)
+
+    for ii in range(100):
+      target = npr.randn(4)
+      check_grads(loss, (target,), order=1, eps=1e-2)
+
+
+  def test_quadratic_grad_5(self):
+    ''' Test gradient with larger input. '''
+
+    npr.seed(1)
+    A = npr.randn(5,6)
+
+    def quad(x, args):
+      target, = args
+      return x - A @ target
+
+    optfun = get_lmfunc(quad)
+
+    def opt_result(target):
+      x0 = np.zeros(5)
+      return optfun(x0, (target,))
+
+    # Made up function to take vector to scalar.
+    def loss(target):
+      return np.sum(opt_result(target)**2)
+
+    for ii in range(100):
+      target = npr.randn(6)
+      check_grads(loss, (target,), order=1, eps=1e-3)
