@@ -8,10 +8,11 @@ constraints, and ideally run on a GPU with 32-bit floats.
 Make testing a priority.
 
 ## Milestones
-* Simulate composite shapes in two dimensions using a variational integrator
+* [completed] Simulate composite shapes in two dimensions using a variational integrator
   of the Lagrangian.
 * Introduce adaptive time-stepping to improve performance and stability.
-* Implement the Hamiltonian variant of the variational integrator.
+* [completed] Implement the Hamiltonian variant of the variational integrator.
 * Extend to three dimensions.
-* Implement collisions with external surfaces.
+* ~~Implement collisions with external surfaces.~~
 * Implement self collisions.
+* Compute gradients through variational integrator.
