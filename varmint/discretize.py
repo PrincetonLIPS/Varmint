@@ -3,6 +3,8 @@ import jax.numpy as np
 import jax.numpy.linalg as npla
 import scipy.optimize as spopt
 
+from varmint.levmar import get_lmfunc
+
 def discretize_eulag(L):
 
   def Ld(q1, q2, dt):
@@ -20,10 +22,10 @@ def discretize_eulag(L):
 
 def discretize_hamiltonian(L):
 
-  def Ld(q1, q2, dt):
+  def Ld(q1, q2, dt, args):
     q    = (q1 + q2) / 2
     qdot = (q2 - q1) / dt
-    return dt * L(q, qdot)
+    return dt * L(q, qdot, *args)
 
   grad_Ld_q1 = jax.jit(jax.grad(Ld, argnums=0))
   grad_Ld_q2 = jax.jit(jax.grad(Ld, argnums=1))
@@ -32,52 +34,25 @@ def discretize_hamiltonian(L):
 
 def get_hamiltonian_stepper(L):
 
-  Ld_q1, Ld_q2 = discretize_hamiltonian(L)
-  Ld_q1_jac = jax.jit(jax.jacfwd(Ld_q1, argnums=1))
+  D0_Ld, D1_Ld = discretize_hamiltonian(L)
 
-  # TODO: need to figure this out for time dependence.
-  @jax.custom_jvp
-  def step_q(q, p, dt):
+  @jax.jit
+  def residual_fun(new_q, args):
+    old_q, p, dt, l_args = args
+    return p + D0_Ld(old_q, new_q, dt, l_args)
 
-    res = spopt.least_squares(
-      lambda q_1: p + Ld_q1(q, q_1, dt),
-      q,
-      lambda q_1: Ld_q1_jac(q, q_1, dt),
-      method='lm',
-    )
-    # TODO: handle errors.
+  optfun = get_lmfunc(residual_fun, maxiters=200)
 
-    return res.x
+  def step_q(q, p, dt, args):
+    new_q = optfun(jax.lax.stop_gradient(q), (q, p, dt, args))
+    return new_q
 
-  @step_q.defjvp
-  def step_q_jvp(primals, tangents):
-    q, p, dt = primals
-    q_tan, p_tan, dt_tan = tangents
+  def step_p(q1, q2, dt, args):
+    return D1_Ld(q1, q2, dt, args)
 
-    # Can I do this with the above version?
-    res = spopt.least_squares(
-      lambda q_1: p + Ld_q1(q, q_1, dt),
-      q,
-      lambda q_1: Ld_q1_jac(q, q_1, dt),
-      method='lm',
-    )
-    # TODO: handle errors.
-
-    new_q = res.x
-    jac   = res.jac # verify
-
-    old_q_tan = jvp(lambda old_q: Ld_q1(old_q, new_q, dt), (q,), q_tan)
-
-    new_q_tan = - npla.solve(jac, old_q_tan + p_tan)
-
-    return new_q, new_q_tan
-
-  def step_p(q1, q2, dt):
-    return Ld_q2(q1, q2, dt)
-
-  def stepper(q, p, dt):
-    new_q = step_q(q, p, dt)
-    new_p = step_p(q, new_q, dt)
+  def stepper(q, p, dt, *args):
+    new_q = step_q(q, p, dt, args)
+    new_p = step_p(q, new_q, dt, args)
     return new_q, new_p
 
   return stepper

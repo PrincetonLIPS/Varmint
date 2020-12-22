@@ -10,7 +10,7 @@ class Test_Discretize_Hamiltonian(ut.TestCase):
 
   def test_stepping_pendulum_rest_1(self):
 
-    def lagrangian(q, qdot):
+    def lagrangian(q, qdot, *args):
       # Simple pendulum with a mass and length.
       # q is angle from hanging down vertically.
       gravity = 9.81 # m/s^2
@@ -39,7 +39,7 @@ class Test_Discretize_Hamiltonian(ut.TestCase):
 
   def test_stepping_pendulum_rest_2(self):
 
-    def lagrangian(q, qdot):
+    def lagrangian(q, qdot, *args):
       # Simple pendulum with a mass and length.
       # q is angle from hanging down vertically.
       gravity = 9.81 # m/s^2
@@ -69,7 +69,7 @@ class Test_Discretize_Hamiltonian(ut.TestCase):
 
   def test_stepping_pendulum_swing(self):
 
-    def lagrangian(q, qdot):
+    def lagrangian(q, qdot, *args):
       # Simple pendulum with a mass and length.
       # q is angle from hanging down vertically.
       gravity = 9.81 # m/s^2
@@ -103,10 +103,14 @@ class Test_Discretize_Hamiltonian(ut.TestCase):
 
   def test_stepping_pendulum_swing_grad(self):
 
+    @jax.jit
     def two_second_theta(params):
-      length = params[0]
-      mass   = params[1]
-      def lagrangian(q, qdot):
+      # params is an ndarray
+
+      def lagrangian(q, qdot, params):
+        mass = params[0]
+        length = params[1]
+
         gravity = 9.81
         ke = np.sum(0.5 * mass * length**2 * qdot**2)
         pe = -np.sum(mass*gravity*length*np.cos(q))
@@ -124,12 +128,22 @@ class Test_Discretize_Hamiltonian(ut.TestCase):
 
       # Roll forward two seconds. Very close to one period.
       for ii in range(200):
-        q, p = stepper(q, p, dt)
+        q, p = stepper(q, p, dt, params)
         Q.append(q)
         P.append(p)
 
-      return Q[-1]
+      return np.sum((Q[-1]-Q[0])**2)
 
-    g_2s_theta = jax.grad(two_second_theta)
+    p = np.array([2.0, 1.5])
+    # print(two_second_theta(p))
 
-    print(g_2s_theta(np.array([1.0, 2.0])))
+    vg_2s_theta = jax.jit(jax.value_and_grad(two_second_theta))
+
+    # Should not fail.
+    vg_2s_theta(p)
+
+    #step = 1e-1
+    #for ii in range(1000):
+    #  v, g = vg_2s_theta(p)
+    #  print(ii, v, p)
+    #  p = p - step*g
