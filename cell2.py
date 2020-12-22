@@ -91,7 +91,7 @@ while TT[-1] < T:
   print('\nt: %0.4f' % (TT[-1]))
 
   t0 = time.time()
-  if True:
+  if False:
     res = spopt.least_squares(
       lambda q_1: PP[-1] + Ld_dq1(QQ[-1], q_1, dt), # should be zero
       QQ[-1], # initialize at current location

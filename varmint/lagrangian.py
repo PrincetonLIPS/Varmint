@@ -129,25 +129,8 @@ def generate_lagrangian(shape, ref_ctrl):
 
   return lagrangian
 
-def generate_lagrangian_structured(shape, ref_ctrl):
+def generate_lagrangian_structured(shape):
   ''' For when all the patches have the same control point shapes. '''
-
-  # Precompute quantities in the reference configuration.
-  # FIXME: sketchy because we're re-using just one patch's func.
-  ref_jacs = jax.vmap(shape.patches[0].get_jacobian_u_fn(), in_axes=(0,))(
-    ref_ctrl
-  )
-
-  # Is this really what you're supposed to do to map multiple axes?
-  # FIXME: make this a vectorize.
-  ref_jac_dets = jax.vmap(jax.vmap(npla.det, in_axes=(0,)), in_axes=(0,))(
-    ref_jacs,
-  )
-
-  # Yes, explicit inverse is bad, but then we get to precompute.
-  ref_jac_invs = jax.vmap(jax.vmap(npla.inv, in_axes=(0,)), in_axes=(0,))(
-    ref_jacs,
-  )
 
   shape_unflatten = shape.get_unflatten_fn()
   def unflatten(q, qdot):
@@ -165,7 +148,27 @@ def generate_lagrangian_structured(shape, ref_ctrl):
   gravity = 981.0 # cm/s^2
 
   @jax.jit
-  def lagrangian(q, qdot):
+  def lagrangian(q, qdot, refq):
+
+    ref_ctrl, _ = unflatten(refq, np.zeros_like(refq))
+
+    # Precompute quantities in the reference configuration.
+    # FIXME: sketchy because we're re-using just one patch's func.
+    ref_jacs = jax.vmap(shape.patches[0].get_jacobian_u_fn(), in_axes=(0,))(
+      ref_ctrl
+    )
+
+    # Is this really what you're supposed to do to map multiple axes?
+    # FIXME: make this a vectorize.
+    ref_jac_dets = jax.vmap(jax.vmap(npla.det, in_axes=(0,)), in_axes=(0,))(
+      ref_jacs,
+    )
+
+    # Yes, explicit inverse is bad, but then we get to precompute.
+    # FIXME: not precomputing now so...
+    ref_jac_invs = jax.vmap(jax.vmap(npla.inv, in_axes=(0,)), in_axes=(0,))(
+      ref_jacs,
+    )
     def_ctrl, def_vels = unflatten(q, qdot)
 
     def_jacs = jax.vmap(jacobian_u_fn, in_axes=(0,))(
@@ -342,7 +345,7 @@ def generate_energies(shape, ref_ctrl):
     ke = kinetic_energy(q, qdot)
     sp = strain_potential(q, qdot)
     gp = gravity_potential(q, qdot)
-    dp = dissipation_potential(q, qdot)
+    dp = 0.0 # dissipation_potential(q, qdot)
     return ke - sp - gp + dp
 
   return lagrangian

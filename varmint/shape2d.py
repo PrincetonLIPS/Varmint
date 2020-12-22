@@ -191,7 +191,7 @@ class Shape2D:
 
         start_idx = end_idx
 
-      return ctrl, vels
+      return np.array(ctrl), np.array(vels)
 
     return unflatten
 

@@ -39,6 +39,19 @@ vmap_neohookean_energy2d = jax.jit(
   ),
 )
 
+@jax.custom_vjp
+def scale_gradient(scale, x):
+  return x
+
+def scale_gradient_fwd(scale, x):
+  return x, (scale,)
+
+def scale_gradient_bwd(res, g):
+  scale, = res
+  return (None, g * scale)
+
+scale_gradient.defvjp(scale_gradient_fwd, scale_gradient_bwd)
+
 class NeoHookean2D:
 
   def __init__(self, material, log=True, thickness=1):
