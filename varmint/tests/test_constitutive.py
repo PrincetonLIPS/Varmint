@@ -2,9 +2,9 @@ import unittest     as ut
 import jax.numpy    as np
 import numpy.random as npr
 
-from constitutive import *
-from materials    import *
-from exceptions   import *
+from varmint.constitutive import *
+from varmint.materials    import *
+from varmint.exceptions   import *
 
 class Test_NeoHookean2D(ut.TestCase):
 

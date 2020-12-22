@@ -1,7 +1,7 @@
 import unittest as ut
 
-from materials import *
-from exceptions import *
+from varmint.materials import *
+from varmint.exceptions import *
 
 class Test_Material(ut.TestCase):
 

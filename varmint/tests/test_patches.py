@@ -5,20 +5,19 @@ import numpy.random  as npr
 import numpy.testing as nptest
 import unittest      as ut
 
-import bsplines
-
-from constitutive import NeoHookean2D
-from materials    import NinjaFlex
-from patch2d      import Patch2D
-from exceptions   import LabelError
+from varmint.bsplines     import *
+from varmint.constitutive import NeoHookean2D
+from varmint.materials    import NinjaFlex
+from varmint.patch2d      import Patch2D
+from varmint.exceptions   import LabelError
 
 class Test_Patch2D_NoLabels(ut.TestCase):
   ''' Test basic functionality with no labels. '''
 
   def setUp(self):
     spline_deg = 4
-    xknots     = bsplines.default_knots(spline_deg, 10)
-    yknots     = bsplines.default_knots(spline_deg, 5)
+    xknots     = default_knots(spline_deg, 10)
+    yknots     = default_knots(spline_deg, 5)
     material   = NeoHookean2D(NinjaFlex)
     quad_deg   = 10
 
@@ -54,7 +53,7 @@ class Test_Patch2D_NoLabels(ut.TestCase):
 
   def test_deformation_fn(self):
     deformation_fn = self.patch.get_deformation_fn()
-    ctrl           = bsplines.mesh(np.arange(10), np.arange(5))
+    ctrl           = mesh(np.arange(10), np.arange(5))
     deformation    = deformation_fn(ctrl)
     num_points     = self.patch.num_quad_pts()
 
@@ -62,7 +61,7 @@ class Test_Patch2D_NoLabels(ut.TestCase):
 
   def test_jacobian_u_fn(self):
     jac_u_fn   = self.patch.get_jacobian_u_fn()
-    ctrl       = bsplines.mesh(np.arange(10), np.arange(5))
+    ctrl       = mesh(np.arange(10), np.arange(5))
     jac_u      = jac_u_fn(ctrl)
     num_points = self.patch.num_quad_pts()
 
@@ -70,7 +69,7 @@ class Test_Patch2D_NoLabels(ut.TestCase):
 
   def test_jacobian_ctrl_fn(self):
     jac_ctrl_fn = self.patch.get_jacobian_ctrl_fn()
-    ctrl        = bsplines.mesh(np.arange(10.), np.arange(5.))
+    ctrl        = mesh(np.arange(10.), np.arange(5.))
     jac_ctrl    = jac_ctrl_fn(ctrl)
     num_points  = self.patch.num_quad_pts()
 
@@ -96,8 +95,8 @@ class Test_Patch2D_Labels(ut.TestCase):
 
   def setUp(self):
     deg    = 4
-    xknots = bsplines.default_knots(deg, 10)
-    yknots = bsplines.default_knots(deg, 5)
+    xknots = default_knots(deg, 10)
+    yknots = default_knots(deg, 5)
     labels = onp.zeros((10,5), dtype='<U256')
     labels[0,0] = 'alfa'
     labels[0,1] = 'bravo'
