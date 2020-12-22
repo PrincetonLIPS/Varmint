@@ -134,14 +134,16 @@ def optfun_jvp(fun, jacfun, cond_fun, body_fun, factor, primals, tangents):
   _, arg_tans = tangents
 
   x_star, res = _optfun(fun, jacfun, cond_fun, body_fun, factor, x0, args)
-  Jx_star = res.Jx # wrt first argument only
+  svd = res.svd
 
   # Function in terms of args only.
   fun_x_star = partial(fun, x_star)
   _, tangents_out = jax.jvp(fun_x_star, (args,), (arg_tans,))
 
-  # Think harder about this.  Need to sum over parts os tangents right?
-  x_star_tans = -npla.solve(Jx_star, tangents_out)
+  # We already have the SVD of Jx/diagD, so use that instead of npla.solve.
+  #x_star_tans = -npla.solve(res.Jx, tangents_out)
+  inv_Jx = ((svd.Vt.T / svd.diagS) @ svd.U.T) * res.diagD
+  x_star_tans = - inv_Jx @ tangents_out
 
   return x_star, x_star_tans
 
