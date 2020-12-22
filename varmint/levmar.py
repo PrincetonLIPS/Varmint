@@ -169,7 +169,9 @@ def get_lmfunc(
           be JIT-ed.  Takes two arguments.  The first one is the vector of
           inputs we're finding the optimal values for.  The second one is some
           arbitrary vector that specifies variable behavior.  This should be
-          a fixed size and make JAX happy in all the right ways.
+          a fixed size and make JAX happy in all the right ways. Probably you
+          should be differentiating the L-M loop with respect to one of these
+          if you want this to work.
 
    - maxiters: The maximum number of L-M iterations per optimization.
                Default is 100.

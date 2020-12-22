@@ -435,6 +435,8 @@ class Test_LevenbergMarquardt_Jacobian(ut.TestCase):
       nptest.assert_array_almost_equal(jac, A)
 
 
+class Test_LevenbergMarquardt_Gradient(ut.TestCase):
+
   def test_quadratic_grad_1(self):
     ''' Test basic gradient through L-M. '''
 
@@ -556,3 +558,106 @@ class Test_LevenbergMarquardt_Jacobian(ut.TestCase):
     for ii in range(100):
       target = npr.randn(6)
       check_grads(loss, (target,), order=1, eps=1e-3)
+
+
+class Test_LevenbergMarquardt_MultiGrad(ut.TestCase):
+
+  def test_quadratic_grad_1(self):
+    ''' Test multi-object gradient through L-M. '''
+
+    npr.seed(1)
+
+    def quad(x, args):
+      target1, target2 = args
+      return x - target1 - target2
+
+    optfun = get_lmfunc(quad)
+
+    def opt_result(target1, target2):
+      x0 = np.zeros(5)
+      return optfun(x0, (target1, target2))
+
+    # Made up function to take vector to scalar.
+    def loss(target1, target2):
+      return np.sum(opt_result(target1, target2)**2)
+
+    for ii in range(100):
+      target1 = npr.randn(5)
+      target2 = npr.randn(5)
+      check_grads(loss, (target1, target2,), order=1, eps=1e-3)
+
+  def test_quadratic_grad_2(self):
+    ''' Test multi-object non-linear gradient through L-M. '''
+
+    npr.seed(1)
+
+    def quad(x, args):
+      target1, target2 = args
+      return x - target1**2 - target2
+
+    optfun = get_lmfunc(quad)
+
+    def opt_result(target1, target2):
+      x0 = np.zeros(5)
+      return optfun(x0, (target1, target2))
+
+    # Made up function to take vector to scalar.
+    def loss(target1, target2):
+      return np.sum(opt_result(target1, target2)**2)
+
+    for ii in range(100):
+      target1 = npr.randn(5)
+      target2 = npr.randn(5)
+      check_grads(loss, (target1, target2), order=1, eps=1e-3)
+
+
+  def test_quadratic_grad_3(self):
+    ''' Test multi-object gradient with non-diagonal Jacobian through L-M. '''
+
+    npr.seed(1)
+    A = npr.randn(5,5)
+    B = npr.randn(5,5)
+
+    def quad(x, args):
+      target1, target2 = args
+      return x - A @ target1 - B @ target2
+
+    optfun = get_lmfunc(quad)
+
+    def opt_result(target1, target2):
+      x0 = np.zeros(5)
+      return optfun(x0, (target1, target2))
+
+    # Made up function to take vector to scalar.
+    def loss(target1, target2):
+      return np.sum(opt_result(target1, target2)**2)
+
+    for ii in range(100):
+      target1 = npr.randn(5)
+      target2 = npr.randn(5)
+      check_grads(loss, (target1, target2), order=1, eps=1e-2)
+
+
+  def test_quadratic_grad_4(self):
+    ''' Test gradient with respect to matrix. '''
+
+    npr.seed(1)
+    a = npr.randn(4)
+
+    def quad(x, args):
+      target, = args
+      return x - target @ a
+
+    optfun = get_lmfunc(quad)
+
+    def opt_result(target):
+      x0 = np.zeros(5)
+      return optfun(x0, (target,))
+
+    # Made up function to take vector to scalar.
+    def loss(target):
+      return np.sum(opt_result(target)**2)
+
+    for ii in range(100):
+      target = npr.randn(5,4)
+      check_grads(loss, (target,), order=1, eps=1e-2)
