@@ -110,6 +110,9 @@ def simulate(refq):
 def loss(refq):
 
   QQ, PP = simulate(refq)
+
+  final_q, final_p = unflatten(QQ[-1], PP[-1])
+
   return np.sum(QQ[-1])
 
 vg_loss = jax.value_and_grad(loss)

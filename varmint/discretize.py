@@ -44,7 +44,8 @@ def get_hamiltonian_stepper(L):
   optfun = get_lmfunc(residual_fun, maxiters=200)
 
   def step_q(q, p, dt, args):
-    new_q = optfun(jax.lax.stop_gradient(q), (q, p, dt, args))
+    new_q, res = optfun(jax.lax.stop_gradient(q), (q, p, dt, args))
+    print(res.nFx, res.nit, res.nfev, res.njev)
     return new_q
 
   def step_p(q1, q2, dt, args):

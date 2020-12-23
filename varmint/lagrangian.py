@@ -148,9 +148,7 @@ def generate_lagrangian_structured(shape):
   gravity = 981.0 # cm/s^2
 
   @jax.jit
-  def lagrangian(q, qdot, refq):
-
-    ref_ctrl, _ = unflatten(refq, np.zeros_like(refq))
+  def lagrangian(q, qdot, ref_ctrl):
 
     # Precompute quantities in the reference configuration.
     # FIXME: sketchy because we're re-using just one patch's func.
