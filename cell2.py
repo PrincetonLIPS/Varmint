@@ -60,11 +60,11 @@ shape = Shape2D(*[
 
 unflatten  = shape.get_unflatten_fn()
 flatten    = shape.get_flatten_fn()
-lagrangian = generate_lagrangian_structured(shape)
-stepper    = get_hamiltonian_stepper(lagrangian)
+lagrangian, strain_forces = generate_lagrangian_structured(shape)
+stepper    = get_hamiltonian_stepper(lagrangian, strain_forces)
 
 dt = 0.01
-T  = 0.5
+T  = 1.0
 
 def radii_to_ctrl(radii):
   return generate_quad_lattice(widths, heights, init_radii)

@@ -10,7 +10,7 @@ def discretize_eulag(L):
   def Ld(q1, q2, dt):
     q    = (q1 + q2) / 2
     qdot = (q2 - q1) / dt
-    return dt * L(q, qdot)
+    return L(q, qdot)
 
   grad_Ld_q1 = jax.jit(jax.grad(Ld, argnums=0))
   grad_Ld_q2 = jax.jit(jax.grad(Ld, argnums=1))
@@ -25,21 +25,30 @@ def discretize_hamiltonian(L):
   def Ld(q1, q2, dt, args):
     q    = (q1 + q2) / 2
     qdot = (q2 - q1) / dt
-    return dt * L(q, qdot, *args)
+    return L(q, qdot, *args)
 
   grad_Ld_q1 = jax.jit(jax.grad(Ld, argnums=0))
   grad_Ld_q2 = jax.jit(jax.grad(Ld, argnums=1))
 
   return grad_Ld_q1, grad_Ld_q2
 
-def get_hamiltonian_stepper(L):
+def get_hamiltonian_stepper(L, F=None):
+
+
+  # For thinking about forces, see West thesis:
+  # https://thesis.library.caltech.edu/2492/1/west_thesis.pdf
+  # Page 16, Sec 1.5.6.
+  # Could include in optimization or in momentum update, I think.
+  # Momentum update seems much easier.
 
   D0_Ld, D1_Ld = discretize_hamiltonian(L)
 
   @jax.jit
   def residual_fun(new_q, args):
     old_q, p, dt, l_args = args
-    return p + D0_Ld(old_q, new_q, dt, l_args)
+    q = (old_q + new_q)/2.0
+    qdot = (new_q-old_q) / dt
+    return p + D0_Ld(old_q, new_q, dt, l_args) + F(q, qdot, *l_args)
 
   optfun = get_lmfunc(residual_fun, maxiters=200)
 
@@ -49,7 +58,15 @@ def get_hamiltonian_stepper(L):
     return new_q
 
   def step_p(q1, q2, dt, args):
-    return D1_Ld(q1, q2, dt, args)
+
+    if F is None:
+      return D1_Ld(q1, q2, dt, args)
+    else:
+
+      q = (q1 + q2) / 2
+      qdot = (q2 - q1) / dt
+
+      return D1_Ld(q1, q2, dt, args) + F(q, qdot, *args)
 
   def stepper(q, p, dt, *args):
     new_q = step_q(q, p, dt, args)
