@@ -108,7 +108,6 @@ def sim_radii(radii):
 
   return ctrl_seq
 
-@jax.jit
 def loss(radii):
   ctrl_seq = sim_radii(radii)
 
