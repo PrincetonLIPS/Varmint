@@ -137,6 +137,7 @@ def generate_lagrangian_structured(shape):
     ctrl, vels = shape_unflatten(q, qdot)
     return np.array(ctrl), np.array(vels)
 
+  # FIXME: Sketchy to just use one patch.
   jacobian_u_fn  = shape.patches[0].get_jacobian_u_fn()
   energy_fn      = shape.patches[0].get_energy_fn()
   quad_fn        = shape.patches[0].get_quad_fn()
@@ -150,58 +151,64 @@ def generate_lagrangian_structured(shape):
   gravity = 981.0 # cm/s^2
 
   @jax.jit
-  def strain_potential(q, qdot, ref_ctrl):
+  def lagrangian(q, qdot, ref_ctrl):
+    def_ctrl, def_vels = unflatten(q, qdot)
 
-    # FIXME: sketchy because we're re-using just one patch's func.
-    ref_jacs = jax.vmap(shape.patches[0].get_jacobian_u_fn(), in_axes=(0,))(
+    ref_jacs = jax.vmap(
+      jacobian_u_fn,
+      in_axes=(0,)
+    )(
       ref_ctrl
     )
 
-    # Is this really what you're supposed to do to map multiple axes?
-    # FIXME: make this a vectorize.
-    ref_jac_dets = jax.vmap(jax.vmap(npla.det, in_axes=(0,)), in_axes=(0,))(
-      ref_jacs,
-    )
-
-    # Yes, explicit inverse is bad, but then we get to precompute.
-    # FIXME: not precomputing now so...
-    ref_jac_invs = jax.vmap(jax.vmap(npla.inv, in_axes=(0,)), in_axes=(0,))(
-      ref_jacs,
-    )
-    def_ctrl, _ = unflatten(q, qdot)
-
-    def_jacs = jax.vmap(jacobian_u_fn, in_axes=(0,))(
+    def_jacs = jax.vmap(
+      jacobian_u_fn,
+      in_axes=(0,)
+    )(
       def_ctrl
     )
 
-    defgrads = jax.vmap(jax.vmap(np.dot, in_axes=(0,0,)), in_axes=(0,0,))(
-      def_jacs, ref_jac_invs,
-    )
-
-    strain_energy_density = jax.vmap(jax.vmap(energy_fn, in_axes=(0,)), in_axes=(0,))(defgrads) \
-      * np.abs(ref_jac_dets)
-
-    strain_potential = np.sum(jax.vmap(quad_fn, in_axes=(0,))(
-      strain_energy_density
-    ))
-
-    return 1e3*strain_potential
-
-  @jax.jit
-  def gravity_potential(q, qdot, ref_ctrl):
-
-     # FIXME: sketchy because we're re-using just one patch's func.
-    ref_jacs = jax.vmap(shape.patches[0].get_jacobian_u_fn(), in_axes=(0,))(
-      ref_ctrl
-    )
-
-    # Is this really what you're supposed to do to map multiple axes?
-    # FIXME: make this a vectorize.
-    ref_jac_dets = jax.vmap(jax.vmap(npla.det, in_axes=(0,)), in_axes=(0,))(
+    #defgrads = jax.vmap(jax.vmap(np.dot, in_axes=(0,0,)), in_axes=(0,0,))(
+    #  def_jacs, ref_jac_invs,
+    #)
+    defgrads = jax.vmap(
+      jax.vmap(
+        lambda A, B: npla.solve(B.T, A.T).T,
+        in_axes=(0,0),
+      ),
+      in_axes=(0,0),
+    )(
+      def_jacs,
       ref_jacs,
     )
 
-    def_ctrl, _ = unflatten(q, qdot)
+    ref_jac_dets = jax.vmap(
+      jax.vmap(
+        npla.det,
+        in_axes=(0,)
+      ), in_axes=(0,)
+    )(
+      ref_jacs,
+    )
+
+    strain_energy_density = jax.vmap(
+      jax.vmap(
+        energy_fn,
+        in_axes=(0,)
+      ),
+      in_axes=(0,)
+    )(
+      defgrads
+    ) * np.abs(ref_jac_dets)
+
+    strain_potential = 1e3 * np.sum(
+      jax.vmap(
+        quad_fn,
+        in_axes=(0,)
+      )(
+      strain_energy_density
+      )
+    )
 
     mass_density = mat_densities[:,np.newaxis] * np.abs(ref_jac_dets)
 
@@ -209,64 +216,63 @@ def generate_lagrangian_structured(shape):
 
     grav_energy_density = positions[:,:,1] * gravity * mass_density
 
-    gravity_potential = np.sum(jax.vmap(quad_fn, in_axes=(0,))(grav_energy_density))
-
-    return 1e-7*gravity_potential
-
-  @jax.jit
-  def kinetic_energy(q, qdot, ref_ctrl):
-
-    # FIXME: so much recomputation...
-
-    # FIXME: sketchy because we're re-using just one patch's func.
-    ref_jacs = jax.vmap(shape.patches[0].get_jacobian_u_fn(), in_axes=(0,))(
-      ref_ctrl
+    gravity_potential = 1e-7 * np.sum(
+      jax.vmap(
+        quad_fn,
+        in_axes=(0,)
+      )(
+        grav_energy_density
+      )
     )
 
-    # Is this really what you're supposed to do to map multiple axes?
-    # FIXME: make this a vectorize.
-    ref_jac_dets = jax.vmap(jax.vmap(npla.det, in_axes=(0,)), in_axes=(0,))(
-      ref_jacs,
+    ctrl_jacs = jax.vmap(
+      jacobian_ctrl_fn,
+      in_axes=(0,)
+    )(
+      def_ctrl
     )
 
-    def_ctrl, def_vels = unflatten(q, qdot)
+    ctrl_jacTjac = jax.vmap(
+      jax.vmap(
+        np.tensordot,
+        in_axes=(0,0,None)
+      ),
+      in_axes=(0,0,None)
+    )(
+      ctrl_jacs,
+      ctrl_jacs,
+      (0,0,)
+    )
 
-    ctrl_jacs = jax.vmap(jacobian_ctrl_fn, in_axes=(0,))(def_ctrl)
-
-    mass_density = mat_densities[:,np.newaxis] * np.abs(ref_jac_dets)
-
-    ctrl_jacTjac = jax.vmap(jax.vmap(
-      np.tensordot,
-      in_axes=(0,0,None)), in_axes=(0,0,None))(ctrl_jacs, ctrl_jacs, (0,0,))
     mass_matrices = (ctrl_jacTjac.T * mass_density.T).T
-    mass_matrix = jax.vmap(quad_fn, in_axes=(0,))(mass_matrices)
 
-    kinetic_energy = np.sum(jax.vmap(lambda mm, vv: 0.5 * np.tensordot(
-      np.tensordot(mm, vv, ((3,4,5), (0,1,2))),
-      vv, ((0,1,2), (0,1,2))), in_axes=(0,0,))(mass_matrix, def_vels))
+    mass_matrix = jax.vmap(
+      quad_fn,
+      in_axes=(0,)
+    )(
+      mass_matrices
+    )
 
-    return 1e-7*kinetic_energy
+    kinetic_energy = 1e-7 * np.sum(
+      jax.vmap(
+        lambda mm, vv: 0.5 * np.tensordot(
+          np.tensordot(
+            mm,
+            vv,
+            ((3,4,5), (0,1,2))
+          ),
+          vv,
+          ((0,1,2), (0,1,2))
+        ),
+        in_axes=(0,0,)
+      )(
+        mass_matrix,
+        def_vels
+      )
+    )
 
-  def lagrangian(q, qdot, ref_ctrl):
-    return kinetic_energy(q, qdot, ref_ctrl) \
-      - gravity_potential(q, qdot, ref_ctrl) \
-      - strain_potential(q, qdot, ref_ctrl)
+    lag = kinetic_energy - gravity_potential - strain_potential
 
-  strain_grad = jax.jit(jax.grad(strain_potential, argnums=0))
+    return lag
 
-  @jax.jit
-  def internal_friction_force(q, qdot, ref_ctrl):
-    ''' Needs to output generalized forces. '''
-
-    #strain_energy_grad = strain_grad(q, qdot, ref_ctrl)
-
-    # Negative forces due to strain energy changes.
-    dissipative_force = -1e-7 * qdot
-    # dissipative_force = -5.0 * qdot * strain_energy_grad**2
-    #print(npla.norm(strain_energy_grad))
-
-    return dissipative_force
-
-
-
-  return lagrangian, internal_friction_force
+  return lagrangian

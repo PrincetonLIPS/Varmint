@@ -25,6 +25,8 @@ class WigglyMat(Material):
 
 mat = NeoHookean2D(WigglyMat)
 
+friction = 1e-7
+
 npr.seed(5)
 
 # Create patch parameters.
@@ -41,7 +43,7 @@ heights    = 5*np.ones(num_y)
 init_radii = np.ones((num_x,num_y,(num_ctrl-1)*4))*0.5
 init_ctrl  = generate_quad_lattice(widths, heights, init_radii)
 labels     = match_labels(init_ctrl, keep_singletons=True)
-left_side  = init_ctrl[:,:,:,0] == 0.0
+left_side  = onp.array(init_ctrl[:,:,:,0] == 0.0)
 fixed_dict = dict(zip(labels[left_side], init_ctrl[left_side,:]))
 
 # Create the shape.
@@ -58,18 +60,18 @@ shape = Shape2D(*[
   for  ii in range(len(init_ctrl))
 ])
 
+friction_force = lambda q, qdot, ref_ctrl: -friction * qdot
+
 unflatten  = shape.get_unflatten_fn()
 flatten    = shape.get_flatten_fn()
-lagrangian, strain_forces = generate_lagrangian_structured(shape)
-stepper    = get_hamiltonian_stepper(lagrangian, strain_forces)
+lagrangian = generate_lagrangian_structured(shape)
+stepper    = get_hamiltonian_stepper(lagrangian, friction_force)
 
 dt = 0.01
-T  = 1.0
+T  = 0.05
 
-def radii_to_ctrl(radii):
-  return generate_quad_lattice(widths, heights, init_radii)
-
-def simulate(ref_ctrl):
+def simulate(refq):
+  ref_ctrl, _ = unflatten(refq, np.zeros_like(refq))
 
   # Initially in the ref config with zero momentum.
   q, p = flatten(ref_ctrl, np.zeros_like(ref_ctrl))
@@ -88,8 +90,44 @@ def simulate(ref_ctrl):
 
   return QQ
 
-QQ = simulate(radii_to_ctrl(init_radii))
+def radii_to_ctrl(radii):
+  return generate_quad_lattice(widths, heights, radii)
 
-ctrl_seq = [ unflatten(q, np.zeros_like(q))[0] for q in QQ ]
+def sim_radii(radii):
 
-shape.create_movie(ctrl_seq, 'cell2.mp4', labels=False)
+  # Construct reference shape.
+  ref_ctrl = radii_to_ctrl(radii)
+
+  refq, _ = flatten(ref_ctrl, np.zeros_like(ref_ctrl))
+
+  # Simulate the reference shape.
+  QQ = simulate(refq)
+
+  # Turn this into a sequence of control point sets.
+  ctrl_seq = [ unflatten(q, np.zeros_like(q))[0] for q in QQ ]
+
+  return ctrl_seq
+
+@jax.jit
+def loss(radii):
+  ctrl_seq = sim_radii(radii)
+
+  return -np.mean(ctrl_seq[-1]), ctrl_seq
+
+#print(loss(init_radii))
+
+valgrad_loss = jax.value_and_grad(loss, has_aux=True)
+
+radii = init_radii
+
+lr = 1.0
+for ii in range(10):
+  (val, ctrl_seq), gradmo = valgrad_loss(radii)
+  print()
+  print(radii)
+  print(val)
+  print(gradmo)
+
+  shape.create_movie(ctrl_seq, 'cell2-%d.mp4' % (ii+1), labels=False)
+
+  radii = radii - lr * gradmo

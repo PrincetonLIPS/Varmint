@@ -126,7 +126,7 @@ def optfun(fun, jacfun, cond_fun, body_fun, factor, x0, args):
   # FIXME: I don't see how to get a result back through this without has_aux
   # working for Jacobian computation.
 
-  return x_star, res
+  return x_star#, res
 
 @optfun.defjvp
 def optfun_jvp(fun, jacfun, cond_fun, body_fun, factor, primals, tangents):
@@ -135,9 +135,6 @@ def optfun_jvp(fun, jacfun, cond_fun, body_fun, factor, primals, tangents):
 
   x_star, res = _optfun(fun, jacfun, cond_fun, body_fun, factor, x0, args)
   svd = res.svd
-
-  if res.nit > 10:
-    raise "MAX ITERS!!!"
 
   # Function in terms of args only.
   fun_x_star = partial(fun, x_star)
@@ -150,7 +147,8 @@ def optfun_jvp(fun, jacfun, cond_fun, body_fun, factor, primals, tangents):
   # inv_Jx = ((svd.Vt.T  / svd.diagS) @ svd.U.T) * res.diagD
   # x_star_tans = - inv_Jx @ tangents_out
 
-  return (x_star, res), x_star_tans
+  #return (x_star, res), x_star_tans
+  return x_star, x_star_tans
 
 def get_lmfunc(
     fun,

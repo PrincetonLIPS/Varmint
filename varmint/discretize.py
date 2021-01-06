@@ -46,15 +46,23 @@ def get_hamiltonian_stepper(L, F=None):
   @jax.jit
   def residual_fun(new_q, args):
     old_q, p, dt, l_args = args
-    q = (old_q + new_q)/2.0
-    qdot = (new_q-old_q) / dt
-    return p + D0_Ld(old_q, new_q, dt, l_args) + F(q, qdot, *l_args)
+
+    if F is None:
+      return p + D0_Ld(old_q, new_q, dt, l_args)
+    else:
+
+      q    = (old_q + new_q)/2.0
+      qdot = (new_q-old_q) / dt
+
+      return p + D0_Ld(old_q, new_q, dt, l_args) + F(q, qdot, *l_args)
 
   optfun = get_lmfunc(residual_fun, maxiters=200)
 
   def step_q(q, p, dt, args):
-    new_q, res = optfun(jax.lax.stop_gradient(q), (q, p, dt, args))
-    print(res.nFx, res.nit, res.nfev, res.njev)
+    new_q = optfun(jax.lax.stop_gradient(q), (q, p, dt, args))
+
+    # new_q, res = optfun(jax.lax.stop_gradient(q), (q, p, dt, args))
+    # print(res.nFx, res.nit, res.nfev, res.njev)
     return new_q
 
   def step_p(q1, q2, dt, args):

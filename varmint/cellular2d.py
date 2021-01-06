@@ -1,4 +1,5 @@
-import numpy as np
+import jax.numpy as np
+import numpy     as onp
 
 from scipy.spatial          import Delaunay
 from scipy.sparse           import csr_matrix
@@ -40,12 +41,12 @@ def match_labels(ctrl, keep_singletons=True, epsilon=1e-6):
     labels[loners==1] = -1
 
   # Turn into strings as appropriate.
-  str_labels = np.array(list(map(
+  str_labels = onp.array(list(map(
     lambda ii: '' if ii < 0 else 'group%d' % (ii),
     labels)), dtype='<U256')
 
   # Reshape to reflect the control point shape, i.e., excluding the last dim.
-  str_labels = np.reshape(str_labels, ctrl.shape[:-1])
+  str_labels = onp.reshape(str_labels, ctrl.shape[:-1])
 
   return str_labels
 
@@ -91,8 +92,8 @@ def _gen_cell(corners, radii):
   return np.array(ctrl)
 
 def generate_quad_lattice(widths, heights, radii):
-  width_mesh  = np.concatenate([[0.0], np.cumsum(widths)])
-  height_mesh = np.concatenate([[0.0], np.cumsum(heights)])
+  width_mesh  = np.concatenate([np.array([0.0]), np.cumsum(widths)])
+  height_mesh = np.concatenate([np.array([0.0]), np.cumsum(heights)])
 
   ctrl = []
   for ii in range(len(widths)):
