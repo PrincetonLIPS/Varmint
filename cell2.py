@@ -120,13 +120,13 @@ valgrad_loss = jax.value_and_grad(loss, has_aux=True)
 radii = init_radii
 
 lr = 1.0
-for ii in range(10):
+for ii in range(50):
   (val, ctrl_seq), gradmo = valgrad_loss(radii)
   print()
-  print(radii)
+  #print(radii)
   print(val)
   print(gradmo)
 
   shape.create_movie(ctrl_seq, 'cell2-%d.mp4' % (ii+1), labels=False)
 
-  radii = radii - lr * gradmo
+  radii = np.clip(radii - lr * gradmo, 0.05, 0.95)
