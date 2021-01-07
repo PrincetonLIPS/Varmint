@@ -44,6 +44,7 @@ init_radii = np.ones((num_x,num_y,(num_ctrl-1)*4))*0.5
 init_ctrl  = generate_quad_lattice(widths, heights, init_radii)
 labels     = match_labels(init_ctrl, keep_singletons=True)
 left_side  = onp.array(init_ctrl[:,:,:,0] == 0.0)
+
 fixed_dict = dict(zip(labels[left_side], init_ctrl[left_side,:]))
 
 # Create the shape.
@@ -60,7 +61,7 @@ shape = Shape2D(*[
   for  ii in range(len(init_ctrl))
 ])
 
-friction_force = lambda q, qdot, ref_ctrl: -friction * qdot
+friction_force = lambda q, qdot, ref_ctrl, fixed_dict: -friction * qdot
 
 unflatten  = shape.get_unflatten_fn()
 flatten    = shape.get_flatten_fn()
@@ -71,7 +72,7 @@ dt = 0.01
 T  = 2.0
 
 def simulate(refq):
-  ref_ctrl, _ = unflatten(refq, np.zeros_like(refq))
+  ref_ctrl, _ = unflatten(refq, np.zeros_like(refq), fixed_dict)
 
   # Initially in the ref config with zero momentum.
   q, p = flatten(ref_ctrl, np.zeros_like(ref_ctrl))
@@ -82,7 +83,7 @@ def simulate(refq):
 
   while TT[-1] < T:
     print(TT[-1])
-    new_q, new_p = stepper(QQ[-1], PP[-1], dt, ref_ctrl)
+    new_q, new_p = stepper(QQ[-1], PP[-1], dt, ref_ctrl, fixed_dict)
 
     QQ.append(new_q)
     PP.append(new_p)
@@ -104,7 +105,7 @@ def sim_radii(radii):
   QQ = simulate(refq)
 
   # Turn this into a sequence of control point sets.
-  ctrl_seq = [ unflatten(q, np.zeros_like(q))[0] for q in QQ ]
+  ctrl_seq = [ unflatten(q, np.zeros_like(q), fixed_dict)[0] for q in QQ ]
 
   return ctrl_seq
 

@@ -12,9 +12,6 @@ from .bsplines import (
   bspline2d_derivs_ctrl,
 )
 
-# TODO: this will own its quadrature points.
-# TODO: will also have its own material.
-
 class Patch2D:
   ''' Class for individual patches in two dimensions.
 
@@ -55,7 +52,7 @@ class Patch2D:
                they will get dimension-specific extensions appended to them.
 
      - fixed: An optional dictionary that maps labels to 2d locations, as
-              appropriate.
+              appropriate. FIXME: just a list/set now.
     '''
     self.xknots     = xknots
     self.yknots     = yknots
@@ -73,9 +70,7 @@ class Patch2D:
 
     if labels is None:
       # Generate an empty label matrix.
-      self.pretty_labels = onp.zeros((self.num_xctrl, self.num_yctrl),
-                                     dtype='<U256')
-      self.labels = onp.zeros((self.num_xctrl, self.num_yctrl,2),
+      self.labels = onp.zeros((self.num_xctrl, self.num_yctrl),
                               dtype='<U256')
 
     else:
@@ -83,28 +78,7 @@ class Patch2D:
       if labels.shape != (self.num_xctrl,self.num_yctrl):
         raise DimensionError('The labels must have shape %d x %d.' \
                              % (self.num_xctrl, self.num_yctrl))
-      self.pretty_labels = labels
-      self.labels = onp.tile(labels[:,:,np.newaxis], (1, 1, 2,))
-      rows, cols = onp.nonzero(labels)
-      self.labels[rows,cols,:] = onp.core.defchararray.add(
-        self.labels[rows,cols,:],
-        onp.array(['_x', '_y']),
-      )
-
-    # Expand the fixed labels with dimensions.
-    self.fixed = {}
-    if fixed:
-      for label, value in fixed.items():
-        for ii, dim in enumerate(['_x', '_y']):
-          newlabel = label + dim
-          if not self.has_label(newlabel):
-            continue
-            #raise LabelError('Label %s not found' % (newlabel))
-          else:
-            self.fixed[label + dim] = value[ii]
-      self.pretty_fixed = fixed
-    else:
-      self.pretty_fixed = {}
+      self.labels = labels
 
     self.compute_quad_points()
 
@@ -240,12 +214,12 @@ class Patch2D:
      Throws a LabelError exception if the label is not present or more than one
      of the labels is present.
     '''
-    rows, cols, third = onp.nonzero(self.labels == label)
-    if rows.shape[0] > 1 or cols.shape[0] > 1 or third.shape[0] > 1:
+    rows, cols = onp.nonzero(self.labels == label)
+    if rows.shape[0] > 1 or cols.shape[0] > 1:
       raise LabelError('More than one control point has label %s.' % (label))
-    elif rows.shape[0] == 0 or cols.shape[0] == 0 or third.shape[0] == 0:
+    elif rows.shape[0] == 0 or cols.shape[0] == 0:
       raise LabelError('No control points have label %s.' % (label))
-    return rows[0], cols[0], third[0]
+    return rows[0], cols[0]
 
   def get_labels(self):
     ''' Get all the labels at once, along with their indices.

@@ -3,6 +3,7 @@ import jax.numpy         as np
 import numpy             as onp
 import matplotlib.pyplot as plt
 
+from operator import itemgetter
 from matplotlib.animation import FuncAnimation
 
 from .exceptions import (
@@ -64,17 +65,12 @@ class Shape2D:
     return all_coincidence
 
   def get_fixed(self):
-    ''' Get all the fixed constraints. '''
+    ''' Gather all fixed constraints. '''
 
-    all_fixed = {}
+    all_fixed = set()
     for patch in self.patches:
-      for label, value in patch.get_fixed().items():
-        if label in all_fixed:
-          if all_fixed[label] != value:
-            raise LabelError("Inconsistent fixed constraint %s: %f vs %f" \
-                             % (label, all_fixed[label], value))
-
-        all_fixed[label] = value
+      for label in patch.get_fixed():
+        all_fixed.add(label)
 
     return all_fixed
 
@@ -87,71 +83,102 @@ class Shape2D:
   def flatten_mat(self):
 
     # Set of keys that are fixed to particular values.
-    fixed = self.get_fixed().keys()
+    fixed = self.get_fixed()
 
     patch_indices = self.patch_indices()
 
     # Indices to delete.
-    to_delete = set()
+    to_delete = []
 
     # Loop over all coincidence constraints.
     for label, entries in self.get_coincidence().items():
+      # Entries are only row/col.
 
       if label in fixed:
         # If the label is in the fixed set, delete them all.
         # Note that all fixed labels that are used should appear here.
         for patch, indices in entries:
-          to_delete.add( patch_indices[patch][indices] )
+          to_delete.append( patch_indices[patch][indices] )
 
       else:
 
         # Connect the entries to their global indices and sort.
-        index_list = sorted(map(
-          lambda ent: patch_indices[ent[0]][ent[1]], entries
-        ))
+        index_list = sorted(
+          sorted(
+            map(
+              lambda ent: patch_indices[ent[0]][ent[1]], entries
+            ),
+            key=itemgetter(1),
+          ),
+          key=itemgetter(0),
+        )
 
-        # Keep the smallest one, delete the rest.
-        to_delete.update(index_list[1:])
+        # Keep the smallest one from the sort, delete the rest.
+        to_delete.extend(index_list[1:])
 
     num_unflat = self.unflat_size()
 
-    # Return an identity matrix with those rows deleted.
-    return onp.delete(onp.eye(num_unflat), list(to_delete), axis=0)
+    # Expand the to_delete to include dimensions.
+    to_delete = [item for pair in to_delete for item in pair]
 
-  def unflatten_mat_vec(self):
+    # Return an identity matrix with those rows deleted.
+    return onp.delete(onp.eye(num_unflat), to_delete, axis=0)
+
+  def unflatten_mat(self):
     ''' The linear transformation that recovers all control points. '''
 
     fixed = self.get_fixed()
 
-    # Start with an empty vector and the transpose of the flattening matrix.
+    # Start with the transpose of the flattening matrix.
     unflat_mat = self.flatten_mat().T
-    unflat_vec = onp.zeros(unflat_mat.shape[0])
 
     patch_indices = self.patch_indices()
 
     # Loop over coincidence constraints.
     for label, entries in self.get_coincidence().items():
 
-      if label in fixed:
-        # Leave zeros in the matrix and put these in the vector.
-        for patch, indices in entries:
-          unflat_vec[patch_indices[patch][indices]] = fixed[label]
-
-      else:
+      if label not in fixed:
 
         # Connect the entries to their global indices and sort.
-        index_list = sorted(map(
-          lambda ent: patch_indices[ent[0]][ent[1]], entries
-        ))
+        index_list = sorted(
+          sorted(
+            map(
+              lambda ent: patch_indices[ent[0]][ent[1]], entries
+            ),
+            key=itemgetter(1),
+          ),
+          key=itemgetter(0),
+        )
 
-        # Slightly tricky because we need to account for having deleted entries
-        # that were before the one we're referencing.
-        parent = onp.nonzero(unflat_mat[index_list[0],:])[0][0]
+        # What is the index of the value being copied?
+        x_parent = onp.nonzero(unflat_mat[index_list[0][0],:])[0][0]
+        y_parent = onp.nonzero(unflat_mat[index_list[0][1],:])[0][0]
 
-        for child in index_list[1:]:
-          unflat_mat[child, parent] = 1
+        for pair in index_list[1:]:
+          unflat_mat[pair[0], x_parent] = 1
+          unflat_mat[pair[1], y_parent] = 1
 
-    return unflat_mat, unflat_vec
+    return unflat_mat
+
+  def unflatten_vec(self, fixed_dict):
+    sz = self.unflat_size()
+    unflat_vec = np.zeros(sz)
+
+    fixed = self.get_fixed()
+
+    patch_indices = self.patch_indices()
+
+    for patch in self.patches:
+      for label, indices in patch.get_labels():
+        if label in fixed:
+          for dim in [0,1]:
+            idx_dim = list(indices) + [dim]
+            #unflat_vec[patch_indices[patch][idx_dim]] = fixed_dict[label][dim]
+            unflat_vec = jax.ops.index_update(unflat_vec,
+                                              patch_indices[patch][idx_dim],
+                                              fixed_dict[label][dim])
+
+    return unflat_vec
 
   def get_flatten_fn(self):
 
@@ -169,13 +196,18 @@ class Shape2D:
     return flatten
 
   def get_unflatten_fn(self):
-    unflat_mat, unflat_vec = self.unflatten_mat_vec()
+    unflat_mat = self.unflatten_mat()
 
     sizes = [patch.get_ctrl_shape() for patch in self.patches]
     lens  = [onp.prod(size) for size in sizes]
 
-    def unflatten(flat_ctrl, flat_vels):
-      # Fixed control points have zero velocity.
+    def unflatten(flat_ctrl, flat_vels, fixed_dict):
+
+      unflat_vec = self.unflatten_vec(fixed_dict)
+
+      # FIXME: Do we need to have the velocities of moving but "fixed" points
+      # be non-zero?
+
       ravel_ctrl = unflat_mat @ flat_ctrl + unflat_vec
       ravel_vels = unflat_mat @ flat_vels
 
@@ -317,3 +349,5 @@ class Shape2D:
       blit=True,
     )
     anim.save(filename)
+
+    plt.close(fig)
