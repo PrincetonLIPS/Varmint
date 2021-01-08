@@ -1,4 +1,5 @@
 import jax
+import time
 import jax.numpy as np
 import jax.numpy.linalg as npla
 import scipy.optimize as spopt
@@ -55,7 +56,7 @@ def get_hamiltonian_stepper(L, F=None):
 
       return p + D0_Ld(old_q, new_q, dt, l_args) + F(q, qdot, *l_args)
 
-  optfun = get_lmfunc(residual_fun, maxiters=200)
+  optfun = get_lmfunc(residual_fun, maxiters=50)
 
   def step_q(q, p, dt, args):
     new_q = optfun(jax.lax.stop_gradient(q), (q, p, dt, args))
@@ -76,8 +77,17 @@ def get_hamiltonian_stepper(L, F=None):
       return D1_Ld(q1, q2, dt, args) + F(q, qdot, *args)
 
   def stepper(q, p, dt, *args):
+    t0 = time.time()
     new_q = step_q(q, p, dt, args)
-    new_p = step_p(q, new_q, dt, args)
+    t1 = time.time()
+    new_p = jax.lax.cond(
+      np.all(np.isfinite(new_q)),
+      lambda _: step_p(q, new_q, dt, args),
+      lambda _: np.ones_like(p) + np.nan,
+      None,
+    )
+    t2 = time.time()
+    print("\tstep_q = %0.2fs  step_p = %0.2fs" % (t1-t0, t2-t1))
     return new_q, new_p
 
   return stepper
