@@ -109,7 +109,14 @@ def _optfun(fun, jacfun, cond_fun, body_fun, factor, x0, args):
     cond_fun, body_fun, init_state,
   )
 
-  return state.x, state
+  ret_x = jax.lax.cond(
+    np.logical_or(state.hit_xtol, state.hit_ftol),
+    lambda _: state.x,
+    lambda _: np.ones_like(state.x) + np.nan,
+    None,
+  )
+
+  return ret_x, state
 
 @partial(jax.custom_jvp, nondiff_argnums=(0,1,2,3,4,))
 def optfun(fun, jacfun, cond_fun, body_fun, factor, x0, args):
@@ -147,7 +154,6 @@ def optfun_jvp(fun, jacfun, cond_fun, body_fun, factor, primals, tangents):
   # inv_Jx = ((svd.Vt.T  / svd.diagS) @ svd.U.T) * res.diagD
   # x_star_tans = - inv_Jx @ tangents_out
 
-  #return (x_star, res), x_star_tans
   return x_star, x_star_tans
 
 def get_lmfunc(
@@ -227,11 +233,18 @@ def get_lmfunc(
 
   @jax.jit
   def cond_fun(state):
-    # TODO: catch various bad situations like nans.
-    return np.logical_not(np.logical_or(
-        np.logical_or(state.hit_xtol, state.hit_ftol),
-        state.nit >= maxiters,
-    ))
+    return np.logical_not(
+      np.logical_or(
+        np.logical_or(
+          np.logical_or(
+            state.hit_xtol,
+            state.hit_ftol
+          ),
+          state.nit >= maxiters,
+        ),
+        np.logical_not(np.all(np.isfinite(state.x))),
+      )
+    )
 
   @jax.jit
   def body_fun(state):

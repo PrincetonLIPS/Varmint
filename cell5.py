@@ -123,17 +123,15 @@ def loss(radii):
 
   return -np.mean(ctrl_seq[-1]), ctrl_seq
 
-val, ctrl_seq = loss(init_radii)
-shape.create_movie(ctrl_seq, 'cell5.mp4', labels=False)
+#val, ctrl_seq = loss(init_radii)
+#shape.create_movie(ctrl_seq, 'cell5.mp4', labels=False)
 
-
-'''
 valgrad_loss = jax.value_and_grad(loss, has_aux=True)
 
 radii = init_radii
 
 lr = 1.0
-for ii in range(10):
+for ii in range(1):
   (val, ctrl_seq), gradmo = valgrad_loss(radii)
   print()
   #print(radii)
@@ -143,4 +141,3 @@ for ii in range(10):
   shape.create_movie(ctrl_seq, 'cell2-%d.mp4' % (ii+1), labels=False)
 
   radii = np.clip(radii - lr * gradmo, 0.05, 0.95)
-'''
