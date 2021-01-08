@@ -133,8 +133,8 @@ def generate_lagrangian_structured(shape):
   ''' For when all the patches have the same control point shapes. '''
 
   shape_unflatten = shape.get_unflatten_fn()
-  def unflatten(q, qdot, fixed_dict):
-    ctrl, vels = shape_unflatten(q, qdot, fixed_dict)
+  def unflatten(q, qdot, displacement):
+    ctrl, vels = shape_unflatten(q, qdot, displacement)
     return np.array(ctrl), np.array(vels)
 
   # FIXME: Sketchy to just use one patch.
@@ -151,8 +151,8 @@ def generate_lagrangian_structured(shape):
   gravity = 981.0 # cm/s^2
 
   @jax.jit
-  def lagrangian(q, qdot, ref_ctrl, fixed_dict):
-    def_ctrl, def_vels = unflatten(q, qdot, fixed_dict)
+  def lagrangian(q, qdot, ref_ctrl, displacement):
+    def_ctrl, def_vels = unflatten(q, qdot, displacement)
 
     ref_jacs = jax.vmap(
       jacobian_u_fn,

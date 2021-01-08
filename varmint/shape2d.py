@@ -160,9 +160,14 @@ class Shape2D:
 
     return unflat_mat
 
-  def unflatten_vec(self, fixed_dict):
+  def unflatten_fixed_mat(self):
+
+    # Build a matrix that takes raveled fixed locations and turns them into
+    # raveled offsets.
     sz = self.unflat_size()
-    unflat_vec = np.zeros(sz)
+
+    # Start with empty matrix.
+    unflat_fixed_mat = onp.zeros((sz,sz))
 
     fixed = self.get_fixed()
 
@@ -172,13 +177,10 @@ class Shape2D:
       for label, indices in patch.get_labels():
         if label in fixed:
           for dim in [0,1]:
-            idx_dim = list(indices) + [dim]
-            #unflat_vec[patch_indices[patch][idx_dim]] = fixed_dict[label][dim]
-            unflat_vec = jax.ops.index_update(unflat_vec,
-                                              patch_indices[patch][idx_dim],
-                                              fixed_dict[label][dim])
+            index = patch_indices[patch][tuple(list(indices) + [dim])]
+            unflat_fixed_mat[index, index] = 1
 
-    return unflat_vec
+    return unflat_fixed_mat
 
   def get_flatten_fn(self):
 
@@ -197,18 +199,20 @@ class Shape2D:
 
   def get_unflatten_fn(self):
     unflat_mat = self.unflatten_mat()
+    unflat_fixed_mat = self.unflatten_fixed_mat()
 
     sizes = [patch.get_ctrl_shape() for patch in self.patches]
     lens  = [onp.prod(size) for size in sizes]
 
-    def unflatten(flat_ctrl, flat_vels, fixed_dict):
+    def unflatten(flat_ctrl, flat_vels, fixed_locs):
 
-      unflat_vec = self.unflatten_vec(fixed_dict)
+      # Get into one big vector.
+      fixed_ravel = np.hstack(map(np.ravel, fixed_locs))
 
       # FIXME: Do we need to have the velocities of moving but "fixed" points
       # be non-zero?
 
-      ravel_ctrl = unflat_mat @ flat_ctrl + unflat_vec
+      ravel_ctrl = unflat_mat @ flat_ctrl + unflat_fixed_mat @ fixed_ravel
       ravel_vels = unflat_mat @ flat_vels
 
       # Now, to reshape for each patch.
@@ -294,11 +298,11 @@ class Shape2D:
           # Plot labels.
           rendered_labels = set()
 
-          label_r, label_c = onp.where(patch.pretty_labels)
+          label_r, label_c = onp.where(patch.labels)
           for ii in range(len(label_r)):
             row = label_r[ii]
             col = label_c[ii]
-            text = patch.pretty_labels[row,col]
+            text = patch.labels[row,col]
             if True: #text not in rendered_labels:
               rendered_labels.add(text)
             else:
@@ -325,11 +329,11 @@ class Shape2D:
           # Plot labels.
           rendered_labels = set()
 
-          label_r, label_c = onp.where(patch.pretty_labels)
+          label_r, label_c = onp.where(patch.labels)
           for ii in range(len(label_r)):
             row = label_r[ii]
             col = label_c[ii]
-            text = patch.pretty_labels[row,col]
+            text = patch.labels[row,col]
             if True: #text not in rendered_labels:
               rendered_labels.add(text)
             else:

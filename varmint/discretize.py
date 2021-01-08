@@ -34,7 +34,6 @@ def discretize_hamiltonian(L):
 
 def get_hamiltonian_stepper(L, F=None):
 
-
   # For thinking about forces, see West thesis:
   # https://thesis.library.caltech.edu/2492/1/west_thesis.pdf
   # Page 16, Sec 1.5.6.

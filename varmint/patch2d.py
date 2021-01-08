@@ -28,7 +28,7 @@ class Patch2D:
       material,
       quad_deg,
       labels=None,
-      fixed=None,
+      fixed=[],
   ):
     ''' Constructor for two dimensional patch.
 
