@@ -17,6 +17,7 @@ from varmint.levmar       import get_lmfunc
 from varmint.cellular2d   import match_labels, generate_quad_lattice
 
 import jax.profiler
+server = jax.profiler.start_server(9999)
 
 class WigglyMat(Material):
   _E = 0.001
@@ -83,15 +84,27 @@ def simulate(ref_ctrl):
   TT = [ 0.0 ]
 
   while TT[-1] < T:
-    print(TT[-1])
 
+    t0 = time.time()
     fixed_locs = displacement(TT[-1]) + ref_ctrl
 
-    new_q, new_p = stepper(QQ[-1], PP[-1], dt, ref_ctrl, fixed_locs)
 
-    QQ.append(new_q)
+    success = False
+    this_dt = dt
+    while True:
+      new_q, new_p = stepper(QQ[-1], PP[-1], this_dt, ref_ctrl, fixed_locs)
+      success = np.all(np.isfinite(new_q))
+      if success:
+        break
+      else:
+        this_dt = this_dt / 2.0
+        print('\tFailed to converge. dt now %f' % (this_dt))
+
+    QQ.append(new_q.block_until_ready())
     PP.append(new_p)
-    TT.append(TT[-1] + dt)
+    TT.append(TT[-1] + this_dt)
+    t1 = time.time()
+    print(TT[-1], t1-t0)
 
   return QQ, PP, TT
 
@@ -131,13 +144,13 @@ valgrad_loss = jax.value_and_grad(loss, has_aux=True)
 radii = init_radii
 
 lr = 1.0
-for ii in range(1):
+for ii in range(5):
   (val, ctrl_seq), gradmo = valgrad_loss(radii)
   print()
   #print(radii)
   print(val)
   print(gradmo)
 
-  shape.create_movie(ctrl_seq, 'cell2-%d.mp4' % (ii+1), labels=False)
+  shape.create_movie(ctrl_seq, 'cell5-%d.mp4' % (ii+1), labels=False)
 
   radii = np.clip(radii - lr * gradmo, 0.05, 0.95)
