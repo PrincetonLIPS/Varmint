@@ -100,7 +100,7 @@ def simulate(ref_ctrl):
         this_dt = this_dt / 2.0
         print('\tFailed to converge. dt now %f' % (this_dt))
 
-    QQ.append(new_q.block_until_ready())
+    QQ.append(new_q)
     PP.append(new_p)
     TT.append(TT[-1] + this_dt)
     t1 = time.time()

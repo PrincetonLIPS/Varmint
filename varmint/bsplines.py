@@ -50,7 +50,7 @@ def mesh(*control):
   '''
   return np.stack(np.meshgrid(*control, indexing='ij'), axis=-1)
 
-#@jax.jit
+@jax.jit
 def divide00(num, denom):
   ''' Divide such that 0/0 = 0.
 
@@ -59,7 +59,7 @@ def divide00(num, denom):
   '''
 
   force_zero = np.logical_and(num==0, denom==0)
-  return np.where(force_zero, 0, num) / np.where(force_zero, 1, denom)
+  return np.where(force_zero, 0.0, num) / np.where(force_zero, 1.0, denom)
 
 def default_knots(degree, num_ctrl):
   return np.hstack([np.zeros(degree),
