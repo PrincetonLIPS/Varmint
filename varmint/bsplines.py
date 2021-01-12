@@ -50,7 +50,7 @@ def mesh(*control):
   '''
   return np.stack(np.meshgrid(*control, indexing='ij'), axis=-1)
 
-@jax.jit
+#@jax.jit
 def divide00(num, denom):
   ''' Divide such that 0/0 = 0.
 
@@ -59,7 +59,8 @@ def divide00(num, denom):
   '''
 
   force_zero = np.logical_and(num==0, denom==0)
-  return np.where(force_zero, 0.0, num) / np.where(force_zero, 1.0, denom)
+  return np.where(force_zero, np.float32(0.0), num) \
+    / np.where(force_zero, np.float32(1.0), denom)
 
 def default_knots(degree, num_ctrl):
   return np.hstack([np.zeros(degree),
@@ -258,17 +259,17 @@ def bspline1d_basis_derivs_hand(u, knots, degree):
   v1 = divide00(d_basis[:,1:] * degree, knots[degree+1:] - knots[1:-degree])
   return v0 - v1
 
-bspline1d_basis_derivs_jax = jax.jit(
-  jax.vmap(
-    #lambda *args: np.squeeze(jax.jacfwd(bspline1d_basis, argnums=0)(*args)),
-    lambda u, knots, degree: \
-    np.squeeze(jax.jacfwd(bspline1d_basis, argnums=0)(
-      u, knots, degree
-    )),
-    (0, None, None),
-  ),
-  static_argnums=(2,)
-)
+#bspline1d_basis_derivs_jax = jax.jit(
+#  jax.vmap(
+#    #lambda *args: np.squeeze(jax.jacfwd(bspline1d_basis, argnums=0)(*args)),
+#    lambda u, knots, degree: \
+#    np.squeeze(jax.jacfwd(bspline1d_basis, argnums=0)(
+#      u, knots, degree
+#    )),
+#    (0, None, None),
+#  ),
+#  static_argnums=(2,)
+#)
 
 # In this case the hand-coded one appears to be faster.
 bspline1d_basis_derivs = bspline1d_basis_derivs_hand
@@ -277,15 +278,15 @@ def bspline1d_derivs_hand(u, control, knots, degree):
   ''' Evaluate the derivative of a one-dimensional bspline function. '''
   return bspline1d_basis_derivs(u, knots, degree) @ control
 
-bspline1d_derivs_jax = jax.jit(
-  jax.vmap(
-    #lambda *args: np.squeeze(jax.jacfwd(bspline1d, argnums=0)(*args)),
-    lambda u, control, knots, degree: \
-    np.squeeze(jax.jacfwd(bspline1d, argnums=0)(u, control, knots, degree)),
-    (0, None, None, None),
-  ),
-  static_argnums=(3,)
-)
+#bspline1d_derivs_jax = jax.jit(
+#  jax.vmap(
+#    #lambda *args: np.squeeze(jax.jacfwd(bspline1d, argnums=0)(*args)),
+#    lambda u, control, knots, degree: \
+#    np.squeeze(jax.jacfwd(bspline1d, argnums=0)(u, control, knots, degree)),
+#    (0, None, None, None),
+#  ),
+#  static_argnums=(3,)
+#)
 
 #@partial(jax.jit, static_argnums=(3,))
 def bspline2d_basis_derivs_hand(u, xknots, yknots, degree):
@@ -301,17 +302,17 @@ def bspline2d_basis_derivs_hand(u, xknots, yknots, degree):
                     basis_x[:,:,np.newaxis] * basis_y_du2[:,np.newaxis,:] ],
                   axis=3)
 
-bspline2d_basis_derivs_jax = jax.jit(
-  jax.vmap(
-    #lambda *args: np.squeeze(jax.jacfwd(bspline2d_basis, argnums=0)(*args)),
-    lambda u, xknots, yknots, degree: \
-    np.squeeze(jax.jacfwd(bspline2d_basis, argnums=0)(
-      u, xknots, yknots, degree
-    )),
-    (0, None, None, None),
-  ),
-  static_argnums=(3,),
-)
+#bspline2d_basis_derivs_jax = jax.jit(
+#  jax.vmap(
+#    #lambda *args: np.squeeze(jax.jacfwd(bspline2d_basis, argnums=0)(*args)),
+#    lambda u, xknots, yknots, degree: \
+#    np.squeeze(jax.jacfwd(bspline2d_basis, argnums=0)(
+#      u, xknots, yknots, degree
+#    )),
+#    (0, None, None, None),
+#  ),
+#  static_argnums=(3,),
+#)
 
 # Hand-coded appears slightly faster.
 bspline2d_basis_derivs = bspline2d_basis_derivs_hand
@@ -330,63 +331,63 @@ def bspline2d_derivs_hand(u, control, xknots, yknots, degree):
     1, 2, # exchange the last two axes
   )
 
-bspline2d_derivs_jax = jax.jit(
-  jax.vmap(
-    lambda u, control, xknots, yknots, degree: \
-    np.squeeze(jax.jacfwd(bspline2d, argnums=0)(
-      u, control, xknots, yknots, degree
-    )),
-    (0, None, None, None, None),
-  ),
-  static_argnums=(4,),
-)
+#bspline2d_derivs_jax = jax.jit(
+#  jax.vmap(
+#    lambda u, control, xknots, yknots, degree: \
+#    np.squeeze(jax.jacfwd(bspline2d, argnums=0)(
+#      u, control, xknots, yknots, degree
+#    )),
+#    (0, None, None, None, None),
+#  ),
+#  static_argnums=(4,),
+#)
 
 # Hand-coded appears slightly faster.
 bspline2d_derivs = bspline2d_derivs_hand
 
 # Don't bother coding the 3d derivatives by hand.
-bspline3d_basis_derivs_jax = jax.jit(
-  jax.vmap(
-    # lambda *args: np.squeeze(jax.jacfwd(bspline3d_basis, argnums=0)(*args)),
-    lambda u, xknots, yknots, zknots, degree: \
-    np.squeeze(jax.jacfwd(bspline3d_basis, argnums=0)(
-      u, xknots, yknots, zknots, degree
-    )),
-    (0, None, None, None, None),
-  ),
-  static_argnums=(4,),
-)
-bspline3d_basis_derivs = bspline3d_basis_derivs_jax
+#bspline3d_basis_derivs_jax = jax.jit(
+#  jax.vmap(
+#    # lambda *args: np.squeeze(jax.jacfwd(bspline3d_basis, argnums=0)(*args)),
+#    lambda u, xknots, yknots, zknots, degree: \
+#    np.squeeze(jax.jacfwd(bspline3d_basis, argnums=0)(
+#      u, xknots, yknots, zknots, degree
+#    )),
+#    (0, None, None, None, None),
+#  ),
+#  static_argnums=(4,),
+#)
+#bspline3d_basis_derivs = bspline3d_basis_derivs_jax
 
-bspline3d_derivs_jax = jax.jit(
-  jax.vmap(
-    #lambda *args: np.squeeze(jax.jacfwd(bspline3d, argnums=0)(*args)),
-    lambda u, control, xknots, yknots, zknots, degree: \
-    np.squeeze(jax.jacfwd(bspline3d, argnums=0)(
-      u, control, xknots, yknots, zknots, degree
-    )),
-    (0, None, None, None, None, None),
-  ),
-  static_argnums=(5,),
-)
-bspline3d_derivs = bspline3d_derivs_jax
+#bspline3d_derivs_jax = jax.jit(
+#  jax.vmap(
+#    #lambda *args: np.squeeze(jax.jacfwd(bspline3d, argnums=0)(*args)),
+#    lambda u, control, xknots, yknots, zknots, degree: \
+#    np.squeeze(jax.jacfwd(bspline3d, argnums=0)(
+#      u, control, xknots, yknots, zknots, degree
+#    )),
+#    (0, None, None, None, None, None),
+#  ),
+#  static_argnums=(5,),
+#)
+#bspline3d_derivs = bspline3d_derivs_jax
 
 #
 # Derivatives with respect to control points.
 ################################################################################
 def bspline1d_derivs_ctrl_hand(u, control, knots, degree):
   return bspline1d_basis(u, knots, degree)
-bspline1d_derivs_ctrl_jax = jax.jit(
-  jax.vmap(
-    # lambda *args: np.squeeze(jax.jacfwd(bspline1d, argnums=1)(*args)),
-    lambda u, control, knots, degree: \
-    np.squeeze(jax.jacfwd(bspline1d, argnums=1)(
-      u, control, knots, degree
-    )),
-    (0, None, None, None),
-  ),
-  static_argnums=(3,),
-)
+#bspline1d_derivs_ctrl_jax = jax.jit(
+#  jax.vmap(
+#    # lambda *args: np.squeeze(jax.jacfwd(bspline1d, argnums=1)(*args)),
+#    lambda u, control, knots, degree: \
+#    np.squeeze(jax.jacfwd(bspline1d, argnums=1)(
+#      u, control, knots, degree
+#    )),
+#    (0, None, None, None),
+#  ),
+#  static_argnums=(3,),
+#)
 bspline1d_derivs_ctrl = bspline1d_derivs_ctrl_hand
 
 def bspline2d_derivs_ctrl_hand(u, control, xknots, yknots, degree):
@@ -397,31 +398,31 @@ def bspline2d_derivs_ctrl_hand(u, control, xknots, yknots, degree):
                          np.concatenate([zeros, basis], axis=1)],
                          axis=4)
 
-bspline2d_derivs_ctrl_jax = jax.jit(
-  jax.vmap(
-    #lambda *args: np.squeeze(jax.jacfwd(bspline2d, argnums=1)(*args)),
-    lambda u, control, xknots, yknots, degree: \
-    np.squeeze(jax.jacfwd(bspline2d, argnums=1)(
-      u, control, xknots, yknots, degree
-    )),
-    (0, None, None, None, None),
-  ),
-  static_argnums=(4,),
-)
-bspline2d_derivs_ctrl = bspline2d_derivs_ctrl_jax
+#bspline2d_derivs_ctrl_jax = jax.jit(
+#  jax.vmap(
+#    #lambda *args: np.squeeze(jax.jacfwd(bspline2d, argnums=1)(*args)),
+#    lambda u, control, xknots, yknots, degree: \
+#    np.squeeze(jax.jacfwd(bspline2d, argnums=1)(
+#      u, control, xknots, yknots, degree
+#    )),
+#    (0, None, None, None, None),
+#  ),
+#  static_argnums=(4,),
+#)
+bspline2d_derivs_ctrl = bspline2d_derivs_ctrl_hand # fixme?
 
-bspline3d_derivs_ctrl_jax = jax.jit(
-  jax.vmap(
-    # lambda *args: np.squeeze(jax.jacfwd(bspline3d, argnums=1)(*args)),
-    lambda u, control, xknots, yknots, zknots, degree: \
-    np.squeeze(jax.jacfwd(bspline3d, argnums=1)(
-      u, control, xknots, yknots, zknots, degree
-    )),
-    (0, None, None, None, None, None),
-  ),
-  static_argnums=(5,),
-)
-bspline3d_derivs_ctrl = bspline3d_derivs_ctrl_jax
+#bspline3d_derivs_ctrl_jax = jax.jit(
+#  jax.vmap(
+#    # lambda *args: np.squeeze(jax.jacfwd(bspline3d, argnums=1)(*args)),
+#    lambda u, control, xknots, yknots, zknots, degree: \
+#    np.squeeze(jax.jacfwd(bspline3d, argnums=1)(
+#      u, control, xknots, yknots, zknots, degree
+#    )),
+#    (0, None, None, None, None, None),
+#  ),
+#  static_argnums=(5,),
+#)
+#bspline3d_derivs_ctrl = bspline3d_derivs_ctrl_jax
 
 
 #

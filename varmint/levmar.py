@@ -28,17 +28,18 @@ def phi(alpha, diagD, svd, Fx, delta):
   return npla.norm(diagD * p) - delta, p
 
 
-phi_valgrad = jax.jit(jax.value_and_grad(phi, argnums=0, has_aux=True))
+# phi_valgrad = jax.jit(jax.value_and_grad(phi, argnums=0, has_aux=True))
+phi_valgrad = jax.value_and_grad(phi, argnums=0, has_aux=True)
 
 
-@jax.jit
+#@jax.jit
 def lm_param(delta, diagD, svd, Fx, sigma=0.1):
   (phi_0, p), dphi_0 = phi_valgrad(0.0, diagD, svd, Fx, delta)
 
   # Initial bounds as in More'.
   upper = npla.norm((Fx.T @ svd.U) * svd.diagS) / delta
   lower = - phi_0 / dphi_0
-  alpha = np.array(0.0)
+  alpha = np.float32(0.0)
 
   init_val = (alpha, lower, upper, phi_0, p)
 
@@ -51,12 +52,13 @@ def lm_param(delta, diagD, svd, Fx, sigma=0.1):
     alpha, lower, upper, phi_k, p = val
 
     alpha = np.where(np.logical_or(alpha <= lower, alpha >= upper),
-                     np.maximum( 0.001 * upper, np.sqrt(upper * lower) ),
+                     np.maximum( np.float32(0.001) * upper,
+                                 np.sqrt(upper * lower) ),
                      alpha)
 
     (phi_k, p), dphi_k = phi_valgrad(alpha, diagD, svd, Fx, delta)
 
-    upper = np.where(phi_k < 0.0, alpha, upper)
+    upper = np.where(phi_k < np.float32(0.0), alpha, upper)
     lower = np.maximum(lower, alpha - phi_k/dphi_k)
     alpha = alpha - ( (phi_k + delta)/delta ) * ( phi_k/dphi_k )
 
@@ -92,11 +94,11 @@ def _optfun(fun, jacfun, cond_fun, body_fun, factor, x0, args):
     svd      = SVD(*npla.svd(Jx/diagD, full_matrices=False)),
     diagD    = diagD,
     delta    = delta,
-    hit_xtol = False,
-    hit_ftol = False,
-    nit      = 0,
-    nfev     = 1,
-    njev     = 1,
+    hit_xtol = np.float32(0.0),
+    hit_ftol = np.float32(0.0),
+    nit      = np.float32(0.0),
+    nfev     = np.float32(1.0),
+    njev     = np.float32(1.0),
   )
 
   # FIXME: Report a more sophisticated success.
@@ -158,11 +160,11 @@ def optfun_jvp(fun, jacfun, cond_fun, body_fun, factor, primals, tangents):
 
 def get_lmfunc(
     fun,
-    maxiters=100,
-    xtol=1e-8,
-    ftol=1e-8,
-    factor=100.0,
-    sigma=0.1,
+    maxiters=np.float32(100.0),
+    xtol=np.float32(1e-8),
+    ftol=np.float32(1e-8),
+    factor=np.float32(100.0),
+    sigma=np.float32(0.1),
     full_result=False,
 ):
   ''' Generate a Levenberg-Marquardt optimizer for a problem.
@@ -229,16 +231,17 @@ def get_lmfunc(
   '''
 
   # Compute and jit the Jacobian function.
-  jacfun = jax.jit(jax.jacfwd(fun))
+  # jacfun = jax.jit(jax.jacfwd(fun))
+  jacfun = jax.jacfwd(fun)
 
-  @jax.jit
+  #@jax.jit
   def cond_fun(state):
     return np.logical_not(
       np.logical_or(
         np.logical_or(
           np.logical_or(
-            state.hit_xtol,
-            state.hit_ftol
+            state.hit_xtol > np.float32(0.0),
+            state.hit_ftol > np.float32(0.0),
           ),
           state.nit >= maxiters,
         ),
@@ -246,7 +249,7 @@ def get_lmfunc(
       )
     )
 
-  @jax.jit
+  # @jax.jit # whence the 15M files?
   def body_fun(state):
 
     # Compute lambda.
@@ -289,7 +292,9 @@ def get_lmfunc(
         rho <= 0.25,
         lambda _: state.delta * mu_fn(gamma_fn()),
         lambda _: jax.lax.cond(
-            np.logical_or(np.logical_and(rho <= 0.75, lamb == 0.0), rho > 0.75),
+            np.logical_or(np.logical_and(rho <= np.float32(0.75),
+                                         lamb == np.float32(0.0)),
+                          rho > np.float32(0.75)),
             lambda _: 2 * nDp,
             lambda _: state.delta,
             None,
@@ -300,13 +305,13 @@ def get_lmfunc(
     # Have we achieved xtol? Look at this after changing delta.
     hit_xtol = delta <= xtol * npla.norm(state.diagD * new_x)
 
-    improved = rho > 0.0001
+    improved = rho > np.float32(0.0001)
 
     # This becomes the new state if we improved.
     x, Fx, nFx, Jx, njev = jax.lax.cond(
         improved,
         lambda _: (new_x, new_Fx, new_nFx, jacfun(new_x, state.args),
-                   state.njev+1),
+                   state.njev+1.0),
         lambda _: (state.x, state.Fx, state.nFx, state.Jx, state.njev),
         None,
     )
@@ -337,14 +342,18 @@ def get_lmfunc(
       svd      = svd,
       diagD    = diagD,
       delta    = delta,
-      hit_xtol = hit_xtol,
-      hit_ftol = hit_ftol,
-      nit      = state.nit + 1,
-      nfev     = state.nfev + 1,
+      hit_xtol = np.array(hit_xtol, float),
+      hit_ftol = np.array(hit_ftol, float),
+      nit      = state.nit + np.float32(1.0),
+      nfev     = state.nfev + np.float32(1.0),
       njev     = njev,
     )
 
   if full_result:
-    return jax.jit(partial(_optfun, fun, jacfun, cond_fun, body_fun, factor))
+    return partial(_optfun, fun, jacfun, cond_fun, body_fun, factor)
+    #return jax.jit(partial(_optfun, fun, jacfun, cond_fun, body_fun, factor))
 
-  return jax.jit(partial(optfun, fun, jacfun, cond_fun, body_fun, factor))
+  # Is this where the 12M files are coming from?
+  return partial(optfun, fun, jacfun, cond_fun, body_fun, factor)
+
+  # return jax.jit(partial(optfun, fun, jacfun, cond_fun, body_fun, factor))

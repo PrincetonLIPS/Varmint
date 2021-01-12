@@ -13,8 +13,10 @@ def discretize_eulag(L):
     qdot = (q2 - q1) / dt
     return L(q, qdot)
 
-  grad_Ld_q1 = jax.jit(jax.grad(Ld, argnums=0))
-  grad_Ld_q2 = jax.jit(jax.grad(Ld, argnums=1))
+  #grad_Ld_q1 = jax.jit(jax.grad(Ld, argnums=0))
+  #grad_Ld_q2 = jax.jit(jax.grad(Ld, argnums=1))
+  grad_Ld_q1 = jax.grad(Ld, argnums=0)
+  grad_Ld_q2 = jax.grad(Ld, argnums=1)
 
   def DEL(q1, t1, q2, t2, q3, t3):
     return grad_Ld_q1(q2, q3, t3-t2) + grad_Ld_q2(q1, q2, t2-t1)
@@ -28,8 +30,10 @@ def discretize_hamiltonian(L):
     qdot = (q2 - q1) / dt
     return L(q, qdot, *args)
 
-  grad_Ld_q1 = jax.jit(jax.grad(Ld, argnums=0))
-  grad_Ld_q2 = jax.jit(jax.grad(Ld, argnums=1))
+  #grad_Ld_q1 = jax.jit(jax.grad(Ld, argnums=0))
+  #grad_Ld_q2 = jax.jit(jax.grad(Ld, argnums=1))
+  grad_Ld_q1 = jax.grad(Ld, argnums=0)
+  grad_Ld_q2 = jax.grad(Ld, argnums=1)
 
   return grad_Ld_q1, grad_Ld_q2
 
@@ -43,7 +47,8 @@ def get_hamiltonian_stepper(L, F=None):
 
   D0_Ld, D1_Ld = discretize_hamiltonian(L)
 
-  @jax.jit
+  # Trying to track down the source of the 12M files.
+  # @jax.jit
   def residual_fun(new_q, args):
     old_q, p, dt, l_args = args
 
@@ -58,6 +63,7 @@ def get_hamiltonian_stepper(L, F=None):
 
   optfun = get_lmfunc(residual_fun, maxiters=50)
 
+  #@jax.jit
   def step_q(q, p, dt, args):
     new_q = optfun(jax.lax.stop_gradient(q), (q, p, dt, args))
 
@@ -65,6 +71,7 @@ def get_hamiltonian_stepper(L, F=None):
     # print(res.nFx, res.nit, res.nfev, res.njev)
     return new_q
 
+  #@jax.jit
   def step_p(q1, q2, dt, args):
 
     if F is None:
@@ -76,18 +83,22 @@ def get_hamiltonian_stepper(L, F=None):
 
       return D1_Ld(q1, q2, dt, args) + F(q, qdot, *args)
 
+  @jax.jit
   def stepper(q, p, dt, *args):
-    t0 = time.time()
+    #t0 = time.time()
     new_q = step_q(q, p, dt, args)
-    t1 = time.time()
+
+    #t1 = time.time()
+
+    # This seems to get recompiled over and over again?
     new_p = jax.lax.cond(
       np.all(np.isfinite(new_q)),
       lambda _: step_p(q, new_q, dt, args),
       lambda _: np.ones_like(p) + np.nan,
-      None,
+      np.float32(0.0),
     )
-    t2 = time.time()
-    print("\tstep_q = %0.2fs  step_p = %0.2fs" % (t1-t0, t2-t1))
+    #t2 = time.time()
+    # print("\tstep_q = %0.2fs  step_p = %0.2fs" % (t1-t0, t2-t1))
     return new_q, new_p
 
   return stepper

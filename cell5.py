@@ -16,21 +16,22 @@ from varmint.discretize   import get_hamiltonian_stepper
 from varmint.levmar       import get_lmfunc
 from varmint.cellular2d   import match_labels, generate_quad_lattice
 
-import jax.profiler
-server = jax.profiler.start_server(9999)
+#from varmint.grad_graph import grad_graph
+#import jax.profiler
+#server = jax.profiler.start_server(9999)
 
 class WigglyMat(Material):
-  _E = 0.001
+  _E = 0.0001
   _nu = 0.48
   _density = 1.0
 
 mat = NeoHookean2D(WigglyMat)
 
-friction = 1e-6
+friction = 1e-7
 
 npr.seed(5)
 
-# Create patch parameters.
+# Create patch parameters.c
 quad_deg   = 10
 spline_deg = 3
 num_ctrl   = 5
@@ -40,6 +41,7 @@ xknots     = default_knots(spline_deg, num_ctrl)
 yknots     = default_knots(spline_deg, num_ctrl)
 widths     = 5*np.ones(num_x)
 heights    = 5*np.ones(num_y)
+
 #radii     = npr.rand(num_x, num_y, (num_ctrl-1)*4)*0.9 + 0.05
 init_radii = np.ones((num_x,num_y,(num_ctrl-1)*4))*0.5
 init_ctrl  = generate_quad_lattice(widths, heights, init_radii)
@@ -71,8 +73,8 @@ flatten    = shape.get_flatten_fn()
 lagrangian = generate_lagrangian_structured(shape)
 stepper    = get_hamiltonian_stepper(lagrangian, friction_force)
 
-dt = 0.01
-T  = 1.0
+dt = np.float32(0.005)
+T  = 0.5
 
 def simulate(ref_ctrl):
 
@@ -87,7 +89,6 @@ def simulate(ref_ctrl):
 
     t0 = time.time()
     fixed_locs = displacement(TT[-1]) + ref_ctrl
-
 
     success = False
     this_dt = dt
@@ -136,8 +137,12 @@ def loss(radii):
 
   return -np.mean(ctrl_seq[-1]), ctrl_seq
 
-#val, ctrl_seq = loss(init_radii)
-#shape.create_movie(ctrl_seq, 'cell5.mp4', labels=False)
+
+val, ctrl_seq = loss(init_radii)
+
+shape.create_movie(ctrl_seq, 'cell5.mp4', labels=False)
+
+quit()
 
 valgrad_loss = jax.value_and_grad(loss, has_aux=True)
 
@@ -154,3 +159,4 @@ for ii in range(5):
   shape.create_movie(ctrl_seq, 'cell5-%d.mp4' % (ii+1), labels=False)
 
   radii = np.clip(radii - lr * gradmo, 0.05, 0.95)
+s

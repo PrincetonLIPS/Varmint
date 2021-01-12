@@ -4,7 +4,7 @@ import jax.numpy.linalg as npla
 
 from functools import partial
 
-@jax.jit
+#@jax.jit
 def neohookean_energy2d_log(shear, bulk, F):
   I1 = np.trace(F.T @ F)
   J  = npla.det(F)
@@ -16,7 +16,7 @@ def neohookean_energy2d_log(shear, bulk, F):
 #  ),
 #)
 
-@jax.jit
+#@jax.jit
 def neohookean_energy3d_log(shear, bulk, F):
   I1 = np.trace(F.T @ F)
   J  = npla.det(F)
@@ -28,7 +28,7 @@ def neohookean_energy3d_log(shear, bulk, F):
 #  ),
 #)
 
-@jax.jit
+#@jax.jit
 def neohookean_energy2d(shear, bulk, F):
   I1 = np.trace(F.T @ F)
   J  = npla.det(F)

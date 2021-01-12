@@ -144,13 +144,14 @@ def generate_lagrangian_structured(shape):
   deformation_fn = shape.patches[0].get_deformation_fn()
   jacobian_ctrl_fn = shape.patches[0].get_jacobian_ctrl_fn()
 
-  grad_energy_fn = jax.jit(jax.grad(energy_fn))
+  #grad_energy_fn = jax.jit(jax.grad(energy_fn))
+  grad_energy_fn = jax.grad(energy_fn)
 
   mat_densities = np.array([p.material.density for p in shape.patches])
 
   gravity = 981.0 # cm/s^2
 
-  @jax.jit
+  #@jax.jit
   def lagrangian(q, qdot, ref_ctrl, displacement):
     def_ctrl, def_vels = unflatten(q, qdot, displacement)
 
