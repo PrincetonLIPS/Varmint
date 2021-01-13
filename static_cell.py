@@ -9,9 +9,9 @@ import string
 from varmint.patch2d      import Patch2D
 from varmint.shape2d      import Shape2D
 from varmint.materials    import Material, SiliconeRubber
-from varmint.constitutive import NeoHookean2D
+from varmint.constitutive import NeoHookean2D, LinearElastic2D
 from varmint.bsplines     import default_knots
-from varmint.lagrangian   import generate_lagrangian_structured
+from varmint.statics      import generate_free_energy_structured
 from varmint.discretize   import get_hamiltonian_stepper
 from varmint.levmar       import get_lmfunc
 from varmint.cellular2d   import match_labels, generate_quad_lattice
@@ -25,9 +25,7 @@ class WigglyMat(Material):
   _nu = 0.48
   _density = 1.0
 
-mat = NeoHookean2D(WigglyMat)
-
-friction = 1e-7
+mat = LinearElastic2D(WigglyMat)
 
 npr.seed(5)
 
@@ -63,51 +61,30 @@ shape = Shape2D(*[
   for  ii in range(len(init_ctrl))
 ])
 
-friction_force = lambda q, qdot, ref_ctrl, fixed_dict: -friction * qdot
-
-def displacement(t):
-  return np.sin(4 * np.pi * t) * np.ones_like(init_ctrl)
-
 unflatten  = shape.get_unflatten_fn()
 flatten    = shape.get_flatten_fn()
-lagrangian = generate_lagrangian_structured(shape)
-stepper    = get_hamiltonian_stepper(lagrangian, friction_force)
 
-dt = np.float32(0.005)
-T  = 0.5
+free_energy = generate_free_energy_structured(shape)
 
-def simulate(ref_ctrl):
-
-  # Initially in the ref config with zero momentum.
+def simulate(ref_ctrl, n_newton=5):
+  # Momentum is throwaway for statics.
   q, p = flatten(ref_ctrl, np.zeros_like(ref_ctrl))
+  fixed_locs = ref_ctrl
+  new_q = q
+  for i in range(n_newton):
+    print(new_q.mean())
+    grad_q = jax.grad(free_energy, argnums=0)(new_q, p, ref_ctrl, fixed_locs)
+    hess_q = jax.hessian(free_energy, argnums=0)(new_q, p, ref_ctrl, fixed_locs)
+    
+    new_q = new_q - np.linalg.inv(hess_q) @ grad_q
 
-  QQ = [ q ]
-  PP = [ p ]
-  TT = [ 0.0 ]
+  return [unflatten(new_q, np.zeros_like(new_q), ref_ctrl)[0]]
 
-  while TT[-1] < T:
+# Since we're simulating linear elasticity, a single Newton iteration is enough.
+ctrl_seq = simulate(init_ctrl, n_newton=1)
+shape.create_movie(ctrl_seq, 'statics_test.mp4', labels=False)
 
-    t0 = time.time()
-    fixed_locs = displacement(TT[-1]) + ref_ctrl
-
-    success = False
-    this_dt = dt
-    while True:
-      new_q, new_p = stepper(QQ[-1], PP[-1], this_dt, ref_ctrl, fixed_locs)
-      success = np.all(np.isfinite(new_q))
-      if success:
-        break
-      else:
-        this_dt = this_dt / 2.0
-        print('\tFailed to converge. dt now %f' % (this_dt))
-
-    QQ.append(new_q)
-    PP.append(new_p)
-    TT.append(TT[-1] + this_dt)
-    t1 = time.time()
-    print(TT[-1], t1-t0)
-
-  return QQ, PP, TT
+quit()
 
 def radii_to_ctrl(radii):
   return generate_quad_lattice(widths, heights, radii)

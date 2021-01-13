@@ -16,6 +16,11 @@ def neohookean_energy2d_log(shear, bulk, F):
 #  ),
 #)
 
+def linear_elastic_energy2d(lmbda, mu, F):
+  strain = 0.5 * (F + F.T - 2 * np.eye(2))
+  return 0.5 * lmbda * (np.trace(strain) ** 2) + \
+          mu * np.tensordot(strain, strain, axes=([0, 1], [0, 1]))
+
 #@jax.jit
 def neohookean_energy3d_log(shear, bulk, F):
   I1 = np.trace(F.T @ F)
@@ -40,6 +45,23 @@ def neohookean_energy2d(shear, bulk, F):
 #    in_axes=(0, None, None),
 #  ),
 #)
+
+class LinearElastic2D:
+
+  def __init__(self, material, thickness=1):
+    ''' thickness in cm '''
+    self.material  = material
+    self.thickness = thickness
+    self.lmbda     = self.material.lmbda
+    self.mu        = self.material.mu
+    self.density   = self.material.density
+
+  def get_energy_fn(self):
+    return partial(linear_elastic_energy2d, self.lmbda, self.mu)
+
+  def density(self):
+    # TODO: How should this interact with third dimension?
+    return self.density
 
 class NeoHookean2D:
 

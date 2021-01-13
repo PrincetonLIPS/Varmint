@@ -111,6 +111,7 @@ class Patch2D:
 
     # FIXME: Why don't I have to divide this by 4 to accommodate the change in
     # interval?
+    # Answer(doktay): Because for some reason quadpy.c2 weights sum to 1 instead of 4.
     self.weights = np.reshape(scheme.weights, (1, 1, -1))
 
   def num_quad_pts(self):
