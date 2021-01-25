@@ -4,7 +4,10 @@ import jax.numpy as np
 import numpy as onp
 import numpy.random as npr
 import scipy.optimize as spopt
+import scipy.sparse.linalg
 import string
+
+from functools import partial
 
 from varmint.patch2d      import Patch2D
 from varmint.shape2d      import Shape2D
@@ -25,7 +28,12 @@ class WigglyMat(Material):
   _nu = 0.48
   _density = 1.0
 
-mat = LinearElastic2D(WigglyMat)
+class CollapsingMat(Material):
+  _E = 0.00001
+  _nu = 0.48
+  _density = 1.0
+
+mat = NeoHookean2D(CollapsingMat)
 
 npr.seed(5)
 
@@ -33,8 +41,8 @@ npr.seed(5)
 quad_deg   = 10
 spline_deg = 3
 num_ctrl   = 5
-num_x      = 3
-num_y      = 1
+num_x      = 4
+num_y      = 4
 xknots     = default_knots(spline_deg, num_ctrl)
 yknots     = default_knots(spline_deg, num_ctrl)
 widths     = 5*np.ones(num_x)
@@ -45,7 +53,8 @@ init_radii = np.ones((num_x,num_y,(num_ctrl-1)*4))*0.5
 init_ctrl  = generate_quad_lattice(widths, heights, init_radii)
 labels     = match_labels(init_ctrl, keep_singletons=True)
 left_side  = onp.array(init_ctrl[:,:,:,0] == 0.0)
-fixed_labels = labels[left_side]
+bottom     = onp.array(init_ctrl[:,:,:,1] == 0.0)
+fixed_labels = labels[bottom]
 
 # Create the shape.
 shape = Shape2D(*[
@@ -66,73 +75,111 @@ flatten    = shape.get_flatten_fn()
 
 free_energy = generate_free_energy_structured(shape)
 
-def simulate(ref_ctrl, n_newton=5):
+def hvp(f, x, v):
+  return jax.grad(lambda x: np.vdot(jax.grad(f)(x), v))(x)
+
+def simulate(ref_ctrl):
   # Momentum is throwaway for statics.
   q, p = flatten(ref_ctrl, np.zeros_like(ref_ctrl))
   fixed_locs = ref_ctrl
   new_q = q
-  for i in range(n_newton):
-    print(new_q.mean())
-    grad_q = jax.grad(free_energy, argnums=0)(new_q, p, ref_ctrl, fixed_locs)
-    hess_q = jax.hessian(free_energy, argnums=0)(new_q, p, ref_ctrl, fixed_locs)
-    
-    new_q = new_q - np.linalg.inv(hess_q) @ grad_q
 
-  return [unflatten(new_q, np.zeros_like(new_q), ref_ctrl)[0]]
+  @jax.jit
+  def loss_wrapped(new_q):
+      return free_energy(new_q, p, ref_ctrl, fixed_locs)
+
+  def callback(x):
+      print('iteration')
+
+  grad_q = jax.jit(jax.grad(loss_wrapped))
+  #hess_q = jax.jit(jax.hessian(loss_wrapped))
+
+  @jax.jit
+  def hessp(new_q, p):
+      return hvp(loss_wrapped, new_q, p)
+
+#  for i in range(n_newton):
+#    print(new_q.mean())
+#    grad_q = jax.grad(free_energy, argnums=0)(new_q, p, ref_ctrl, fixed_locs)
+#    hess_q = jax.hessian(free_energy, argnums=0)(new_q, p, ref_ctrl, fixed_locs)
+#    
+#    new_q = new_q - np.linalg.solve(hess_q, grad_q)
+
+  optim = spopt.minimize(loss_wrapped, new_q, method='Newton-CG', jac=grad_q, hessp=hessp,
+                         callback=callback, options={'disp': True})
+  new_q = optim.x
+
+  return unflatten(new_q, np.zeros_like(new_q), ref_ctrl)[0]
 
 # Since we're simulating linear elasticity, a single Newton iteration is enough.
-ctrl_seq = simulate(init_ctrl, n_newton=1)
-shape.create_movie(ctrl_seq, 'statics_test.mp4', labels=False)
-
-quit()
+#ctrl_seq = simulate(init_ctrl)
+#shape.create_movie([ctrl_seq], 'statics_test.mp4', labels=False)
 
 def radii_to_ctrl(radii):
   return generate_quad_lattice(widths, heights, radii)
 
-def sim_radii(radii):
+def loss_and_adjoint_grad(loss_fn, init_radii):
+  # loss_fn should be a function of ctrl_seq
+  grad_loss = jax.jit(jax.grad(loss_fn))
+  ctrl_sol = simulate(radii_to_ctrl(init_radii))
+  dJdu = grad_loss(ctrl_sol)
 
-  # Construct reference shape.
-  ref_ctrl = radii_to_ctrl(radii)
+  def inner_loss(radii, ctrl):
+    ref_ctrl = radii_to_ctrl(radii)
 
-  # Simulate the reference shape.
-  QQ, PP, TT = simulate(ref_ctrl)
+    q, p = flatten(ctrl, np.zeros_like(ctrl))
+    fixed_locs = ref_ctrl
 
-  # Turn this into a sequence of control point sets.
-  ctrl_seq = [
-    unflatten(
-      qt[0],
-      np.zeros_like(qt[0]),
-      ref_ctrl + displacement(qt[1]),
-    )[0] \
-    for qt in zip(QQ, TT)
-  ]
+    return free_energy(q, p, ref_ctrl, fixed_locs)
 
-  return ctrl_seq
+  loss_val = loss_fn(ctrl_sol)
+  implicit_fn = jax.jit(jax.grad(inner_loss, argnums=1))
+  implicit_vjp = jax.jit(jax.vjp(implicit_fn, init_radii, ctrl_sol)[1])
 
-def loss(radii):
-  ctrl_seq = sim_radii(radii)
+  def vjp_ctrl(v):
+    return implicit_vjp(v)[1]
+  
+  def vjp_radii(v):
+    return implicit_vjp(v)[0]
+  
+  flat_size = ctrl_sol.flatten().shape[0]
+  unflat_size = ctrl_sol.shape
 
-  return -np.mean(ctrl_seq[-1]), ctrl_seq
+  def spmatvec(v):
+    v = v.reshape(ctrl_sol.shape)
+    vjp = implicit_vjp(v)[1]
+    return vjp.flatten()
 
+  A = scipy.sparse.linalg.LinearOperator((flat_size,flat_size), matvec=spmatvec)
+  
+  # Precomputing full Jacobian might be better
+  #print('precomputing hessian')
+  #hess = jax.jacfwd(implicit_fn, argnums=1)(init_radii, ctrl_sol)
+  #print(f'computed hessian with shape {hess.shape}')
+  
+  print('solving adjoint equation')
+  
+  adjoint, info = scipy.sparse.linalg.minres(A, dJdu.flatten())
+  adjoint = adjoint.reshape(unflat_size)
+  grad = vjp_radii(adjoint)
 
-val, ctrl_seq = loss(init_radii)
+  return loss_val, grad, ctrl_sol
 
-shape.create_movie(ctrl_seq, 'cell5.mp4', labels=False)
+def sample_loss_fn(ctrl):
+  return np.mean(ctrl[..., 0])
 
-quit()
-
-valgrad_loss = jax.value_and_grad(loss, has_aux=True)
+def close_to_center_loss_fn(ctrl):
+  return np.linalg.norm(ctrl[..., 0] - 10)
 
 radii = init_radii
 
 lr = 1.0
-for ii in range(5):
-  (val, ctrl_seq), gradmo = valgrad_loss(radii)
+for ii in range(10):
+  loss_val, loss_grad, ctrl_sol = loss_and_adjoint_grad(close_to_center_loss_fn, radii)
   print()
   #print(radii)
-  print(val)
-  print(gradmo)
+  print(loss_val)
 
-  shape.create_movie(ctrl_seq, 'cell5-%d.mp4' % (ii+1), labels=False)
+  shape.create_movie([ctrl_sol], 'center-static-cell5-%d.mp4' % (ii+1), labels=False)
 
-  radii = np.clip(radii - lr * gradmo, 0.05, 0.95)
+  radii = np.clip(radii - lr * loss_grad, 0.05, 0.95)
