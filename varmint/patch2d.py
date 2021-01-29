@@ -8,9 +8,12 @@ from .exceptions import LabelError
 from .bsplines import (
   mesh,
   bspline2d,
+  bspline2d_basis,
+  bspline2d_basis_derivs,
   bspline2d_derivs,
   bspline2d_derivs_ctrl,
 )
+
 
 class Patch2D:
   ''' Class for individual patches in two dimensions.
@@ -156,6 +159,49 @@ class Patch2D:
         self.yknots,
         self.spline_deg,
       )
+    return jacobian_ctrl_fn
+
+  def get_cached_deformation_fn(self):
+    ''' Get a function that produces deformations
+
+    Takes in control points and returns a deformation for each quad point.
+
+    This is assumed to be in cm.
+    '''
+    basis_xy = bspline2d_basis(self.points, self.xknots,
+                               self.yknots, self.spline_deg)
+
+    def deformation_fn(ctrl):
+      return np.tensordot(basis_xy, ctrl, ((1,2), (0,1)))
+    return deformation_fn
+
+  def get_cached_jacobian_u_fn(self):
+    ''' Take control points, return 2x2 Jacobians wrt quad points. '''
+    basis_derivs = bspline2d_basis_derivs(self.points, self.xknots,
+                                          self.yknots, self.spline_deg)
+
+    def jacobian_u_fn(ctrl):
+      return np.swapaxes(
+        np.tensordot(
+          basis_derivs,
+          ctrl,
+          ((1,2), (0,1)),
+        ),
+        1, 2, # exchange the last two axes
+      )
+    return jacobian_u_fn
+
+  def get_cached_jacobian_ctrl_fn(self):
+    ''' Take control points, return Jacobian wrt control points. '''
+    basis = bspline2d_basis(
+      self.points, self.xknots, self.yknots, self.spline_deg)[:,np.newaxis,:,:,np.newaxis]
+    zeros = np.zeros_like(basis)
+    precomputed = np.concatenate([np.concatenate([basis, zeros], axis=1),
+                                  np.concatenate([zeros, basis], axis=1)],
+                                  axis=4)
+
+    def jacobian_ctrl_fn(ctrl):
+      return precomputed
     return jacobian_ctrl_fn
 
   def get_energy_fn(self):

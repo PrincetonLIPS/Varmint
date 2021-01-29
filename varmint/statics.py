@@ -10,6 +10,7 @@ def generate_free_energy_structured(shape):
   ''' For when all the patches have the same control point shapes. '''
 
   shape_unflatten = shape.get_unflatten_fn()
+
   def unflatten(q, qdot, displacement):
     ctrl, vels = shape_unflatten(q, qdot, displacement)
     return np.array(ctrl), np.array(vels)
@@ -85,6 +86,7 @@ def generate_free_energy_structured(shape):
       defgrads
     ) * np.abs(ref_jac_dets)
 
+
     # Total potential energy via integrating over parent config.
     strain_potential = 1e3 * np.sum(
       jax.vmap(
@@ -94,6 +96,7 @@ def generate_free_energy_structured(shape):
       strain_energy_density
       )
     )
+
 
     # Mass density in parent config.
     mass_density = mat_densities[:,np.newaxis] * np.abs(ref_jac_dets)
@@ -113,6 +116,62 @@ def generate_free_energy_structured(shape):
         grav_energy_density
       )
     )
+
+    # Returning total energy here.
+    fenergy = strain_potential + gravity_potential
+
+    return fenergy
+
+
+def generate_patch_free_energy(shape):
+  """Generates a function that computes the free energy for a single patch.
+
+  Assumes homogeneous patches.
+  """
+
+  jacobian_u_fn  = shape.patches[0].get_cached_jacobian_u_fn()
+  energy_fn      = shape.patches[0].get_energy_fn()
+  quad_fn        = shape.patches[0].get_quad_fn()
+  deformation_fn = shape.patches[0].get_cached_deformation_fn()
+  vmap_energy_fn = jax.vmap(energy_fn, in_axes=(0,))
+  jac_dets_fn    = jax.vmap(npla.det, in_axes=(0,))
+
+  defgrads_fn = jax.vmap(
+    lambda A, B: npla.solve(B.T, A.T).T,
+    in_axes=(0,0),
+  )
+
+  mat_density = shape.patches[0].material.density
+  gravity = 981.0 # cm/s^2
+
+  def free_energy(def_ctrl, ref_ctrl):
+    # Jacobian of reference config wrt parent config.
+    def_jacs = jacobian_u_fn(def_ctrl)
+    ref_jacs = jacobian_u_fn(ref_ctrl)
+    
+    # Deformation gradients. def_jacs @ ref_jacs_inv computed via a linear solve.
+    defgrads = defgrads_fn(def_jacs, ref_jacs)
+
+    # Jacobian determinants of reference config wrt parent.
+    ref_jac_dets = jac_dets_fn(ref_jacs)
+
+    # Strain energy density wrt to parent config.
+    strain_energy_density = vmap_energy_fn(defgrads) * np.abs(ref_jac_dets)
+
+    # Total potential energy via integrating over parent config.
+    strain_potential = 1e3 * np.sum(quad_fn(strain_energy_density))
+
+    # Mass density in parent config.
+    mass_density = mat_density * np.abs(ref_jac_dets)
+
+    # Positions in deformed config.
+    positions = deformation_fn(def_ctrl)
+
+    # Work density done by gravity.
+    grav_energy_density = positions[:,1] * gravity * mass_density
+
+    # Total work done by gravity integrated over parent config.
+    gravity_potential = 1e-7 * np.sum(quad_fn(grav_energy_density))
 
     # Returning total energy here.
     fenergy = strain_potential + gravity_potential

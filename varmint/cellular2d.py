@@ -8,6 +8,30 @@ from scipy.spatial.distance import pdist, squareform
 
 from .bsplines import mesh
 
+def get_sparse_indices(ctrl, epsilon=1e-6):
+  # TODO(doktay): This still constructs an N^2 matrix. Do not do that.
+
+  # Keep the last dimension the same.
+  unrolled = np.reshape(ctrl, (-1, ctrl.shape[-1]))
+
+  # Compute inter-control point distances.
+  dists = squareform(pdist(unrolled))
+
+  # Turn this into an adjacency matrix.
+  adjacency = csr_matrix(dists < epsilon)
+
+  # Find the connected components.
+  n_components, labels = connected_components(
+    csgraph=adjacency,
+    directed=False,
+    return_labels=True
+  )
+
+  # Reshape to reflect the control point shape, i.e., excluding the last dim.
+  labels= onp.reshape(labels, ctrl.shape[:-1])
+
+  return n_components, labels
+
 def match_labels(ctrl, keep_singletons=True, epsilon=1e-6):
 
   # Keep the last dimension the same.
