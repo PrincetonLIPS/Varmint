@@ -17,7 +17,7 @@ from varmint.materials    import Material, SiliconeRubber
 from varmint.constitutive import NeoHookean2D, LinearElastic2D
 from varmint.bsplines     import default_knots
 from varmint.statics      import generate_patch_free_energy
-from varmint.cellular2d   import get_sparse_indices, generate_quad_lattice
+from varmint.cellular2d   import index_array_from_ctrl, generate_quad_lattice
 
 #from jax.config import config
 #config.update("jax_enable_x64", True)
@@ -27,7 +27,7 @@ from varmint.cellular2d   import get_sparse_indices, generate_quad_lattice
 #server = jax.profiler.start_server(9999)
 
 class WigglyMat(Material):
-  _E = 0.005
+  _E = 0.0005
   _nu = 0.48
   _density = 1.0
 
@@ -45,8 +45,8 @@ npr.seed(5)
 quad_deg   = 10
 spline_deg = 3
 num_ctrl   = 5
-num_x      = 30
-num_y      = 10
+num_x      = 20
+num_y      = 60
 xknots     = default_knots(spline_deg, num_ctrl)
 yknots     = default_knots(spline_deg, num_ctrl)
 widths     = 5*np.ones(num_x)
@@ -54,12 +54,12 @@ heights    = 5*np.ones(num_y)
 
 print('Generating radii and control points')
 #radii     = npr.rand(num_x, num_y, (num_ctrl-1)*4)*0.9 + 0.05
-init_radii = onp.ones((num_x,num_y,(num_ctrl-1)*4))*0.5
+init_radii = np.ones((num_x,num_y,(num_ctrl-1)*4))*0.5
 init_ctrl  = generate_quad_lattice(widths, heights, init_radii)
-n_components, index_arr  = get_sparse_indices(init_ctrl)
+n_components, index_arr = index_array_from_ctrl(num_x, num_y, init_ctrl)
 left_side  = onp.array(init_ctrl[:,:,:,0] == 0.0)
 bottom     = onp.array(init_ctrl[:,:,:,1] == 0.0)
-fixed_labels = index_arr[left_side]
+fixed_labels = index_arr[bottom]
 
 def flatten_add(unflat_ctrl):
   almost_flat = jax.ops.index_add(np.zeros((n_components, 2)), index_arr, unflat_ctrl)
@@ -96,8 +96,18 @@ shape = Shape2D(*[
   for  ii in range(len(init_ctrl))
 ])
 
+patch = Patch2D(
+    xknots,
+    yknots,
+    spline_deg,
+    mat,
+    quad_deg,
+    None, #labels[ii,:,:],
+    fixed_labels, # <-- Labels not locations
+)
+
 #free_energy = generate_patch_free_energy(shape)
-free_energy = generate_patch_free_energy(shape)
+free_energy = generate_patch_free_energy(patch)
 
 def hvp(f, x, v):
   return jax.grad(lambda x: np.vdot(jax.grad(f)(x), v))(x)
@@ -257,9 +267,12 @@ def sample_loss_fn(ctrl):
 def close_to_center_loss_fn(ctrl):
   return np.linalg.norm(ctrl[..., 0] - 10)
 
+print('Starting statics simulation')
 radii = init_radii
 ctrl_sol = simulate(radii_to_ctrl(radii))
-shape.create_movie([ctrl_sol], 'long-hanging-cells-static.mp4', labels=False)
+#shape.create_movie([ctrl_sol], 'long-hanging-cells-static.mp4', labels=False)
+print('Saving result in figure.')
+shape.create_static_image(ctrl_sol, 'tall-cells-static-just-cp.png', just_cp=True)
 
 quit()
 

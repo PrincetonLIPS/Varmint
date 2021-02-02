@@ -123,16 +123,16 @@ def generate_free_energy_structured(shape):
     return fenergy
 
 
-def generate_patch_free_energy(shape):
+def generate_patch_free_energy(patch):
   """Generates a function that computes the free energy for a single patch.
 
   Assumes homogeneous patches.
   """
 
-  jacobian_u_fn  = shape.patches[0].get_cached_jacobian_u_fn()
-  energy_fn      = shape.patches[0].get_energy_fn()
-  quad_fn        = shape.patches[0].get_quad_fn()
-  deformation_fn = shape.patches[0].get_cached_deformation_fn()
+  jacobian_u_fn  = patch.get_cached_jacobian_u_fn()
+  energy_fn      = patch.get_energy_fn()
+  quad_fn        = patch.get_quad_fn()
+  deformation_fn = patch.get_cached_deformation_fn()
   vmap_energy_fn = jax.vmap(energy_fn, in_axes=(0,))
   jac_dets_fn    = jax.vmap(npla.det, in_axes=(0,))
 
@@ -141,7 +141,7 @@ def generate_patch_free_energy(shape):
     in_axes=(0,0),
   )
 
-  mat_density = shape.patches[0].material.density
+  mat_density = patch.material.density
   gravity = 981.0 # cm/s^2
 
   def free_energy(def_ctrl, ref_ctrl):
