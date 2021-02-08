@@ -19,8 +19,8 @@ from varmint.bsplines     import default_knots
 from varmint.statics      import generate_patch_free_energy
 from varmint.cellular2d   import index_array_from_ctrl, generate_quad_lattice
 
-#from jax.config import config
-#config.update("jax_enable_x64", True)
+from jax.config import config
+config.update("jax_enable_x64", True)
 
 #from varmint.grad_graph import grad_graph
 #import jax.profiler
@@ -32,11 +32,11 @@ class WigglyMat(Material):
   _density = 1.0
 
 class CollapsingMat(Material):
-  _E = 0.00001
+  _E = 0.00005
   _nu = 0.48
   _density = 1.0
 
-mat = NeoHookean2D(WigglyMat)
+mat = NeoHookean2D(CollapsingMat)
 #mat = NeoHookean2D(SiliconeRubber)
 
 npr.seed(5)
@@ -45,8 +45,8 @@ npr.seed(5)
 quad_deg   = 10
 spline_deg = 3
 num_ctrl   = 5
-num_x      = 20
-num_y      = 60
+num_x      = 30
+num_y      = 30
 xknots     = default_knots(spline_deg, num_ctrl)
 yknots     = default_knots(spline_deg, num_ctrl)
 widths     = 5*np.ones(num_x)
@@ -142,8 +142,8 @@ def simulate(ref_ctrl):
     block_hess = block_hess_fn(x)
 
     @jax.jit
-    #def hessp(new_q, p):
-    def hessp(p):
+    def hessp(new_q, p):
+    #def hessp(p):
       unflat = unflatten(p, np.zeros_like(fixed_locations))
       hvp_unflat = multi_patch_hvp(block_hess, unflat)
       flattened = flatten_add(hvp_unflat).reshape(-1, 2)
@@ -157,14 +157,15 @@ def simulate(ref_ctrl):
       self.total_calls = 0
       self.last_printed = time.time()
 
-    #def __call__(self, new_q, p):
-    def __call__(self, p):
+    def __call__(self, new_q, p):
+    #def __call__(self, p):
       self.total_calls += 1
       if time.time() - self.last_printed > 2.0:
           print(f'called hvp {self.total_calls} times')
           self.last_printed = time.time()
 
-      return self.func(p)
+      #return self.func(p)
+      return self.func(new_q, p)
 
   hessp = MutableFunction(generate_hessp(new_q))
 
@@ -179,29 +180,29 @@ def simulate(ref_ctrl):
   # Precompile
   loss_q(new_q)
   grad_q(new_q)
-  #hessp(new_q, new_q)
-  hessp(new_q)
+  hessp(new_q, new_q)
+  #hessp(new_q)
 
   # Try pure Newton iterations
-  print('starting optimization')
-  start_t = time.time()
-  for i in range(10):
-    print('newton iteration')
-    print(f'loss: {loss_q(new_q)}')
-    direction = -jax.scipy.sparse.linalg.cg(hessp, grad_q(new_q))[0]
-    new_q = new_q + direction
-    hessp.func = generate_hessp(new_q)
-  end_t = time.time()
-  print(f'optimization took {end_t - start_t} seconds')
-
   #print('starting optimization')
   #start_t = time.time()
-  #optim = spopt.minimize(loss_q, new_q, method='trust-ncg', jac=grad_q, hessp=hessp,
-  #                       callback=callback, options={'disp': True})
+  #for i in range(10):
+  #  print('newton iteration')
+  #  print(f'loss: {loss_q(new_q)}')
+  #  direction = -jax.scipy.sparse.linalg.cg(hessp, grad_q(new_q))[0]
+  #  new_q = new_q + direction
+  #  hessp.func = generate_hessp(new_q)
   #end_t = time.time()
   #print(f'optimization took {end_t - start_t} seconds')
 
-  #new_q = optim.x
+  print('starting optimization')
+  start_t = time.time()
+  optim = spopt.minimize(loss_q, new_q, method='newton-cg', jac=grad_q, hessp=hessp,
+                         callback=callback, options={'xtol': 1e-03, 'disp': True})
+  new_q = optim.x
+  end_t = time.time()
+  print(f'optimization took {end_t - start_t} seconds')
+
 
   return unflatten(new_q, fixed_locations)
 
