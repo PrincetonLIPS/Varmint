@@ -167,6 +167,8 @@ class Patch2D:
     Takes in control points and returns a deformation for each quad point.
 
     This is assumed to be in cm.
+
+    NOTE: At least for statics, caching is done magically by XLA compilation.
     '''
     basis_xy = bspline2d_basis(self.points, self.xknots,
                                self.yknots, self.spline_deg)
@@ -176,7 +178,10 @@ class Patch2D:
     return deformation_fn
 
   def get_cached_jacobian_u_fn(self):
-    ''' Take control points, return 2x2 Jacobians wrt quad points. '''
+    ''' Take control points, return 2x2 Jacobians wrt quad points.
+    
+    NOTE: At least for statics, caching is done magically by XLA compilation.
+    '''
     basis_derivs = bspline2d_basis_derivs(self.points, self.xknots,
                                           self.yknots, self.spline_deg)
 
@@ -192,7 +197,10 @@ class Patch2D:
     return jacobian_u_fn
 
   def get_cached_jacobian_ctrl_fn(self):
-    ''' Take control points, return Jacobian wrt control points. '''
+    ''' Take control points, return Jacobian wrt control points.
+    
+    NOTE: At least for statics, caching is done magically by XLA compilation.
+    '''
     basis = bspline2d_basis(
       self.points, self.xknots, self.yknots, self.spline_deg)[:,np.newaxis,:,:,np.newaxis]
     zeros = np.zeros_like(basis)
