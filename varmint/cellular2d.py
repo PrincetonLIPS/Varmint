@@ -96,30 +96,6 @@ def index_array_from_ctrl(num_x, num_y, ctrl):
   
   return n_components, labels
 
-def get_sparse_indices(ctrl, epsilon=1e-6):
-  # TODO(doktay): This still constructs an N^2 matrix. Do not do that.
-
-  # Keep the last dimension the same.
-  unrolled = np.reshape(ctrl, (-1, ctrl.shape[-1]))
-
-  # Compute inter-control point distances.
-  dists = squareform(pdist(unrolled))
-
-  # Turn this into an adjacency matrix.
-  adjacency = csr_matrix(dists < epsilon)
-
-  # Find the connected components.
-  n_components, labels = connected_components(
-    csgraph=adjacency,
-    directed=False,
-    return_labels=True
-  )
-
-  # Reshape to reflect the control point shape, i.e., excluding the last dim.
-  labels= onp.reshape(labels, ctrl.shape[:-1])
-
-  return n_components, labels
-
 def match_labels(ctrl, keep_singletons=True, epsilon=1e-6):
 
   # Keep the last dimension the same.
@@ -202,22 +178,6 @@ def _gen_cell(corners, radii):
     ctrl.append(new_ctrl)
 
   return np.stack(ctrl, axis=0)
-
-def generate_quad_lattice_old(widths, heights, radii):
-  width_mesh  = np.concatenate([np.array([0.0]), np.cumsum(widths)])
-  height_mesh = np.concatenate([np.array([0.0]), np.cumsum(heights)])
-
-  ctrl = []
-  for ii in range(len(widths)):
-    for jj in range(len(heights)):
-      corners = np.array([ [width_mesh[ii], height_mesh[jj]],
-                           [width_mesh[ii], height_mesh[jj+1]],
-                           [width_mesh[ii+1], height_mesh[jj+1]],
-                           [width_mesh[ii+1], height_mesh[jj]] ])
-      cell_ctrl = _gen_cell(corners, radii[ii,jj,:])
-      ctrl.extend(cell_ctrl)
-
-  return np.array(ctrl)
 
 def generate_quad_lattice(widths, heights, radii):
   width_mesh  = np.concatenate([np.array([0.0]), np.cumsum(widths)])
