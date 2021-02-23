@@ -236,6 +236,7 @@ def get_lmfunc(
 
   #@jax.jit
   def cond_fun(state):
+    #  !(hit_xtol > 0.0 || hit_ftol > 0.0 || nit >= maxiters || !np.allfinite(x))
     return np.logical_not(
       np.logical_or(
         np.logical_or(

@@ -5,6 +5,7 @@ import jax.numpy.linalg as npla
 import scipy.optimize as spopt
 
 from varmint.levmar import get_lmfunc
+from varmint.optimizers import get_optfun
 
 def discretize_eulag(L):
 
@@ -37,7 +38,11 @@ def discretize_hamiltonian(L):
 
   return grad_Ld_q1, grad_Ld_q2
 
-def get_hamiltonian_stepper(L, F=None):
+def hvp(f, x, v, args):
+  return jax.grad(lambda x, args: np.vdot(jax.grad(f)(x, args), v))(x, args)
+
+def get_hamiltonian_stepper(L, F=None, return_residual=False,
+                               surrogate=None, optimkind=None):
 
   # For thinking about forces, see West thesis:
   # https://thesis.library.caltech.edu/2492/1/west_thesis.pdf
@@ -47,8 +52,6 @@ def get_hamiltonian_stepper(L, F=None):
 
   D0_Ld, D1_Ld = discretize_hamiltonian(L)
 
-  # Trying to track down the source of the 12M files.
-  # @jax.jit
   def residual_fun(new_q, args):
     old_q, p, dt, l_args = args
 
@@ -61,44 +64,51 @@ def get_hamiltonian_stepper(L, F=None):
 
       return p + D0_Ld(old_q, new_q, dt, l_args) + F(q, qdot, *l_args)
 
-  optfun = get_lmfunc(residual_fun, maxiters=50)
+  jac_fun = jax.jacfwd(residual_fun)
+  optfun = get_optfun(residual_fun, kind=optimkind, maxiters=50)
 
-  #@jax.jit
   def step_q(q, p, dt, args):
-    new_q = optfun(jax.lax.stop_gradient(q), (q, p, dt, args))
-
-    # new_q, res = optfun(jax.lax.stop_gradient(q), (q, p, dt, args))
-    # print(res.nFx, res.nit, res.nfev, res.njev)
+    new_q = optfun(jax.lax.stop_gradient(q), (q, p, dt, args),
+                   jac=jac_fun, jacp=None, hess=None, hessp=None)
     return new_q
 
-  #@jax.jit
   def step_p(q1, q2, dt, args):
-
     if F is None:
       return D1_Ld(q1, q2, dt, args)
     else:
-
       q = (q1 + q2) / 2
       qdot = (q2 - q1) / dt
 
       return D1_Ld(q1, q2, dt, args) + F(q, qdot, *args)
 
   @jax.jit
-  def stepper(q, p, dt, *args):
-    #t0 = time.time()
-    new_q = step_q(q, p, dt, args)
-
-    #t1 = time.time()
-
-    # This seems to get recompiled over and over again?
-    new_p = jax.lax.cond(
+  def update_p(new_q, q, p, dt, *args):
+    return jax.lax.cond(
       np.all(np.isfinite(new_q)),
       lambda _: step_p(q, new_q, dt, args),
       lambda _: np.ones_like(p) + np.nan,
       np.float32(0.0),
     )
-    #t2 = time.time()
-    # print("\tstep_q = %0.2fs  step_p = %0.2fs" % (t1-t0, t2-t1))
+
+  #@jax.jit
+  def stepper(q, p, dt, *args):
+    if surrogate != None:
+      new_q = surrogate(q, p)
+    else:
+      new_q = step_q(q, p, dt, args)
+
+    # This seems to get recompiled over and over again?
+    new_p = update_p(new_q, q, p, dt, *args)
+    #new_p = jax.lax.cond(
+    #  np.all(np.isfinite(new_q)),
+    #  lambda _: step_p(q, new_q, dt, args),
+    #  lambda _: np.ones_like(p) + np.nan,
+    #  np.float32(0.0),
+    #)
+
     return new_q, new_p
 
-  return stepper
+  if return_residual:
+    return stepper, residual_fun
+  else:
+    return stepper

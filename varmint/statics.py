@@ -32,7 +32,7 @@ def generate_patch_free_energy(patch):
     # Jacobian of reference config wrt parent config.
     def_jacs = jacobian_u_fn(def_ctrl)
     ref_jacs = jacobian_u_fn(ref_ctrl)
-    
+
     # Deformation gradients. def_jacs @ ref_jacs_inv computed via a linear solve.
     defgrads = defgrads_fn(def_jacs, ref_jacs)
 
@@ -58,8 +58,6 @@ def generate_patch_free_energy(patch):
     gravity_potential = 1e-7 * np.sum(quad_fn(grav_energy_density))
 
     # Returning total energy here.
-    fenergy = strain_potential + gravity_potential
-
-    return fenergy
+    return strain_potential + gravity_potential
 
   return free_energy

@@ -277,3 +277,69 @@ def generate_lagrangian_structured(shape):
     return lag
 
   return lagrangian
+
+def generate_patch_lagrangian(patch):
+  ''' For when all the patches have the same control point shapes. '''
+
+  jacobian_u_fn    = patch.get_cached_jacobian_u_fn()
+  energy_fn        = patch.get_energy_fn()
+  quad_fn          = patch.get_quad_fn()
+  deformation_fn   = patch.get_cached_deformation_fn()
+  jacobian_ctrl_fn = patch.get_jacobian_ctrl_fn()
+  vmap_energy_fn   = jax.vmap(energy_fn, in_axes=(0,))
+  jac_dets_fn      = jax.vmap(npla.det, in_axes=(0,))
+
+  defgrads_fn = jax.vmap(
+    lambda A, B: npla.solve(B.T, A.T).T,
+    in_axes=(0,0),
+  )
+
+  kinetic_energy_fn = \
+    lambda mm, vv: 0.5 * np.tensordot(
+      np.tensordot(mm, vv, ((3,4,5), (0,1,2))), vv, ((0,1,2), (0,1,2))
+    )
+
+  mat_density = patch.material.density
+  gravity = 981.0 # cm/s^2
+
+  def lagrangian(def_ctrl, def_vels, ref_ctrl):
+    # Jacobian of reference config wrt parent config.
+    def_jacs = jacobian_u_fn(def_ctrl)
+    ref_jacs = jacobian_u_fn(ref_ctrl)
+
+    # Deformation gradients. def_jacs @ ref_jacs_inv computed via a linear solve.
+    defgrads = defgrads_fn(def_jacs, ref_jacs)
+
+    # Jacobian determinants of reference config wrt parent.
+    ref_jac_dets = jac_dets_fn(ref_jacs)
+
+    # Strain energy density wrt to parent config.
+    strain_energy_density = vmap_energy_fn(defgrads) * np.abs(ref_jac_dets)
+
+    # Total potential energy via integrating over parent config.
+    strain_potential = 1e3 * np.sum(quad_fn(strain_energy_density))
+
+    # Mass density in parent config.
+    mass_density = mat_density * np.abs(ref_jac_dets)
+
+    # Positions in deformed config.
+    positions = deformation_fn(def_ctrl)
+
+    # Work density done by gravity.
+    grav_energy_density = positions[:,1] * gravity * mass_density
+
+    # Total work done by gravity integrated over parent config.
+    gravity_potential = 1e-7 * np.sum(quad_fn(grav_energy_density))
+
+    ctrl_jacs = jacobian_ctrl_fn(def_ctrl)
+    ctrl_jacTjac = jax.vmap(np.tensordot, in_axes=(0,0,None))(ctrl_jacs, ctrl_jacs, (0,0,))
+
+    mass_matrices = (ctrl_jacTjac.T * mass_density.T).T
+    mass_matrix = quad_fn(mass_matrices)
+
+    kinetic_energy = 1e-7 * np.sum(kinetic_energy_fn(mass_matrix, def_vels))
+
+    # Compute and return lagrangian.
+    return kinetic_energy - gravity_potential - strain_potential
+
+  return lagrangian
