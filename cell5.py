@@ -42,7 +42,7 @@ parser.add_argument('-q', '--quaddeg', type=int, default=10)
 parser.add_argument('-s', '--splinedeg', type=int, default=3)
 
 parser.add_argument('--save', dest='save', action='store_true')
-parser.add_argument('--optimizer', choices=['levmar', 'scipy-lm'],
+parser.add_argument('--optimizer', choices=['levmar', 'scipy-lm', 'newtoncg'],
                     default='levmar')
 
 
