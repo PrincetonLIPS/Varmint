@@ -62,7 +62,7 @@ def get_hamiltonian_stepper(L, F=None, return_residual=False,
       q    = (old_q + new_q)/2.0
       qdot = (new_q-old_q) / dt
 
-      return p + D0_Ld(old_q, new_q, dt, l_args) + F(q, qdot, *l_args)
+      return (p + D0_Ld(old_q, new_q, dt, l_args) + F(q, qdot, *l_args))
 
   jac_fun = jax.jacfwd(residual_fun)
   optfun = get_optfun(residual_fun, kind=optimkind, maxiters=50)

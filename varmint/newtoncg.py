@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as np
 
-def newtoncg(f, grad, hessp, xtol=1e-5, maxiter=None):
+def newtoncg(f, grad, hessp, xtol=1e-8, maxiter=None):
   # Adapted from Scipy source code
   # https://github.com/scipy/scipy/blob/d78daa50c2d462c32b62cfa8cd4bb03b5d9b1403/scipy/optimize/optimize.py#L1681
   # Variable names match Nocedal and Wright 2nd Edition Algorithm 7.1 (Line Search Newton-CG)
@@ -72,7 +72,7 @@ def newtoncg(f, grad, hessp, xtol=1e-5, maxiter=None):
                     np.logical_or(
                         np.logical_or(
                             np.linalg.norm(r_i, ord=1) <= termcond,
-                            np.logical_and(0 <= curv, curv <= 3 * float32eps)
+                            np.logical_and(0 <= curv, curv <= 0.0003 * float32eps)
                         ), np.logical_and(curv < 0, i > 0)),
                     lambda _: (True, i, x_k, z_i, r_i, d_i, riri_0),
                     lambda _: jax.lax.cond(

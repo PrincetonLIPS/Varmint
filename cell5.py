@@ -42,7 +42,7 @@ parser.add_argument('-q', '--quaddeg', type=int, default=10)
 parser.add_argument('-s', '--splinedeg', type=int, default=3)
 
 parser.add_argument('--save', dest='save', action='store_true')
-parser.add_argument('--optimizer', choices=['levmar', 'scipy-lm', 'newtoncg'],
+parser.add_argument('--optimizer', choices=['levmar', 'scipy-lm', 'newtoncg', 'newtoncg-python', 'newtoncg-scipy', 'trustncg-scipy'],
                     default='levmar')
 
 
@@ -113,6 +113,7 @@ if __name__ == '__main__':
   n_components, index_arr = index_array_from_ctrl(num_x, num_y, init_ctrl)
   left_side  = onp.array(init_ctrl[:,:,:,0] == 0.0)
   fixed_labels = index_arr[left_side]
+  print(f'fixed labels: {fixed_labels.shape}')
 
   def flatten_add(unflat_ctrl, unflat_vel):
     almost_flat     = jax.ops.index_add(np.zeros((n_components, 2)), index_arr, unflat_ctrl)
