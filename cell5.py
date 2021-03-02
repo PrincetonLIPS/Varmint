@@ -112,36 +112,48 @@ if __name__ == '__main__':
   init_ctrl  = generate_quad_lattice(widths, heights, init_radii)
   n_components, index_arr = index_array_from_ctrl(num_x, num_y, init_ctrl)
   left_side  = onp.array(init_ctrl[:,:,:,0] == 0.0)
-  fixed_labels = index_arr[left_side]
-  print(f'fixed labels: {fixed_labels.shape}')
+  fixed_labels = np.unique(index_arr[left_side])
+
+  non_left_side  = onp.array(init_ctrl[:,:,:,0] != 0.0)
+  nonfixed_labels = np.unique(index_arr[non_left_side])
+  print(nonfixed_labels)
+  print(f'non fixed labels: {nonfixed_labels.shape}')
 
   def flatten_add(unflat_ctrl, unflat_vel):
     almost_flat     = jax.ops.index_add(np.zeros((n_components, 2)), index_arr, unflat_ctrl)
     almost_flat_vel = jax.ops.index_add(np.zeros((n_components, 2)), index_arr, unflat_vel)
-    return almost_flat.flatten(), almost_flat_vel.flatten()
+
+    nonfixed_flat     = np.take(almost_flat, nonfixed_labels, axis=0)
+    nonfixed_flat_vel = np.take(almost_flat_vel, nonfixed_labels, axis=0)
+
+    return nonfixed_flat.flatten(), nonfixed_flat_vel.flatten()
 
   def flatten(unflat_ctrl, unflat_vel):
     almost_flat = jax.ops.index_update(np.zeros((n_components, 2)), index_arr, unflat_ctrl)
     almost_flat_vel = jax.ops.index_update(np.zeros((n_components, 2)), index_arr, unflat_vel)
-    return almost_flat.flatten(), almost_flat_vel.flatten()
 
-  fixed_locations = flatten(init_ctrl, np.zeros_like(init_ctrl))[0].reshape((n_components, 2))
-  fixed_locations = np.take(fixed_locations, fixed_labels, axis=0)
+    nonfixed_flat     = np.take(almost_flat, nonfixed_labels, axis=0)
+    nonfixed_flat_vel = np.take(almost_flat_vel, nonfixed_labels, axis=0)
+
+    return nonfixed_flat.flatten(), nonfixed_flat_vel.flatten()
 
   def unflatten(flat_ctrl, flat_vels, fixed_locs):
-    fixed_locs = flatten(fixed_locs, np.zeros_like(fixed_locs))[0].reshape((n_components, 2))
+    fixed_locs = jax.ops.index_update(np.zeros((n_components, 2)), index_arr, fixed_locs)
     fixed_locs = np.take(fixed_locs, fixed_labels, axis=0)
 
-    flat_ctrl  = flat_ctrl.reshape(n_components, 2)
-    flat_vels  = flat_vels.reshape(n_components, 2)
-    fixed      = jax.ops.index_update(flat_ctrl, fixed_labels, fixed_locs)
-    fixed_vels = jax.ops.index_update(flat_vels, fixed_labels, np.zeros_like(fixed_locs))
-    return np.take(fixed, index_arr, axis=0), np.take(fixed_vels, index_arr, axis=0)
+    unflat_ctrl  = np.zeros((n_components, 2))
+    unflat_vels  = np.zeros((n_components, 2))
 
-  def unflatten_nofixed(flat_ctrl, flat_vels):
-    flat_ctrl = flat_ctrl.reshape(n_components, 2)
-    flat_vels = flat_vels.reshape(n_components, 2)
-    return np.take(flat_ctrl, index_arr, axis=0), np.take(flat_vels, index_arr, axis=0)
+    flat_ctrl = flat_ctrl.reshape((-1, 2))
+    flat_vels = flat_vels.reshape((-1, 2))
+
+    unflat_ctrl  = jax.ops.index_update(unflat_ctrl, nonfixed_labels, flat_ctrl)
+    unflat_vels  = jax.ops.index_update(unflat_vels, nonfixed_labels, flat_vels)
+
+    fixed      = jax.ops.index_update(unflat_ctrl, fixed_labels, fixed_locs)
+    fixed_vels = jax.ops.index_update(unflat_vels, fixed_labels, np.zeros_like(fixed_locs))
+
+    return np.take(fixed, index_arr, axis=0), np.take(fixed_vels, index_arr, axis=0)
 
   # Create the shape.
   shape = Shape2D(*[
@@ -178,11 +190,15 @@ if __name__ == '__main__':
     def_ctrl, def_vels = unflatten(q, qdot, displacement)
     return np.sum(jax.vmap(p_lagrangian)(def_ctrl, def_vels, ref_ctrl))
 
-  stepper = get_hamiltonian_stepper(full_lagrangian, friction_force,
-                                    optimkind=args.optimizer)
-
-  dt = np.float32(0.005)
+  dt = np.float64(0.005)
   T  = 0.5
+
+  q, p = flatten(init_ctrl, np.zeros_like(init_ctrl))
+  scale_args = (q, p, dt, (init_ctrl, init_ctrl))
+  stepper, residual_fun, diagD = \
+          get_hamiltonian_stepper(full_lagrangian, friction_force,
+                                  optimkind=args.optimizer,# scale_args=scale_args,
+                                  return_residual=True)
 
   def simulate(ref_ctrl):
 
@@ -203,6 +219,18 @@ if __name__ == '__main__':
       this_dt = dt
       while True:
         new_q, new_p = stepper(QQ[-1], PP[-1], this_dt, ref_ctrl, fixed_locs)
+        resids_before = residual_fun(QQ[-1] * diagD, (QQ[-1], PP[-1], this_dt, (ref_ctrl, fixed_locs)))
+        resids_after  = residual_fun(new_q * diagD,  (QQ[-1], PP[-1], this_dt, (ref_ctrl, fixed_locs)))
+
+        resid_grad = jax.jacfwd(residual_fun)(QQ[-1] * diagD, (QQ[-1], PP[-1], this_dt, (ref_ctrl, fixed_locs)))
+        print(f'Shape of resids: {resids_before.shape}')
+        print(f'Shape of resid grads: {resid_grad.shape}')
+        print(f'Rank of Jacobian: {np.linalg.matrix_rank(resid_grad)}')
+        print(f'Rank of GN Matrix: {np.linalg.matrix_rank(resid_grad.T @ resid_grad)}')
+        print(f'Condition number of GN Matrix: {np.linalg.cond(resid_grad.T @ resid_grad)}')
+        print(f'Before residual norm: {np.linalg.norm(resids_before)}')
+        print(f'After norm: {np.linalg.norm(resids_after)}')
+
         success = np.all(np.isfinite(new_q))
         if success:
           if args.save:

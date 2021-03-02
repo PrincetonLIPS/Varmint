@@ -59,7 +59,7 @@ def index_array_from_ctrl(num_x, num_y, ctrl):
         that_cell = unflat_indices[x, y-1]
         side1 = get_side_indices(this_cell, 'bottom')
         side2 = get_side_indices(that_cell, 'top')
-        
+
         row_inds.append(side1)
         col_inds.append(np.flip(side2))
 
@@ -68,7 +68,7 @@ def index_array_from_ctrl(num_x, num_y, ctrl):
         that_cell = unflat_indices[x+1, y]
         side1 = get_side_indices(this_cell, 'right')
         side2 = get_side_indices(that_cell, 'left')
-        
+
         row_inds.append(side1)
         col_inds.append(np.flip(side2))
 
@@ -92,8 +92,8 @@ def index_array_from_ctrl(num_x, num_y, ctrl):
       return_labels=True
   )
 
-  labels= onp.reshape(labels, ctrl.shape[:-1])
-  
+  labels = onp.reshape(labels, ctrl.shape[:-1])
+
   return n_components, labels
 
 def match_labels(ctrl, keep_singletons=True, epsilon=1e-6):

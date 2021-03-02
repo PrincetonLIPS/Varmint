@@ -42,7 +42,7 @@ def hvp(f, x, v, args):
   return jax.grad(lambda x, args: np.vdot(jax.grad(f)(x, args), v))(x, args)
 
 def get_hamiltonian_stepper(L, F=None, return_residual=False,
-                               surrogate=None, optimkind=None):
+                               surrogate=None, scale_args=None, optimkind='levmar'):
 
   # For thinking about forces, see West thesis:
   # https://thesis.library.caltech.edu/2492/1/west_thesis.pdf
@@ -52,20 +52,35 @@ def get_hamiltonian_stepper(L, F=None, return_residual=False,
 
   D0_Ld, D1_Ld = discretize_hamiltonian(L)
 
-  def residual_fun(new_q, args):
+  def residual_fun_pre(new_q, args):
     old_q, p, dt, l_args = args
 
     if F is None:
       return p + D0_Ld(old_q, new_q, dt, l_args)
     else:
-
       q    = (old_q + new_q)/2.0
       qdot = (new_q-old_q) / dt
 
       return (p + D0_Ld(old_q, new_q, dt, l_args) + F(q, qdot, *l_args))
 
+  def get_scaled_residual_fun(args):
+    jac_res = jax.jacfwd(residual_fun_pre)(args[0], args)
+    diagD   = np.linalg.norm(jac_res, axis=0)
+    print(diagD.shape)
+
+    def scaled_residual_fun(new_q, args):
+      return residual_fun_pre(new_q / diagD, args)
+
+    return scaled_residual_fun, diagD
+
+  diagD = 1.0
+  if scale_args is not None:
+    residual_fun, diagD = get_scaled_residual_fun(scale_args)
+  else:
+    residual_fun = residual_fun_pre
+
   jac_fun = jax.jacfwd(residual_fun)
-  optfun = get_optfun(residual_fun, kind=optimkind, maxiters=50)
+  optfun = get_optfun(residual_fun, kind=optimkind, diagD=diagD, maxiters=50)
 
   def step_q(q, p, dt, args):
     new_q = optfun(jax.lax.stop_gradient(q), (q, p, dt, args),
@@ -109,6 +124,6 @@ def get_hamiltonian_stepper(L, F=None, return_residual=False,
     return new_q, new_p
 
   if return_residual:
-    return stepper, residual_fun
+    return stepper, residual_fun, diagD
   else:
     return stepper
