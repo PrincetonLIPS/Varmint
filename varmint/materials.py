@@ -227,3 +227,13 @@ class ABS(Material):
   _E       = 1.1
   _nu      = 0.35 # ?
   _density = 1.2
+
+class CollapsingMat(Material):
+  _E = 0.00005
+  _nu = 0.48
+  _density = 1.0
+
+class WigglyMat(Material):
+  _E = 0.0001
+  _nu = 0.48
+  _density = 1.0
