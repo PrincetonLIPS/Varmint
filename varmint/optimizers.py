@@ -10,7 +10,7 @@ from varmint.levmar import get_lmfunc
 from varmint.newtoncg import newtoncg
 from varmint.newtoncg_python import newtoncg_python
 
-def get_optfun(residual_fun, kind='levmar', diagD=None, **optargs):
+def get_optfun(residual_fun, kind='levmar', **optargs):
   if kind == 'levmar':
     maxiters = optargs.get('maxiters', 50)
     lmfunc = get_lmfunc(residual_fun, maxiters=maxiters)
@@ -18,17 +18,14 @@ def get_optfun(residual_fun, kind='levmar', diagD=None, **optargs):
 
     # We would like all the optimizer functions
     # to have the same signature. 
-    def wrapped_lmfunc(x0, args, jac, jacp, hess, hessp):
-      if diagD is not None:
-        x0 = x0 * diagD
+    def wrapped_lmfunc(x0, args):
       return lmfunc(x0, args)
     return wrapped_lmfunc
 
   elif kind == 'scipy-lm':
     residual_fun = jax.jit(residual_fun)
-    def wrapped_optfun(x0, args, jac, jacp, hess, hessp):
-      if diagD is not None:
-        x0 = x0 * diagD
+    jac = jax.jacfwd(residual_fun)
+    def wrapped_optfun(x0, args):
       return spopt.least_squares(residual_fun, x0, args=(args,),
                                  method='lm', jac=jac).x
     return wrapped_optfun
@@ -50,8 +47,6 @@ def get_optfun(residual_fun, kind='levmar', diagD=None, **optargs):
     optfun = jax.jit(optfun)
     
     def wrapped_optfun(x0, args, jac, jacp, hess, hessp):
-      if diagD is not None:
-        x0 = x0 * diagD
       return optfun(x0, args)
 
     return wrapped_optfun
@@ -86,8 +81,6 @@ def get_optfun(residual_fun, kind='levmar', diagD=None, **optargs):
       return hess @ p
 
     def wrapped_optfun(x0, args, jac, jacp, hess, hessp):
-      if diagD is not None:
-        x0 = x0 * diagD
       return newtoncg_python(total_residual, gradd, hesspdirect, x0, args)
 
     return wrapped_optfun
@@ -124,8 +117,6 @@ def get_optfun(residual_fun, kind='levmar', diagD=None, **optargs):
       return hess @ p
 
     def wrapped_optfun(x0, args, jac, jacp, hess, hessp):
-      if diagD is not None:
-        x0 = x0 * diagD
       return spopt.minimize(total_residual, x0, args=(args,), method='Newton-CG', jac=gradd,
                             hessp=hesspdirect).x
 
@@ -167,8 +158,6 @@ def get_optfun(residual_fun, kind='levmar', diagD=None, **optargs):
       return res_jac.T @ res_jac
 
     def wrapped_optfun(x0, args, jac, jacp, hess, hessp):
-      if diagD is not None:
-        x0 = x0 * diagD
       return spopt.minimize(total_residual, x0, args=(args,), method='trust-ncg', jac=gradd,
                             hessp=hesspp, tol=1e-8).x
 

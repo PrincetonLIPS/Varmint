@@ -4,50 +4,33 @@ import jax.numpy.linalg as npla
 
 from functools import partial
 
-#@jax.jit
+
 def neohookean_energy2d_log(shear, bulk, F):
   I1 = np.trace(F.T @ F)
   J  = npla.det(F)
   return (shear/2) * (I1 - 2 - 2*np.log(J)) + (bulk/2)*np.log(J)**2
-#vmap_neohookean_energy2d_log = jax.jit(
-#  jax.vmap(
-#    neohookean_energy2d_log,
-#    in_axes=(0, None, None),
-#  ),
-#)
+
 
 def linear_elastic_energy2d(lmbda, mu, F):
   strain = 0.5 * (F + F.T - 2 * np.eye(2))
   return 0.5 * lmbda * (np.trace(strain) ** 2) + \
           mu * np.tensordot(strain, strain, axes=([0, 1], [0, 1]))
 
-#@jax.jit
+
 def neohookean_energy3d_log(shear, bulk, F):
   I1 = np.trace(F.T @ F)
   J  = npla.det(F)
   return (shear/2) * (I1 - 3 - 2*np.log(J)) + (bulk/2)*(J-1)**2
-#vmap_neohookean_energy3d_log = jax.jit(
-#  jax.vmap(
-#    neohookean_energy3d_log,
-#    in_axes=(0, None, None),
-#  ),
-#)
 
-#@jax.jit
+
 def neohookean_energy2d(shear, bulk, F):
   I1 = np.trace(F.T @ F)
   J  = npla.det(F)
   J23 = J**(-2/3)
   return (shear/2) * (J23 * (I1+1) - 3) + (bulk/2)*(J-1)**2
-#vmap_neohookean_energy2d = jax.jit(
-#  jax.vmap(
-#    neohookean_energy2d,
-#    in_axes=(0, None, None),
-#  ),
-#)
+
 
 class LinearElastic2D:
-
   def __init__(self, material, thickness=1):
     ''' thickness in cm '''
     self.material  = material
@@ -63,8 +46,8 @@ class LinearElastic2D:
     # TODO: How should this interact with third dimension?
     return self.density
 
-class NeoHookean2D:
 
+class NeoHookean2D:
   def __init__(self, material, log=True, thickness=1):
     ''' thickness in cm '''
     self.material  = material
@@ -85,7 +68,6 @@ class NeoHookean2D:
     return self.density
 
 class NeoHookean3D:
-
   def __init__(self, material):
     self.material = material
     self.shear    = self.material.shear

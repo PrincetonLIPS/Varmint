@@ -1,29 +1,12 @@
-import time
 import jax
 import jax.numpy as np
 import numpy as onp
 import numpy.random as npr
-import scipy.optimize as spopt
-import string
 
 from varmint.patch2d      import Patch2D
-from varmint.shape2d      import Shape2D
-from varmint.materials    import Material, SiliconeRubber
-from varmint.constitutive import NeoHookean2D
 from varmint.bsplines     import default_knots
 from varmint.lagrangian   import generate_patch_lagrangian
-from varmint.discretize   import get_hamiltonian_stepper
-from varmint.levmar       import get_lmfunc
 from varmint.cellular2d   import index_array_from_ctrl, generate_quad_lattice
-
-import experiment_utils as exputils
-
-import json
-import logging
-import random
-import argparse
-import time
-import os
 
 from collections import namedtuple
 
@@ -127,11 +110,11 @@ class Cell2D:
 
     return flatten, unflatten
 
-  def unflatten_dynamics_sequence(self, QQ, fixed_locs):
+  def unflatten_dynamics_sequence(self, QQ, PP, fixed_locs):
     _, unflatten = self.get_dynamics_flatten_unflatten()
-    ctrl_seq = [unflatten(q, np.zeros_like(q), fixed_locs)[0] for q in QQ]
+    unflat_pos, unflat_vel = zip(*[unflatten(q, p, fixed_locs) for q, p in zip(QQ, PP)])
 
-    return ctrl_seq
+    return unflat_pos, unflat_vel
 
   def get_statics_flatten_unflatten(self):
     def flatten(unflat_pos):

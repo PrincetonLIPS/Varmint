@@ -1,28 +1,21 @@
-import time
 import jax
 import jax.numpy as np
 import numpy as onp
 import numpy.random as npr
-import scipy.optimize as spopt
-import string
 
 from varmint.patch2d      import Patch2D
 from varmint.materials    import WigglyMat, CollapsingMat
 from varmint.constitutive import NeoHookean2D
-from varmint.discretize   import get_hamiltonian_stepper
+from varmint.discretize   import HamiltonianStepper
 from varmint.cell2d       import Cell2D, CellShape
 from varmint.movie_utils  import create_movie
 
 import experiment_utils as eutils
 import analysis_utils as autils
 
-import json
-import logging
-import random
 import argparse
-import time
 import os
-import pickle
+import time
 
 
 parser = argparse.ArgumentParser()
@@ -50,10 +43,8 @@ def simulate(ref_ctrl, ref_vels, cell, dt, T, friction=1e-7):
   flatten, unflatten = cell.get_dynamics_flatten_unflatten()
   full_lagrangian = cell.get_lagrangian_fun()
 
-  stepper, residual_fun, diagD = \
-          get_hamiltonian_stepper(full_lagrangian, friction_force,
-                                  optimkind=args.optimizer,
-                                  return_residual=True)
+  stepper = HamiltonianStepper(full_lagrangian, friction_force)
+  step = stepper.construct_stepper(optimkind=args.optimizer)
 
   # Initially in the ref config with zero momentum.
   q, p = flatten(ref_ctrl, ref_vels)
@@ -66,7 +57,7 @@ def simulate(ref_ctrl, ref_vels, cell, dt, T, friction=1e-7):
     success = False
     this_dt = dt
     while True:
-      new_q, new_p = stepper(QQ[-1], PP[-1], this_dt, ref_ctrl, fixed_locs)
+      new_q, new_p = step(QQ[-1], PP[-1], this_dt, ref_ctrl, fixed_locs)
 
       success = np.all(np.isfinite(new_q))
       if success:
@@ -81,10 +72,7 @@ def simulate(ref_ctrl, ref_vels, cell, dt, T, friction=1e-7):
     t1 = time.time()
     print(f'stepped to time {TT[-1]} in {t1-t0} seconds')
 
-  # Turn this into a sequence of control point sets.
-  ctrl_seq = cell.unflatten_dynamics_sequence(QQ, ref_ctrl)
-
-  return ctrl_seq, QQ, PP, TT
+  return QQ, PP, TT
 
 
 def sim_radii(cell, radii, dt, T):
@@ -92,9 +80,9 @@ def sim_radii(cell, radii, dt, T):
   ref_ctrl = cell.radii_to_ctrl(radii)
 
   # Simulate the reference shape.
-  ctrl_seq, QQ, PP, TT = simulate(ref_ctrl, np.zeros_like(ref_ctrl), cell, dt, T)
+  QQ, PP, TT = simulate(ref_ctrl, np.zeros_like(ref_ctrl), cell, dt, T)
 
-  return ctrl_seq, QQ, PP, TT
+  return QQ, PP, TT
 
 
 if __name__ == '__main__':
@@ -121,10 +109,14 @@ if __name__ == '__main__':
   dt = np.float64(args.dt)
   T  = args.simtime
 
-  ctrl_seq, QQ, PP, TT = sim_radii(cell, init_radii, dt, T)
+  QQ, PP, TT = sim_radii(cell, init_radii, dt, T)
   sim_dir = os.path.join(args.exp_dir, 'sim_ckpt')
   os.mkdir(sim_dir)
   autils.save_dynamics_simulation(sim_dir, QQ, PP, TT, init_radii, cell)
+
+  # Turn this into a sequence of control point sets.
+  ref_ctrl = cell.radii_to_ctrl(init_radii)
+  ctrl_seq, _ = cell.unflatten_dynamics_sequence(QQ, PP, ref_ctrl)
 
   print('Saving result in video.')
   vid_path = os.path.join(args.exp_dir, 'sim.mp4')

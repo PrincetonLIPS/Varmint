@@ -77,7 +77,7 @@ class Test_Patch2D_NoLabels(ut.TestCase):
 
   def test_energy_fn(self):
     energy_fn = self.patch.get_energy_fn()
-    defgrad   = np.array([np.eye(2)])
+    defgrad   = np.eye(2)
 
     self.assertEqual(energy_fn(defgrad), 0.0)
 

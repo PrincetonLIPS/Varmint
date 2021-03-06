@@ -6,15 +6,10 @@ import matplotlib.pyplot as plt
 from operator import itemgetter
 from matplotlib.animation import FuncAnimation
 
-from .exceptions import (
-  DimensionError,
-  LabelError,
-  )
 from .patch2d import Patch2D
-from .bsplines import (
-  bspline2d,
-  mesh,
-)
+from .bsplines import bspline2d
+
+import time
 
 
 def create_movie(
@@ -23,6 +18,8 @@ def create_movie(
     filename,
     fig_kwargs={},
 ):
+  t0 = time.time()
+
   # Get extrema of control points.
   min_x = np.inf
   max_x = -np.inf
@@ -59,11 +56,14 @@ def create_movie(
     np.vstack([uu[::-1], uu[0]*np.ones(N)]),
   ]).T
 
-  def init():
+  print('Compiling bspline code for movie exporting.')
+  jit_bspline2d = jax.jit(bspline2d, static_argnums=(4,))
+  print('Done.')
 
+  def init():
     # Render the first time step.
     for i, patch_ctrl in enumerate(ctrl_seq[0]):
-      locs = bspline2d(
+      locs = jit_bspline2d(
         path,
         patch_ctrl,
         patch.xknots,
@@ -81,9 +81,8 @@ def create_movie(
     return objects.values()
 
   def update(tt):
-
     for i, patch_ctrl in enumerate(ctrl_seq[tt]):
-      locs = bspline2d(
+      locs = jit_bspline2d(
         path,
         patch_ctrl,
         patch.xknots,
@@ -107,6 +106,8 @@ def create_movie(
   anim.save(filename)
 
   plt.close(fig)
+  t1 = time.time()
+  print(f'Generated movie with {len(ctrl_seq)} frames in {t1-t0} seconds.')
 
 def create_static_image(
     self,

@@ -13,7 +13,7 @@ class Test_NeoHookean2D(ut.TestCase):
     bulk    = 1.0
     defgrad = np.eye(2)
 
-    self.assertEqual(neohookean_energy2d(defgrad, shear, bulk), 0.0)
+    self.assertEqual(neohookean_energy2d(shear, bulk, defgrad), 0.0)
 
   def test_rigid_energy(self):
     shear   = 1.0
@@ -26,7 +26,7 @@ class Test_NeoHookean2D(ut.TestCase):
       defgrad = np.array([[np.cos(theta), -np.sin(theta),],
                           [np.sin(theta), np.cos(theta)]])
 
-      self.assertAlmostEqual(neohookean_energy2d(defgrad, shear, bulk), 0.0,
+      self.assertAlmostEqual(neohookean_energy2d(shear, bulk, defgrad), 0.0,
                              places=6)
 
 class Test_NeoHookean2D_log(ut.TestCase):
@@ -36,7 +36,7 @@ class Test_NeoHookean2D_log(ut.TestCase):
     bulk    = 1.0
     defgrad = np.eye(2)
 
-    self.assertEqual(neohookean_energy2d_log(defgrad, shear, bulk), 0.0)
+    self.assertEqual(neohookean_energy2d_log(shear, bulk, defgrad), 0.0)
 
   def test_rigid_energy(self):
     shear   = 1.0
@@ -49,7 +49,7 @@ class Test_NeoHookean2D_log(ut.TestCase):
       defgrad = np.array([[np.cos(theta), -np.sin(theta),],
                           [np.sin(theta), np.cos(theta)]])
 
-      self.assertAlmostEqual(neohookean_energy2d_log(defgrad, shear, bulk), 0.0,
+      self.assertAlmostEqual(neohookean_energy2d_log(shear, bulk, defgrad), 0.0,
                              places=6)
 
 class Test_NeoHookean3D(ut.TestCase):
@@ -59,7 +59,7 @@ class Test_NeoHookean3D(ut.TestCase):
     bulk    = 1.0
     defgrad = np.eye(3)
 
-    self.assertEqual(neohookean_energy3d_log(defgrad, shear, bulk), 0.0)
+    self.assertEqual(neohookean_energy3d_log(shear, bulk, defgrad), 0.0)
 
   def test_rigid_energy(self):
     shear = 1.0
@@ -90,5 +90,5 @@ class Test_NeoHookean3D(ut.TestCase):
       defgrad = yaw @ pitch @ roll
 
 
-      self.assertAlmostEqual(neohookean_energy3d_log(defgrad, shear, bulk), 0.0,
+      self.assertAlmostEqual(neohookean_energy3d_log(shear, bulk, defgrad), 0.0,
                              places=6)
