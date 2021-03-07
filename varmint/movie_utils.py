@@ -107,15 +107,17 @@ def create_movie(
 
   plt.close(fig)
   t1 = time.time()
-  print(f'Generated movie with {len(ctrl_seq)} frames in {t1-t0} seconds.')
+  print(f'Generated movie with {len(ctrl_seq)} frames and \
+          {len(ctrl_seq[0])} patches in {t1-t0} seconds.')
 
 def create_static_image(
-    self,
+    patch,
     ctrl_sol,
     filename,
     just_cp=False,
     fig_kwargs={},
 ):
+  t0 = time.time()
 
   # Get extrema of control points.
   min_x = float(onp.min(ctrl_sol[..., 0]))
@@ -152,9 +154,11 @@ def create_static_image(
       np.vstack([uu[::-1], uu[0]*np.ones(N)]),
     ]).T
 
+    jit_bspline2d = jax.jit(bspline2d, static_argnums=(4,))
+
     # Render the first time step.
     for patch_ctrl in ctrl_sol:
-      locs = bspline2d(
+      locs = jit_bspline2d(
         path,
         patch_ctrl,
         patch.xknots,
@@ -169,3 +173,5 @@ def create_static_image(
 
   plt.savefig(filename)
   plt.close(fig)
+  t1 = time.time()
+  print(f'Generated image with {len(ctrl_sol)} patches in {t1-t0} seconds.')

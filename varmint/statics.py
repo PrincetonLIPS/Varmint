@@ -2,9 +2,8 @@ import jax
 import jax.numpy        as np
 import jax.numpy.linalg as npla
 import numpy            as onp
-import logging
 
-from .vmap_utils import *
+import time
 
 
 def generate_patch_free_energy(patch):
@@ -61,3 +60,114 @@ def generate_patch_free_energy(patch):
     return strain_potential + gravity_potential
 
   return free_energy
+
+
+class DenseStaticsSolver:
+  def __init__(self, cell):
+    self.cell = cell
+
+  def get_loss_fun(self):
+    return self.cell.get_free_energy_fun(patchwise=False)
+
+  def get_solver_fun(self, optimkind='newton', opt_params={}):
+    niters = opt_params.get('niters', 10)
+
+    loss_fun = jax.jit(self.get_loss_fun())
+    grad_fun = jax.jit(jax.grad(self.get_loss_fun()))
+    hess_fun = jax.jit(jax.hessian(self.get_loss_fun()))
+
+    def solve(q, ref_ctrl):
+      # Try pure Newton iterations
+      print('Beginning optimization...')
+      start_t = time.time()
+      for i in range(niters):
+        print(f'Loss: {loss_fun(q, ref_ctrl)}')
+        hess = hess_fun(q, ref_ctrl)
+
+        def hessp(p):
+          return hess @ p
+
+        direction = -jax.scipy.sparse.linalg.cg(hessp, grad_fun(q, ref_ctrl))[0]
+        q = q + direction
+      end_t = time.time()
+      print(f'Finished optimization. Took {niters} steps in {end_t - start_t} seconds')
+
+      return q
+
+    return solve
+
+
+class SparseStaticsSolver:
+  def __init__(self, cell):
+    self.cell = cell
+
+  def get_loss_fun(self):
+    p_free_energy = self.cell.get_free_energy_fun(patchwise=True)
+    _, unflatten = self.cell.get_statics_flatten_unflatten()
+
+    def loss(q, ref_ctrl):
+      def_ctrl = unflatten(q, ref_ctrl)
+      all_args = np.stack([def_ctrl, ref_ctrl], axis=-1)
+      return np.sum(jax.vmap(lambda x: p_free_energy(x[..., 0], x[..., 1]))(all_args))
+
+    return loss
+
+  def get_solver_fun(self, optimkind='newton', opt_params={}):
+    niters = opt_params.get('niters', 10)
+
+    p_free_energy = self.cell.get_free_energy_fun(patchwise=True)
+    flatten, unflatten = self.cell.get_statics_flatten_unflatten()
+    flatten_add = self.cell.get_statics_flatten_add()
+
+    loss_fun = jax.jit(self.get_loss_fun())
+    grad_fun = jax.jit(jax.grad(self.get_loss_fun()))
+
+    @jax.jit
+    def block_hess_fn(q, ref_ctrl):
+      def_ctrl = unflatten(q, ref_ctrl)
+      all_args = np.stack([def_ctrl, ref_ctrl], axis=-1)
+      return jax.vmap(lambda x: jax.hessian(p_free_energy)(x[..., 0], x[..., 1]))(all_args)
+
+    def single_patch_hvp(patch_hess, patch_ctrl):
+      flat_ctrl = patch_ctrl.ravel()
+      ravel_len = flat_ctrl.shape[0]
+
+      patch_hess = patch_hess.reshape((ravel_len, ravel_len))
+      return (patch_hess @ flat_ctrl).reshape(patch_ctrl.shape)
+    multi_patch_hvp = jax.vmap(single_patch_hvp, in_axes=(0, 0))
+
+    def generate_hessp(q, ref_ctrl):
+      block_hess = block_hess_fn(q, ref_ctrl)
+
+      @jax.jit
+      def hessp(p):
+        unflat = unflatten(p, np.zeros_like(ref_ctrl))
+        hvp_unflat = multi_patch_hvp(block_hess, unflat)
+        return flatten_add(hvp_unflat)
+
+      return hessp
+
+    class MutableFunction:
+      def __init__(self, func):
+        self.func = func
+
+      def __call__(self, p):
+        return self.func(p)
+
+    def solve(q, ref_ctrl):
+      hessp = MutableFunction(generate_hessp(q, ref_ctrl))
+      # Try pure Newton iterations
+      print('Beginning optimization...')
+      start_t = time.time()
+      for i in range(niters):
+        print(f'Loss: {loss_fun(q, ref_ctrl)}')
+        hessp.func = generate_hessp(q, ref_ctrl)
+
+        direction = -jax.scipy.sparse.linalg.cg(hessp, grad_fun(q, ref_ctrl))[0]
+        q = q + direction
+      end_t = time.time()
+      print(f'Finished optimization. Took {niters} steps in {end_t - start_t} seconds')
+
+      return q
+
+    return solve

@@ -30,18 +30,14 @@ import argparse
 import time
 import os
 
-#from varmint.grad_graph import grad_graph
-#import jax.profiler
-#server = jax.profiler.start_server(9999)
-
 
 parser = argparse.ArgumentParser()
 exputils.prepare_experiment_args(parser, exp_root='/n/fs/mm-iga/Varmint/experiments')
 
 
 # Geometry parameters.
-parser.add_argument('-x', '--nx', type=int, default=10)
-parser.add_argument('-y', '--ny', type=int, default=10)
+parser.add_argument('-x', '--nx', type=int, default=3)
+parser.add_argument('-y', '--ny', type=int, default=1)
 parser.add_argument('-c', '--ncp', type=int, default=5)
 parser.add_argument('-q', '--quaddeg', type=int, default=10)
 parser.add_argument('-s', '--splinedeg', type=int, default=3)
@@ -169,8 +165,8 @@ if __name__ == '__main__':
       block_hess = block_hess_fn(x)
 
       @jax.jit
-      def hessp(new_q, p):
-      #def hessp(p):
+      #def hessp(new_q, p):
+      def hessp(p):
         unflat = unflatten(p, np.zeros_like(fixed_locations))
         hvp_unflat = multi_patch_hvp(block_hess, unflat)
         flattened = flatten_add(hvp_unflat).reshape(-1, 2)
@@ -184,21 +180,21 @@ if __name__ == '__main__':
         self.total_calls = 0
         self.last_printed = time.time()
 
-      def __call__(self, new_q, p):
-      #def __call__(self, p):
+      #def __call__(self, new_q, p):
+      def __call__(self, p):
         self.total_calls += 1
         if time.time() - self.last_printed > 2.0:
             print(f'called hvp {self.total_calls} times')
             self.last_printed = time.time()
 
-        #return self.func(p)
-        return self.func(new_q, p)
+        return self.func(p)
+        #return self.func(new_q, p)
 
-    #hessp = MutableFunction(generate_hessp(new_q))
+    hessp = MutableFunction(generate_hessp(new_q))
 
-    @jax.jit
-    def hessp(new_q, p):
-      return hvp(loss_wrapped, new_q, p)
+    #@jax.jit
+    #def hessp(new_q, p):
+    #  return hvp(loss_wrapped, new_q, p)
 
     def callback(x):
       print('iteration. updating hessian.')
@@ -207,20 +203,20 @@ if __name__ == '__main__':
     # Precompile
     loss_q(new_q)
     grad_q(new_q)
-    hessp(new_q, new_q)
-    #hessp(new_q)
+    #hessp(new_q, new_q)
+    hessp(new_q)
 
     # Try pure Newton iterations
-    #print('starting optimization')
-    #start_t = time.time()
-    #for i in range(10):
-    #  print('newton iteration')
-    #  print(f'loss: {loss_q(new_q)}')
-    #  direction = -jax.scipy.sparse.linalg.cg(hessp, grad_q(new_q))[0]
-    #  new_q = new_q + direction
-    #  hessp.func = generate_hessp(new_q)
-    #end_t = time.time()
-    #print(f'optimization took {end_t - start_t} seconds')
+    print('starting optimization')
+    start_t = time.time()
+    for i in range(10):
+      print('newton iteration')
+      print(f'loss: {loss_q(new_q)}')
+      direction = -jax.scipy.sparse.linalg.cg(hessp, grad_q(new_q))[0]
+      new_q = new_q + direction
+      hessp.func = generate_hessp(new_q)
+    end_t = time.time()
+    print(f'optimization took {end_t - start_t} seconds')
 
     # Try pure gradient descent
     #print('starting optimization')
@@ -236,13 +232,13 @@ if __name__ == '__main__':
     #end_t = time.time()
     #print(f'optimization took {end_t - start_t} seconds')
 
-    print('starting optimization')
-    start_t = time.time()
-    optim = spopt.minimize(loss_q, new_q, method='trust-ncg', jac=grad_q, hessp=hessp,
-                           callback=callback, options={'disp': True})
-    new_q = optim.x
-    end_t = time.time()
-    print(f'optimization took {end_t - start_t} seconds')
+    #print('starting optimization')
+    #start_t = time.time()
+    #optim = spopt.minimize(loss_q, new_q, method='trust-ncg', jac=grad_q, hessp=hessp,
+    #                       callback=callback, options={'disp': True})
+    #new_q = optim.x
+    #end_t = time.time()
+    #print(f'optimization took {end_t - start_t} seconds')
 
 
     return unflatten(new_q, fixed_locations)

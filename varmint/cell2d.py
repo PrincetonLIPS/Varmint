@@ -6,6 +6,7 @@ import numpy.random as npr
 from varmint.patch2d      import Patch2D
 from varmint.bsplines     import default_knots
 from varmint.lagrangian   import generate_patch_lagrangian
+from varmint.statics      import generate_patch_free_energy
 from varmint.cellular2d   import index_array_from_ctrl, generate_quad_lattice
 
 from collections import namedtuple
@@ -149,8 +150,25 @@ class Cell2D:
 
     return flatten, unflatten
 
-  def get_lagrangian_fun(self):
+  def get_statics_flatten_add(self):
+    def flatten_add(unflat_pos):
+      kZeros = np.zeros((self.n_components, 2))
+
+      # flatten to connected components, accumulating shared points.
+      flat_pos = jax.ops.index_add(kZeros, self.index_arr, unflat_pos)
+
+      # Remove fixed locations
+      flat_pos = np.take(flat_pos, self.nonfixed_labels, axis=0)
+
+      return flat_pos.flatten()
+
+    return flatten_add
+
+  def get_lagrangian_fun(self, patchwise=False):
     p_lagrangian = generate_patch_lagrangian(self.patch)
+
+    if patchwise:
+      return p_lagrangian
     flatten, unflatten = self.get_dynamics_flatten_unflatten()
 
     def full_lagrangian(q, qdot, ref_ctrl, displacement):
@@ -158,3 +176,16 @@ class Cell2D:
       return np.sum(jax.vmap(p_lagrangian)(def_ctrl, def_vels, ref_ctrl))
 
     return full_lagrangian
+
+  def get_free_energy_fun(self, patchwise=False):
+    p_free_energy = generate_patch_free_energy(self.patch)
+
+    if patchwise:
+      return p_free_energy
+    
+    flatten, unflatten = self.get_statics_flatten_unflatten()
+
+    def full_free_energy(q, ref_ctrl):
+      def_ctrl = unflatten(q, ref_ctrl)
+      return np.sum(jax.vmap(p_free_energy)(def_ctrl, ref_ctrl))
+    return full_free_energy
