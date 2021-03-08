@@ -107,8 +107,8 @@ def create_movie(
 
   plt.close(fig)
   t1 = time.time()
-  print(f'Generated movie with {len(ctrl_seq)} frames and \
-          {len(ctrl_seq[0])} patches in {t1-t0} seconds.')
+  print(f'Generated movie with {len(ctrl_seq)} frames and '
+        f'{len(ctrl_seq[0])} patches in {t1-t0} seconds.')
 
 def create_static_image(
     patch,

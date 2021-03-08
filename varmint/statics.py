@@ -3,6 +3,8 @@ import jax.numpy        as np
 import jax.numpy.linalg as npla
 import numpy            as onp
 
+from varmint.optimizers import get_statics_optfun
+
 import time
 
 
@@ -70,30 +72,17 @@ class DenseStaticsSolver:
     return self.cell.get_free_energy_fun(patchwise=False)
 
   def get_solver_fun(self, optimkind='newton', opt_params={}):
-    niters = opt_params.get('niters', 10)
-
     loss_fun = jax.jit(self.get_loss_fun())
     grad_fun = jax.jit(jax.grad(self.get_loss_fun()))
     hess_fun = jax.jit(jax.hessian(self.get_loss_fun()))
 
-    def solve(q, ref_ctrl):
-      # Try pure Newton iterations
-      print('Beginning optimization...')
-      start_t = time.time()
-      for i in range(niters):
-        print(f'Loss: {loss_fun(q, ref_ctrl)}')
-        hess = hess_fun(q, ref_ctrl)
+    def hessp_gen_fun(q, ref_ctrl):
+      hess = hess_fun(q, ref_ctrl)
+      def hessp(_q, p, _ref_ctrl):
+        return hess @ p
+      return hessp
 
-        def hessp(p):
-          return hess @ p
-
-        direction = -jax.scipy.sparse.linalg.cg(hessp, grad_fun(q, ref_ctrl))[0]
-        q = q + direction
-      end_t = time.time()
-      print(f'Finished optimization. Took {niters} steps in {end_t - start_t} seconds')
-
-      return q
-
+    solve = get_statics_optfun(loss_fun, grad_fun, hessp_gen_fun=hessp_gen_fun, kind=optimkind)
     return solve
 
 
@@ -140,34 +129,12 @@ class SparseStaticsSolver:
       block_hess = block_hess_fn(q, ref_ctrl)
 
       @jax.jit
-      def hessp(p):
+      def hessp(_q, p, _ref_ctrl):
         unflat = unflatten(p, np.zeros_like(ref_ctrl))
         hvp_unflat = multi_patch_hvp(block_hess, unflat)
         return flatten_add(hvp_unflat)
 
       return hessp
 
-    class MutableFunction:
-      def __init__(self, func):
-        self.func = func
-
-      def __call__(self, p):
-        return self.func(p)
-
-    def solve(q, ref_ctrl):
-      hessp = MutableFunction(generate_hessp(q, ref_ctrl))
-      # Try pure Newton iterations
-      print('Beginning optimization...')
-      start_t = time.time()
-      for i in range(niters):
-        print(f'Loss: {loss_fun(q, ref_ctrl)}')
-        hessp.func = generate_hessp(q, ref_ctrl)
-
-        direction = -jax.scipy.sparse.linalg.cg(hessp, grad_fun(q, ref_ctrl))[0]
-        q = q + direction
-      end_t = time.time()
-      print(f'Finished optimization. Took {niters} steps in {end_t - start_t} seconds')
-
-      return q
-
+    solve = get_statics_optfun(loss_fun, grad_fun, hessp_gen_fun=generate_hessp, kind=optimkind)
     return solve

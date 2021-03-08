@@ -1,11 +1,16 @@
 import jax
+
+# Let's do 64-bit. Does not seem to degrade performance much.
+from jax.config import config
+config.update("jax_enable_x64", True)
+
 import jax.numpy as np
 import numpy as onp
 import numpy.random as npr
 
 from varmint.patch2d      import Patch2D
-from varmint.materials    import WigglyMat, CollapsingMat, SiliconeRubber
 from varmint.constitutive import NeoHookean2D, LinearElastic2D
+from varmint.materials    import Material
 from varmint.cell2d       import Cell2D, CellShape
 from varmint.movie_utils  import create_static_image
 from varmint.statics      import DenseStaticsSolver, SparseStaticsSolver
@@ -31,7 +36,16 @@ parser.add_argument('-s', '--splinedeg', type=int, default=3)
 
 parser.add_argument('--mat_model', choices=['NeoHookean2D', 'LinearElastic2D'],
                     default='NeoHookean2D')
+parser.add_argument('--E', type=float, default=0.005)
 parser.add_argument('--sparse', action='store_true')
+parser.add_argument('--optimizer', choices=['newton', 'newtoncg-scipy', 'trustncg-scipy',
+                                            'bfgs-scipy'], default='newton')
+
+
+class WigglyMat(Material):
+  _E = 0.003
+  _nu = 0.48
+  _density = 1.0
 
 
 def simulate(ref_ctrl, cell, sparse=False, optimkind='newton'):
@@ -59,7 +73,8 @@ if __name__ == '__main__':
   eutils.save_args(args)
   npr.seed(args.seed)
 
-  mat = eval(args.material)(SiliconeRubber)
+  WigglyMat._E = args.E
+  mat = eval(args.mat_model)(WigglyMat)
 
   cell_shape = CellShape(
     num_x=args.nx,
@@ -73,7 +88,8 @@ if __name__ == '__main__':
   init_radii = cell.generate_random_radii(args.seed)
 
   print('Starting statics simulation')
-  ctrl_sol = simulate(cell.radii_to_ctrl(init_radii), cell, sparse=args.sparse)
+  ctrl_sol = simulate(cell.radii_to_ctrl(init_radii), cell,
+                      sparse=args.sparse, optimkind=args.optimizer)
   print('Saving result in figure.')
   im_path = os.path.join(args.exp_dir, 'result.png')
   create_static_image(cell.patch, ctrl_sol, im_path)
@@ -136,7 +152,9 @@ if __name__ == '__main__':
 #
 #  def close_to_center_loss_fn(ctrl):
 #    return np.linalg.norm(ctrl[..., 0] - 10)
-
+#
+#
+#
 #  print('Starting training')
 #  lr = 1.0
 #  for ii in range(1):

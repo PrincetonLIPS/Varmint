@@ -1,4 +1,9 @@
 import jax
+
+# Let's do 64-bit. Does not seem to degrade performance much.
+from jax.config import config
+config.update("jax_enable_x64", True)
+
 import jax.numpy as np
 import numpy as onp
 import numpy.random as npr

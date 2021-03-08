@@ -234,6 +234,6 @@ class CollapsingMat(Material):
   _density = 1.0
 
 class WigglyMat(Material):
-  _E = 0.0001
+  _E = 0.003
   _nu = 0.48
   _density = 1.0

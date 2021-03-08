@@ -39,7 +39,7 @@ def lm_param(delta, diagD, svd, Fx, sigma=0.1):
   # Initial bounds as in More'.
   upper = npla.norm((Fx.T @ svd.U) * svd.diagS) / delta
   lower = - phi_0 / dphi_0
-  alpha = np.float32(0.0)
+  alpha = np.float64(0.0)
 
   init_val = (alpha, lower, upper, phi_0, p)
 
@@ -52,13 +52,13 @@ def lm_param(delta, diagD, svd, Fx, sigma=0.1):
     alpha, lower, upper, phi_k, p = val
 
     alpha = np.where(np.logical_or(alpha <= lower, alpha >= upper),
-                     np.maximum( np.float32(0.001) * upper,
+                     np.maximum( np.float64(0.001) * upper,
                                  np.sqrt(upper * lower) ),
                      alpha)
 
     (phi_k, p), dphi_k = phi_valgrad(alpha, diagD, svd, Fx, delta)
 
-    upper = np.where(phi_k < np.float32(0.0), alpha, upper)
+    upper = np.where(phi_k < np.float64(0.0), alpha, upper)
     lower = np.maximum(lower, alpha - phi_k/dphi_k)
     alpha = alpha - ( (phi_k + delta)/delta ) * ( phi_k/dphi_k )
 
@@ -94,11 +94,11 @@ def _optfun(fun, jacfun, cond_fun, body_fun, factor, x0, args):
     svd      = SVD(*npla.svd(Jx/diagD, full_matrices=False)),
     diagD    = diagD,
     delta    = delta,
-    hit_xtol = np.float32(0.0),
-    hit_ftol = np.float32(0.0),
-    nit      = np.float32(0.0),
-    nfev     = np.float32(1.0),
-    njev     = np.float32(1.0),
+    hit_xtol = np.float64(0.0),
+    hit_ftol = np.float64(0.0),
+    nit      = np.float64(0.0),
+    nfev     = np.float64(1.0),
+    njev     = np.float64(1.0),
   )
 
   # FIXME: Report a more sophisticated success.
@@ -160,11 +160,11 @@ def optfun_jvp(fun, jacfun, cond_fun, body_fun, factor, primals, tangents):
 
 def get_lmfunc(
     fun,
-    maxiters=np.float32(100.0),
-    xtol=np.float32(1e-8),
-    ftol=np.float32(1e-8),
-    factor=np.float32(100.0),
-    sigma=np.float32(0.1),
+    maxiters=np.float64(100.0),
+    xtol=np.float64(1e-8),
+    ftol=np.float64(1e-8),
+    factor=np.float64(100.0),
+    sigma=np.float64(0.1),
     full_result=False,
 ):
   ''' Generate a Levenberg-Marquardt optimizer for a problem.
@@ -241,8 +241,8 @@ def get_lmfunc(
       np.logical_or(
         np.logical_or(
           np.logical_or(
-            state.hit_xtol > np.float32(0.0),
-            state.hit_ftol > np.float32(0.0),
+            state.hit_xtol > np.float64(0.0),
+            state.hit_ftol > np.float64(0.0),
           ),
           state.nit >= maxiters,
         ),
@@ -293,9 +293,9 @@ def get_lmfunc(
         rho <= 0.25,
         lambda _: state.delta * mu_fn(gamma_fn()),
         lambda _: jax.lax.cond(
-            np.logical_or(np.logical_and(rho <= np.float32(0.75),
-                                         lamb == np.float32(0.0)),
-                          rho > np.float32(0.75)),
+            np.logical_or(np.logical_and(rho <= np.float64(0.75),
+                                         lamb == np.float64(0.0)),
+                          rho > np.float64(0.75)),
             lambda _: 2 * nDp,
             lambda _: state.delta,
             None,
@@ -306,7 +306,7 @@ def get_lmfunc(
     # Have we achieved xtol? Look at this after changing delta.
     hit_xtol = delta <= xtol * npla.norm(state.diagD * new_x)
 
-    improved = rho > np.float32(0.0001)
+    improved = rho > np.float64(0.0001)
 
     # This becomes the new state if we improved.
     x, Fx, nFx, Jx, njev = jax.lax.cond(
@@ -345,8 +345,8 @@ def get_lmfunc(
       delta    = delta,
       hit_xtol = np.array(hit_xtol, float),
       hit_ftol = np.array(hit_ftol, float),
-      nit      = state.nit + np.float32(1.0),
-      nfev     = state.nfev + np.float32(1.0),
+      nit      = state.nit + np.float64(1.0),
+      nfev     = state.nfev + np.float64(1.0),
       njev     = njev,
     )
 

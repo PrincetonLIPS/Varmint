@@ -4,6 +4,7 @@ import jax.numpy as np
 import scipy.optimize as spopt
 import scipy.stats
 
+import time
 from functools import partial
 
 from varmint.levmar import get_lmfunc
@@ -166,3 +167,74 @@ def get_optfun(residual_fun, kind='levmar', **optargs):
   else:
     raise ValueError(f'Unknown LS solver kind {kind}')
 
+
+class MutableFunction:
+  def __init__(self, func):
+    self.func = func
+
+  def __call__(self, q, p, ref_ctrl):
+    return self.func(q, p, ref_ctrl)
+
+
+def get_statics_optfun(loss_fun, grad_fun, hessp_gen_fun=None, kind='newton', optargs={}):
+  if kind == 'newton':
+    niters = optargs.get('niters', 10)
+
+    def solve(q, ref_ctrl):
+      # Try pure Newton iterations
+      print('Beginning optimization with Newton solver...')
+      start_t = time.time()
+
+      def update(q):
+        fun = hessp_gen_fun(q, ref_ctrl)
+        def wrap(p):
+          return fun(q, p, ref_ctrl)
+        return wrap
+
+      hessp_fun = update(q)
+
+      for i in range(niters):
+        print(f'Loss: {loss_fun(q, ref_ctrl)}')
+        direction = -jax.scipy.sparse.linalg.cg(hessp_fun, grad_fun(q, ref_ctrl))[0]
+        q = q + direction
+        hessp_fun = update(q)
+      end_t = time.time()
+      print(f'Finished optimization. Took {niters} steps in {end_t - start_t} seconds')
+
+      return q
+
+    return solve
+  elif kind in ['newtoncg-scipy', 'trustncg-scipy', 'bfgs-scipy']:
+    if kind == 'newtoncg-scipy':
+      method = 'Newton-CG'
+    elif kind == 'trustncg-scipy':
+      method = 'trust-ncg'
+    elif kind == 'bfgs-scipy':
+      method = 'bfgs'
+
+    def solve(q, ref_ctrl):
+      print(f'Beginning scipy optimization with {method} solver...')
+      start_t = time.time()
+      hessp_fun = MutableFunction(hessp_gen_fun(q, ref_ctrl))
+      def callback(q):
+        print('Iteration. Updating hessp.')
+        hessp_fun.func = hessp_gen_fun(q, ref_ctrl)
+
+      optim = spopt.minimize(loss_fun, q, args=(ref_ctrl,), method=method,
+                             callback=callback, jac=grad_fun, hessp=hessp_fun)
+      new_q = optim.x
+      if not hasattr(optim, 'nhev'):
+        optim.nhev = 0
+      print(f'Optimization results:'
+            f'\n\tSuccess: {optim.success}'
+            f'\n\tMessage: {optim.message}'
+            f'\n\tFinal loss: {optim.fun}'
+            f'\n\tNumber of fun/grad/hess evals: {optim.nfev}/{optim.njev}/{optim.nhev}')
+      end_t = time.time()
+      print(f'Finished optimization. Took {end_t - start_t} seconds')
+
+      return new_q
+
+    return solve
+  else:
+    raise ValueError(f'Unknown statics solver kind {kind}')
