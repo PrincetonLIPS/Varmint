@@ -81,7 +81,7 @@ class HamiltonianStepper:
         np.all(np.isfinite(new_q)),
         lambda _: step_p(q, new_q, dt, args),
         lambda _: np.ones_like(p) + np.nan,
-        np.float32(0.0),
+        np.float64(0.0),
       )
 
     def stepper(q, p, dt, *args):
