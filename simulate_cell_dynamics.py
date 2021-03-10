@@ -39,7 +39,7 @@ parser.add_argument('--dt', type=float, default=0.005)
 
 parser.add_argument('--mat_model', choices=['NeoHookean2D', 'LinearElastic2D'],
                     default='NeoHookean2D')
-parser.add_argument('--E', type=float, default=0.005)
+parser.add_argument('--E', type=float, default=0.0001)
 
 parser.add_argument('--save', dest='save', action='store_true')
 parser.add_argument('--optimizer', choices=['levmar', 'scipy-lm', 'newtoncg', 'newtoncg-python', 'newtoncg-scipy', 'trustncg-scipy'],

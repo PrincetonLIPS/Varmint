@@ -56,9 +56,7 @@ def create_movie(
     np.vstack([uu[::-1], uu[0]*np.ones(N)]),
   ]).T
 
-  print('Compiling bspline code for movie exporting.')
   jit_bspline2d = jax.jit(bspline2d, static_argnums=(4,))
-  print('Done.')
 
   def init():
     # Render the first time step.

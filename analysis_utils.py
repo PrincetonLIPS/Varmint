@@ -20,9 +20,9 @@ def inspect_residuals(res_fun, old_q, new_q, p, dt, ref_ctrl, fixed_locs, diagD=
 
 
 def save_dynamics_simulation(path, QQ, PP, TT, radii, cell):
-  np.savez(os.path.join(path, 'positions.npz'), QQ)
-  np.savez(os.path.join(path, 'velocities.npz'), PP)
-  np.savez(os.path.join(path, 'times.npz'), TT)
+  np.savez(os.path.join(path, 'positions.npz'), *QQ)
+  np.savez(os.path.join(path, 'velocities.npz'), *PP)
+  np.savez(os.path.join(path, 'times.npz'), *TT)
   np.savez(os.path.join(path, 'radii.npz'), radii)
 
   with open(os.path.join(path, 'cell.pkl'), 'wb') as f:
@@ -30,10 +30,20 @@ def save_dynamics_simulation(path, QQ, PP, TT, radii, cell):
 
 
 def load_dynamics_simulation(path):
-  QQ = np.load(os.path.join(path, 'positions.npz'))
-  PP = np.load(os.path.join(path, 'velocities.npz'))
-  TT = np.load(os.path.join(path, 'times.npz'))
-  radii = np.load(os.path.join(path, 'radii.npz'))
+  with open(os.path.join(path, 'positions.npz'), 'rb') as f:
+    npz = np.load(f)
+    QQ = [npz[i] for i in npz.files]
+
+  with open(os.path.join(path, 'velocities.npz'), 'rb') as f:
+    npz = np.load(f)
+    PP = [npz[i] for i in npz.files]
+
+  with open(os.path.join(path, 'times.npz'), 'rb') as f:
+    npz = np.load(f)
+    TT = [npz[i] for i in npz.files]
+
+  with open(os.path.join(path, 'radii.npz'), 'rb') as f:
+    radii = np.load(f)['arr_0']
 
   with open(os.path.join(path, 'cell.pkl'), 'rb') as f:
     cell = pickle.load(f)
