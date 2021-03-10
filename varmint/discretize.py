@@ -91,3 +91,51 @@ class HamiltonianStepper:
       return new_q, new_p
 
     return stepper
+
+
+class SurrogateStepper:
+  def __init__(self, L, radii, F=None):
+    # For thinking about forces, see West thesis:
+    # https://thesis.library.caltech.edu/2492/1/west_thesis.pdf
+    # Page 16, Sec 1.5.6.
+    # Could include in optimization or in momentum update, I think.
+    # Momentum update seems much easier.
+    self.D0_Ld, self.D1_Ld = discretize_hamiltonian(L)
+    self.F = F
+
+  def construct_stepper(self, predict_fun, radii):
+    def step_q(q, p, dt, args):
+      _q = np.expand_dims(q, 0)
+      _p = np.expand_dims(p, 0)
+      _radii = radii.reshape((1, -1))
+
+      new_q = predict_fun(_q, _p, _radii)
+      new_q = np.squeeze(new_q, 0)
+      return new_q
+    step_q = jax.jit(step_q)
+
+    def step_p(q1, q2, dt, args):
+      if self.F is None:
+        return self.D1_Ld(q1, q2, dt, args)
+      else:
+        q = (q1 + q2) / 2
+        qdot = (q2 - q1) / dt
+
+        return self.D1_Ld(q1, q2, dt, args) + self.F(q, qdot, *args)
+
+    @jax.jit
+    def update_p(new_q, q, p, dt, *args):
+      return jax.lax.cond(
+        np.all(np.isfinite(new_q)),
+        lambda _: step_p(q, new_q, dt, args),
+        lambda _: np.ones_like(p) + np.nan,
+        np.float64(0.0),
+      )
+
+    def stepper(q, p, dt, *args):
+      new_q = step_q(q, p, dt, args)
+      new_p = update_p(new_q, q, p, dt, *args)
+
+      return new_q, new_p
+
+    return stepper

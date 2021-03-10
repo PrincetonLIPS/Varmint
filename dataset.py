@@ -40,6 +40,12 @@ def read_dataset(ds_root):
   return train_ckpts, test_ckpts
 
 
+def get_any_ckpt(ds_root):
+  instances = [f for f in os.listdir(ds_root) \
+      if os.path.isdir(os.path.join(ds_root, f)) and 'cantileverdataset' in f]
+  return parse_instance(ds_root, instances[0])
+
+
 def combine_instances(instances, verbose=False):
   ninstances = len(instances)
 

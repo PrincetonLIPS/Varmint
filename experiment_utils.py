@@ -14,7 +14,7 @@ from collections import namedtuple
 def prepare_experiment_args(parser, exp_root):
   # Experiment organization parameters.
   parser.add_argument('-n', '--exp_name')
-  parser.add_argument('--exp_root', default=exp_root) # default='/n/fs/mm-iga/flow_elasticity/experiments')
+  parser.add_argument('--exp_root', default=exp_root)
   parser.add_argument('--seed', type=int, default=-1)
   parser.add_argument('--overwrite', action='store_true', help='Overwrite the existing experiment directory.')
 
@@ -47,12 +47,9 @@ def save_args(args):
 
 
 def load_args(exp_dir):
-  parser = argparse.ArgumentParser()
-  args = parser.parse_args()
-
   cmd_path = os.path.join(exp_dir, 'args.txt')
   with open(cmd_path, 'r') as f:
-    args.__dict__ = json.load(f)
+    args = json.load(f)
 
   return args
 
@@ -74,7 +71,7 @@ def read_surrogate_experiment(ds_root, expname):
   with open(os.path.join(expdir, 'model.pkl'), 'rb') as f:
     params = pickle.load(f)
 
-  _, nn_fun = surrogate_nns.get_tanh_net(args.nfeat)
+  _, nn_fun = surrogate_nns.get_tanh_net(args['nfeat'])
 
   def predict_fun(old_q, old_p, radii):
     inputs = np.concatenate((old_q, old_p, radii), axis=1)
