@@ -52,14 +52,14 @@ class WigglyMat(Material):
   _density = 1.0
 
 
-def simulate(ref_ctrl, ref_vels, cell, dt, T, friction=1e-7):
+def simulate(ref_ctrl, ref_vels, cell, dt, T, optimizer, friction=1e-7):
   friction_force = lambda q, qdot, ref_ctrl, fixed_dict: -friction * qdot
 
   flatten, unflatten = cell.get_dynamics_flatten_unflatten()
   full_lagrangian = cell.get_lagrangian_fun()
 
   stepper = HamiltonianStepper(full_lagrangian, friction_force)
-  step = stepper.construct_stepper(optimkind=args.optimizer)
+  step = stepper.construct_stepper(optimkind=optimizer)
 
   # Initially in the ref config with zero momentum.
   q, p = flatten(ref_ctrl, ref_vels)
@@ -90,17 +90,17 @@ def simulate(ref_ctrl, ref_vels, cell, dt, T, friction=1e-7):
   return QQ, PP, TT
 
 
-def sim_radii(cell, radii, dt, T):
+def sim_radii(cell, radii, dt, T, optimizer):
   # Construct reference shape.
   ref_ctrl = cell.radii_to_ctrl(radii)
 
   # Simulate the reference shape.
-  QQ, PP, TT = simulate(ref_ctrl, np.zeros_like(ref_ctrl), cell, dt, T)
+  QQ, PP, TT = simulate(ref_ctrl, np.zeros_like(ref_ctrl), cell, dt, T, optimizer)
 
   return QQ, PP, TT
 
 
-if __name__ == '__main__':
+def main():
   args = parser.parse_args()
   eutils.prepare_experiment_directories(args)
   # args.seed and args.exp_dir should be set.
@@ -125,7 +125,7 @@ if __name__ == '__main__':
   dt = np.float64(args.dt)
   T  = args.simtime
 
-  QQ, PP, TT = sim_radii(cell, init_radii, dt, T)
+  QQ, PP, TT = sim_radii(cell, init_radii, dt, T, args.optimizer)
   sim_dir = os.path.join(args.exp_dir, 'sim_ckpt')
   os.mkdir(sim_dir)
   autils.save_dynamics_simulation(sim_dir, QQ, PP, TT, init_radii, cell)
@@ -137,3 +137,7 @@ if __name__ == '__main__':
   print('Saving result in video.')
   vid_path = os.path.join(args.exp_dir, 'sim.mp4')
   create_movie(cell.patch, ctrl_seq, vid_path)
+
+
+if __name__ == '__main__':
+  main()

@@ -65,7 +65,7 @@ def simulate(ref_ctrl, cell, sparse=False, optimkind='newton'):
   return unflatten(new_q, ref_ctrl)
 
 
-if __name__ == '__main__':
+def main():
   args = parser.parse_args()
   eutils.prepare_experiment_directories(args)
   # args.seed and args.exp_dir should be set.
@@ -93,6 +93,10 @@ if __name__ == '__main__':
   print('Saving result in figure.')
   im_path = os.path.join(args.exp_dir, 'result.png')
   create_static_image(cell.patch, ctrl_sol, im_path)
+
+
+if __name__ == '__main__':
+  main()
 
 
 # TODO(doktay): Incorporate adjoint optimization again.

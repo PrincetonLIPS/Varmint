@@ -11,7 +11,7 @@ import numpy.random as npr
 from varmint.patch2d      import Patch2D
 from varmint.materials    import Material
 from varmint.constitutive import NeoHookean2D
-from varmint.discretize   import SurrogateStepper
+from varmint.discretize   import SurrogateStepper, SurrogateInitStepper
 from varmint.cell2d       import Cell2D, CellShape
 from varmint.movie_utils  import create_movie
 
@@ -28,8 +28,13 @@ import time
 parser = argparse.ArgumentParser()
 eutils.prepare_experiment_args(parser, exp_root=None)
 
-parser.add_argument('--ds_root', default='/n/fs/mm-iga/Varmint/slurm_experiments/newdataset/')
+parser.add_argument('--dsroot', default='/n/fs/mm-iga/Varmint/slurm_experiments/')
+parser.add_argument('--dsname', default='newdataset')
 parser.add_argument('--surrogate', default='tanhsimple')
+
+parser.add_argument('--stepper', choices=['init', 'surrogate'], default='surrogate')
+parser.add_argument('--optimizer', choices=['levmar', 'scipy-lm', 'newtoncg', 'newtoncg-python', 'newtoncg-scipy', 'trustncg-scipy'],
+                    default='levmar')
 
 
 class WigglyMat(Material):
@@ -38,14 +43,20 @@ class WigglyMat(Material):
   _density = 1.0
 
 
-def simulate(ref_ctrl, ref_vels, cell, dt, T, predict_fun, radii, friction=1e-7):
+def simulate(ref_ctrl, ref_vels, cell, dt, T, predict_fun, radii, optimizer, stepper, friction=1e-7):
   friction_force = lambda q, qdot, ref_ctrl, fixed_dict: -friction * qdot
 
   flatten, unflatten = cell.get_dynamics_flatten_unflatten()
   full_lagrangian = cell.get_lagrangian_fun()
 
-  stepper = SurrogateStepper(full_lagrangian, friction_force)
-  step = stepper.construct_stepper(predict_fun, radii)
+  if stepper == 'init':
+    stepper = SurrogateInitStepper(full_lagrangian, friction_force)
+    step = stepper.construct_stepper(predict_fun, radii, optimkind=optimizer)
+  elif stepper == 'surrogate':
+    stepper = SurrogateStepper(full_lagrangian, friction_force)
+    step = stepper.construct_stepper(predict_fun, radii)
+  else:
+    raise ValueError(f'Invalid stepper type {stepper}.')
 
   # Initially in the ref config with zero momentum.
   q, p = flatten(ref_ctrl, ref_vels)
@@ -73,9 +84,10 @@ def simulate(ref_ctrl, ref_vels, cell, dt, T, predict_fun, radii, friction=1e-7)
   return QQ, PP, TT
 
 
-if __name__ == '__main__':
+def main():
   args = parser.parse_args()
-  args.exp_root = os.path.join(args.ds_root, 'surrogate_sims')
+  args.dsdir = os.path.join(args.dsroot, args.dsname)
+  args.exp_root = os.path.join(args.dsdir, 'surrogate_sims')
   args.exp_name = f'{args.surrogate}-{args.exp_name}'
   eutils.prepare_experiment_directories(args)
   # args.seed and args.exp_dir should be set.
@@ -84,7 +96,7 @@ if __name__ == '__main__':
   npr.seed(args.seed)
 
   # Get the arguments for any of the dataset runs
-  simckpt = dataset.get_any_ckpt(args.ds_root)
+  simckpt = dataset.get_any_ckpt(args.dsdir)
   simargs = simckpt.args
 
   WigglyMat._E = simargs['E']
@@ -108,10 +120,10 @@ if __name__ == '__main__':
   ref_vels = np.zeros_like(ref_ctrl)
 
   # Get surrogate
-  surrogate = eutils.read_surrogate_experiment(args.ds_root, args.surrogate)
+  surrogate = eutils.read_surrogate_experiment(args.dsdir, args.surrogate)
 
   QQ, PP, TT = simulate(ref_ctrl, ref_vels, cell, dt, T,
-                        surrogate.predict_fun, init_radii)
+                        surrogate.predict_fun, init_radii, args.optimizer, args.stepper)
 
   sim_dir = os.path.join(args.exp_dir, 'sim_ckpt')
   os.mkdir(sim_dir)
@@ -124,3 +136,8 @@ if __name__ == '__main__':
   print('Saving result in video.')
   vid_path = os.path.join(args.exp_dir, 'sim.mp4')
   create_movie(cell.patch, ctrl_seq, vid_path)
+  print(f'Experiment dir at: {args.exp_dir}')
+
+
+if __name__ == '__main__':
+  main()

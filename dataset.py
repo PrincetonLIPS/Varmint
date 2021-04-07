@@ -1,5 +1,6 @@
 import numpy as np
 
+import re
 import os
 import time
 import json
@@ -27,7 +28,7 @@ def parse_instance(ds_root, instance):
 def read_dataset(ds_root):
   start_t = time.time()
   instances = [f for f in os.listdir(ds_root) \
-      if os.path.isdir(os.path.join(ds_root, f)) and 'cantileverdataset' in f]
+      if os.path.isdir(os.path.join(ds_root, f)) and re.match(r"^[0-9]{4}-", f)]
   ntrain = int(len(instances) * 0.8)
 
   train_instances = instances[:ntrain]
@@ -42,12 +43,13 @@ def read_dataset(ds_root):
 
 def get_any_ckpt(ds_root):
   instances = [f for f in os.listdir(ds_root) \
-      if os.path.isdir(os.path.join(ds_root, f)) and 'cantileverdataset' in f]
+      if os.path.isdir(os.path.join(ds_root, f)) and re.match(r"^[0-9]{4}-", f)]
   return parse_instance(ds_root, instances[0])
 
 
 def combine_instances(instances, verbose=False):
   ninstances = len(instances)
+  print(f'there are {ninstances} instances.')
 
   QQs = np.stack([np.stack(i.QQ) for i in instances])
   PPs = np.stack([np.stack(i.PP) for i in instances])
@@ -99,7 +101,7 @@ def parse_tensors_with_cache(ds_root):
     test_nq = np.load(os.path.join(cache_dir, 'test_nq.npy'))
   else:
     print('Could not find in cache.')
-    train, test = dataset.read_dataset(ds_root)
+    train, test = read_dataset(ds_root)
 
     print('Combining instances.')
     QQs, PPs, TTs, radii = combine_instances(train, verbose=True)
