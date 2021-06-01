@@ -184,8 +184,7 @@ def main():
   else:
     raise ValueError(f'Invalid loss type {args.loss_type}.')
 
-  #opt_init, opt_update, get_params = optimizers.momentum(step_size, momentum_mass)
-  opt_init, opt_update, get_params = optimizers.sgd(step_size)
+  opt_init, opt_update, get_params = optimizers.momentum(step_size, momentum_mass)
 
   @jax.jit
   def update(i, opt_state, batch):
