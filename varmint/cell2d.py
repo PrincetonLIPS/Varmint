@@ -9,6 +9,8 @@ from varmint.lagrangian   import generate_patch_lagrangian
 from varmint.statics      import generate_patch_free_energy
 from varmint.cellular2d   import index_array_from_ctrl, generate_quad_lattice
 
+import constructive_cells
+
 from collections import namedtuple
 
 
@@ -18,7 +20,7 @@ CellShape = namedtuple('CellShape', [
 
 
 class Cell2D:
-  def __init__(self, cell_shape, fixed_side, material):
+  def __init__(self, cell_shape, fixed_side, material, infile=None):
     """
     Initialize the cell class.
 
@@ -32,27 +34,39 @@ class Cell2D:
     xknots = default_knots(self.cs.spline_degree, self.cs.num_cp)
     yknots = default_knots(self.cs.spline_degree, self.cs.num_cp)
 
-    # TODO(doktay): The only thing we use ref_ctrl here for is to determine boundary conditions.
-    # So in the current setup we are forced to create a random init_radii just to identify
-    # boundaries even though we never use it. Figure out a better way to represent boundaries.
-    init_radii = self.generate_random_radii()
+    if infile:
+      material_grid = constructive_cells.MaterialGrid(infile)
 
-    ref_ctrl = self.radii_to_ctrl(init_radii)
-    self.n_components, self.index_arr = \
-        index_array_from_ctrl(self.cs.num_x, self.cs.num_y, ref_ctrl)
+      self.n_components, self.index_arr = \
+          material_grid.n_components, material_grid.labels
 
-    self.fixed_side_str = fixed_side
-    if fixed_side == 'left':
-      fixed_side  = onp.array(ref_ctrl[:,:,:,0] == 0.0)
-      nonfixed_side  = onp.array(ref_ctrl[:,:,:,0] != 0.0)
-    elif fixed_side == 'bottom':
-      fixed_side  = onp.array(ref_ctrl[:,:,:,1] == 0.0)
-      nonfixed_side  = onp.array(ref_ctrl[:,:,:,1] != 0.0)
+      self.fixed_labels = material_grid.fixed_labels
+      self.nonfixed_labels = material_grid.nonfixed_labels
+      self.init_ctrls = material_grid.ctrls
+      self.init_ctrls = self.init_ctrls.reshape(-1, self.cs.num_cp, self.cs.num_cp, 2)
+      self.index_arr = self.index_arr.reshape(-1, self.cs.num_cp, self.cs.num_cp)
     else:
-      raise ValueError(f'Unsupported side {fixed_side}')
+      # TODO(doktay): The only thing we use ref_ctrl here for is to determine boundary conditions.
+      # So in the current setup we are forced to create a random init_radii just to identify
+      # boundaries even though we never use it. Figure out a better way to represent boundaries.
+      init_radii = self.generate_random_radii()
 
-    self.fixed_labels = np.unique(self.index_arr[fixed_side])
-    self.nonfixed_labels = np.unique(self.index_arr[nonfixed_side])
+      ref_ctrl = self.radii_to_ctrl(init_radii)
+      self.n_components, self.index_arr = \
+          index_array_from_ctrl(self.cs.num_x, self.cs.num_y, ref_ctrl)
+
+      self.fixed_side_str = fixed_side
+      if fixed_side == 'left':
+        fixed_side  = onp.array(ref_ctrl[:,:,:,0] == 0.0)
+        nonfixed_side  = onp.array(ref_ctrl[:,:,:,0] != 0.0)
+      elif fixed_side == 'bottom':
+        fixed_side  = onp.array(ref_ctrl[:,:,:,1] == 0.0)
+        nonfixed_side  = onp.array(ref_ctrl[:,:,:,1] != 0.0)
+      else:
+        raise ValueError(f'Unsupported side {fixed_side}')
+
+      self.fixed_labels = np.unique(self.index_arr[fixed_side])
+      self.nonfixed_labels = np.unique(self.index_arr[nonfixed_side])
 
     self.patch = Patch2D(
       xknots,
@@ -70,6 +84,8 @@ class Cell2D:
     return np.array(init_radii)
 
   def radii_to_ctrl(self, radii):
+    if self.init_ctrls is not None:
+      return self.init_ctrls
     widths  = 5 * np.ones(self.cs.num_x)
     heights = 5 * np.ones(self.cs.num_y)
     return generate_quad_lattice(widths, heights, radii)

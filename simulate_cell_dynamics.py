@@ -119,7 +119,7 @@ def main():
     spline_degree=args.splinedeg,
   )
 
-  cell = Cell2D(cell_shape=cell_shape, fixed_side='left', material=mat)
+  cell = Cell2D(cell_shape=cell_shape, fixed_side='left', material=mat, infile='grid.txt')
   init_radii = cell.generate_random_radii(args.seed)
 
   dt = np.float64(args.dt)

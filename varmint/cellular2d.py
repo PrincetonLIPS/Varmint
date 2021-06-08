@@ -143,11 +143,11 @@ def _gen_cell_edge(center, corner1, corner2, radii):
 
   right_perim = np.linspace(corner1, corner2, num_ctrl)
 
-  theta_start = np.arctan2(corner1[1]-center[1],
-                           corner1[0]-center[0])
-  theta_end = np.arctan2(corner2[1]-center[1],
-                         corner2[0]-center[0])
-  theta = np.linspace(theta_start, theta_end, num_ctrl)
+#  theta_start = np.arctan2(corner1[1]-center[1],
+#                           corner1[0]-center[0])
+#  theta_end = np.arctan2(corner2[1]-center[1],
+#                         corner2[0]-center[0])
+#  theta = np.linspace(theta_start, theta_end, num_ctrl)
 
   left_perim = radii[:,np.newaxis] * (right_perim - center) + center
 

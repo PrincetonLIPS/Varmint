@@ -281,10 +281,10 @@ def generate_lagrangian_structured(shape):
 def generate_patch_lagrangian(patch):
   ''' For when all the patches have the same control point shapes. '''
 
-  jacobian_u_fn    = patch.get_cached_jacobian_u_fn()
+  jacobian_u_fn    = patch.get_jacobian_u_fn()
   energy_fn        = patch.get_energy_fn()
   quad_fn          = patch.get_quad_fn()
-  deformation_fn   = patch.get_cached_deformation_fn()
+  deformation_fn   = patch.get_deformation_fn()
   jacobian_ctrl_fn = patch.get_jacobian_ctrl_fn()
   vmap_energy_fn   = jax.vmap(energy_fn, in_axes=(0,))
   jac_dets_fn      = jax.vmap(npla.det, in_axes=(0,))
