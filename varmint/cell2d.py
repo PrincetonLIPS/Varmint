@@ -10,6 +10,7 @@ from varmint.statics      import generate_patch_free_energy
 from varmint.cellular2d   import index_array_from_ctrl, generate_quad_lattice
 
 import constructive_cells
+import constructive_rectangles
 
 from collections import namedtuple
 
@@ -35,16 +36,21 @@ class Cell2D:
     yknots = default_knots(self.cs.spline_degree, self.cs.num_cp)
 
     if infile:
-      material_grid = constructive_cells.MaterialGrid(infile)
+      material_grid = constructive_rectangles.MaterialGrid(infile)
 
       self.n_components, self.index_arr = \
           material_grid.n_components, material_grid.labels
 
       self.fixed_labels = material_grid.fixed_labels
       self.nonfixed_labels = material_grid.nonfixed_labels
+      self.compressed_labels = material_grid.compressed_labels
       self.init_ctrls = material_grid.ctrls
       self.init_ctrls = self.init_ctrls.reshape(-1, self.cs.num_cp, self.cs.num_cp, 2)
       self.index_arr = self.index_arr.reshape(-1, self.cs.num_cp, self.cs.num_cp)
+
+      #self.orientations = np.tile(np.array([0,1,2,3]), self.index_arr.shape[0] // 4)
+      self.orientations = np.tile(np.array([1]), self.index_arr.shape[0])
+      self.tractions = np.array(material_grid.traction)
     else:
       # TODO(doktay): The only thing we use ref_ctrl here for is to determine boundary conditions.
       # So in the current setup we are forced to create a random init_radii just to identify
@@ -129,7 +135,7 @@ class Cell2D:
 
   def unflatten_dynamics_sequence(self, QQ, PP, fixed_locs):
     _, unflatten = self.get_dynamics_flatten_unflatten()
-    unflat_pos, unflat_vel = zip(*[unflatten(q, p, fixed_locs) for q, p in zip(QQ, PP)])
+    unflat_pos, unflat_vel = zip(*[unflatten(q, p, f) for q, p, f in zip(QQ, PP, fixed_locs)])
 
     return unflat_pos, unflat_vel
 
@@ -189,7 +195,8 @@ class Cell2D:
 
     def full_lagrangian(q, qdot, ref_ctrl, displacement):
       def_ctrl, def_vels = unflatten(q, qdot, displacement)
-      return np.sum(jax.vmap(p_lagrangian)(def_ctrl, def_vels, ref_ctrl))
+      return np.sum(jax.vmap(p_lagrangian)(def_ctrl, def_vels, ref_ctrl,
+                                           self.orientations, self.tractions))
 
     return full_lagrangian
 

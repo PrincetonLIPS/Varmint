@@ -57,10 +57,10 @@ class HamiltonianStepper:
     optfun = get_optfun(self.residual_fun, kind=optimkind, **opt_params)
 
     def step_q(q, p, dt, args):
-      new_q = optfun(jax.lax.stop_gradient(q), (q, p, dt, args))
-      return new_q
+      new_q = optfun(jax.lax.stop_gradient(q), ((q, p, dt, args),))
+      return new_q, None
 
-    if optimkind in ['levmar']:
+    if optimkind in ['levmar', 'levmarnew', 'justnewtonjit', 'justnewtonjitgmres']:
       print(f'Using {optimkind} optimizer. Compiling optimizer.')
       step_q = jax.jit(step_q)
     else:
@@ -85,7 +85,14 @@ class HamiltonianStepper:
       )
 
     def stepper(q, p, dt, *args):
-      new_q = step_q(q, p, dt, args)
+
+      new_q, aux = step_q(q, p, dt, args)
+      #np.save(f'savedoptcheckpoints/nHvcalls_periter_{total_steps}', aux[0])
+      #np.save(f'savedoptcheckpoints/jacs_{total_steps}', aux[1])
+      #np.save(f'savedoptcheckpoints/grads_{total_steps}', aux[2])
+      #np.save(f'savedoptcheckpoints/epsilons_{total_steps}', aux[3])
+      #np.save(f'savedoptcheckpoints/xs_{total_steps}', aux[4])
+      #np.save(f'savedoptcheckpoints/deltas_{total_steps}', aux[5])
       new_p = update_p(new_q, q, p, dt, *args)
 
       return new_q, new_p

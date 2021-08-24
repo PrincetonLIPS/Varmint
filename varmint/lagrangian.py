@@ -281,13 +281,16 @@ def generate_lagrangian_structured(shape):
 def generate_patch_lagrangian(patch):
   ''' For when all the patches have the same control point shapes. '''
 
-  jacobian_u_fn    = patch.get_jacobian_u_fn()
-  energy_fn        = patch.get_energy_fn()
-  quad_fn          = patch.get_quad_fn()
-  deformation_fn   = patch.get_deformation_fn()
-  jacobian_ctrl_fn = patch.get_jacobian_ctrl_fn()
-  vmap_energy_fn   = jax.vmap(energy_fn, in_axes=(0,))
-  jac_dets_fn      = jax.vmap(npla.det, in_axes=(0,))
+  jacobian_u_fn       = patch.get_jacobian_u_fn()
+  line_jacobian_u_fn  = patch.get_line_derivs_u_fn()
+  energy_fn           = patch.get_energy_fn()
+  quad_fn             = patch.get_quad_fn()
+  line_quad_fn        = patch.get_line_quad_fn()
+  deformation_fn      = patch.get_deformation_fn()
+  line_deformation_fn = patch.get_line_deformation_fn()
+  jacobian_ctrl_fn    = patch.get_jacobian_ctrl_fn()
+  vmap_energy_fn      = jax.vmap(energy_fn, in_axes=(0,))
+  jac_dets_fn         = jax.vmap(npla.det, in_axes=(0,))
 
   defgrads_fn = jax.vmap(
     lambda A, B: npla.solve(B.T, A.T).T,
@@ -302,10 +305,11 @@ def generate_patch_lagrangian(patch):
   mat_density = patch.material.density
   gravity = 981.0 # cm/s^2
 
-  def lagrangian(def_ctrl, def_vels, ref_ctrl):
+  def lagrangian(def_ctrl, def_vels, ref_ctrl, orientation, traction=0.0):
     # Jacobian of reference config wrt parent config.
-    def_jacs = jacobian_u_fn(def_ctrl)
-    ref_jacs = jacobian_u_fn(ref_ctrl)
+    def_jacs      = jacobian_u_fn(def_ctrl)
+    ref_jacs      = jacobian_u_fn(ref_ctrl)
+    line_ref_jacs = line_jacobian_u_fn(ref_ctrl, orientation)
 
     # Deformation gradients. def_jacs @ ref_jacs_inv computed via a linear solve.
     defgrads = defgrads_fn(def_jacs, ref_jacs)
@@ -313,7 +317,7 @@ def generate_patch_lagrangian(patch):
     # Jacobian determinants of reference config wrt parent.
     ref_jac_dets = jac_dets_fn(ref_jacs)
 
-    # Strain energy density wrt to parent config.
+    # Strain energy density wrt parent config.
     strain_energy_density = vmap_energy_fn(defgrads) * np.abs(ref_jac_dets)
 
     # Total potential energy via integrating over parent config.
@@ -324,9 +328,37 @@ def generate_patch_lagrangian(patch):
 
     # Positions in deformed config.
     positions = deformation_fn(def_ctrl)
+    line_positions = line_deformation_fn(def_ctrl, orientation)
 
     # Work density done by gravity.
     grav_energy_density = positions[:,1] * gravity * mass_density
+
+    # Work done by traction on one side of the patch.
+    # Orientation: 0 - left
+    #              1 - top
+    #              2 - right
+    #              3 - bottom
+    
+    traction_vec = jax.lax.cond(
+      orientation == 0,
+      lambda _: np.array([-1., 0.]),
+      lambda _: jax.lax.cond(
+        orientation == 1,
+        lambda _: np.array([0., 1.]),
+        lambda _: jax.lax.cond(
+          orientation == 2,
+          lambda _: np.array([1., 0.]),
+          lambda _: np.array([0., -1.]),
+          operand=None,
+        ),
+        operand=None,
+      ),
+      operand=None,
+    )
+
+    traction_density = np.linalg.norm(line_ref_jacs, axis=-1) * \
+        traction * np.sum(traction_vec * line_positions, axis=-1)
+    traction_potential = 6*1e-2 * np.sum(line_quad_fn(traction_density, orientation))
 
     # Total work done by gravity integrated over parent config.
     gravity_potential = 1e-7 * np.sum(quad_fn(grav_energy_density))
@@ -340,6 +372,6 @@ def generate_patch_lagrangian(patch):
     kinetic_energy = 1e-7 * np.sum(kinetic_energy_fn(mass_matrix, def_vels))
 
     # Compute and return lagrangian.
-    return kinetic_energy - gravity_potential - strain_potential
+    return kinetic_energy - gravity_potential - strain_potential - traction_potential
 
   return lagrangian

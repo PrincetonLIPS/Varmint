@@ -1,7 +1,7 @@
 import jax
 import jax.numpy        as np
 import jax.numpy.linalg as npla
-'''
+
 vmap_dot = jax.jit(
   jax.vmap(
     np.dot,
@@ -58,4 +58,3 @@ vmap_diag = jax.jit(
     in_axes=(0,),
   ),
 )
-''' # testing where the slow jits are

@@ -3,6 +3,7 @@ import jax
 # Let's do 64-bit. Does not seem to degrade performance much.
 from jax.config import config
 config.update("jax_enable_x64", True)
+#config.update("jax_disable_jit", True)
 
 import jax.numpy as np
 import numpy as onp
@@ -30,7 +31,7 @@ eutils.prepare_experiment_args(parser, exp_root='/n/fs/mm-iga/Varmint/experiment
 # Geometry parameters.
 parser.add_argument('-x', '--nx', type=int, default=3)
 parser.add_argument('-y', '--ny', type=int, default=1)
-parser.add_argument('-c', '--ncp', type=int, default=5)
+parser.add_argument('-c', '--ncp', type=int, default=10)
 parser.add_argument('-q', '--quaddeg', type=int, default=10)
 parser.add_argument('-s', '--splinedeg', type=int, default=3)
 
@@ -42,17 +43,20 @@ parser.add_argument('--mat_model', choices=['NeoHookean2D', 'LinearElastic2D'],
 parser.add_argument('--E', type=float, default=0.0001)
 
 parser.add_argument('--save', dest='save', action='store_true')
-parser.add_argument('--optimizer', choices=['levmar', 'scipy-lm', 'newtoncg', 'newtoncg-python', 'newtoncg-scipy', 'trustncg-scipy'],
+parser.add_argument('--optimizer', choices=['levmar', 'scipy-lm', 'newtoncg', 'newtoncg-python',
+                                            'newtoncg-scipy', 'trustncg-scipy', 'levmarnew',
+                                            'levmarnewnojit', 'justnewton', 'justnewtonjit',
+                                            'justnewtonjitgmres'],
                     default='levmar')
 
 
 class WigglyMat(Material):
-  _E = 0.003
+  _E = 0.03
   _nu = 0.48
   _density = 1.0
 
 
-def simulate(ref_ctrl, ref_vels, cell, dt, T, optimizer, friction=1e-7):
+def simulate(ref_ctrl, ref_vels, cell, dt, T, optimizer, friction=1e-4):
   friction_force = lambda q, qdot, ref_ctrl, fixed_dict: -friction * qdot
 
   flatten, unflatten = cell.get_dynamics_flatten_unflatten()
@@ -64,10 +68,15 @@ def simulate(ref_ctrl, ref_vels, cell, dt, T, optimizer, friction=1e-7):
   # Initially in the ref config with zero momentum.
   q, p = flatten(ref_ctrl, ref_vels)
 
+  def fixed_locs_fn(t):
+    return ref_ctrl - t / T * (cell.compressed_labels[..., np.newaxis] * np.array([0.0, 1.0]))
+
   QQ = [q]; PP = [p]; TT = [0.0]
+  all_fixed = [fixed_locs_fn(TT[-1])]
+
   while TT[-1] < T:
     t0 = time.time()
-    fixed_locs = ref_ctrl
+    fixed_locs = all_fixed[-1]
 
     success = False
     this_dt = dt
@@ -84,10 +93,11 @@ def simulate(ref_ctrl, ref_vels, cell, dt, T, optimizer, friction=1e-7):
     QQ.append(new_q)
     PP.append(new_p)
     TT.append(TT[-1] + this_dt)
+    all_fixed.append(fixed_locs_fn(TT[-1]))
     t1 = time.time()
     print(f'stepped to time {TT[-1]} in {t1-t0} seconds')
 
-  return QQ, PP, TT
+  return QQ, PP, TT, all_fixed
 
 
 def sim_radii(cell, radii, dt, T, optimizer):
@@ -95,9 +105,9 @@ def sim_radii(cell, radii, dt, T, optimizer):
   ref_ctrl = cell.radii_to_ctrl(radii)
 
   # Simulate the reference shape.
-  QQ, PP, TT = simulate(ref_ctrl, np.zeros_like(ref_ctrl), cell, dt, T, optimizer)
+  QQ, PP, TT, all_fixed = simulate(ref_ctrl, np.zeros_like(ref_ctrl), cell, dt, T, optimizer)
 
-  return QQ, PP, TT
+  return QQ, PP, TT, all_fixed
 
 
 def main():
@@ -125,14 +135,14 @@ def main():
   dt = np.float64(args.dt)
   T  = args.simtime
 
-  QQ, PP, TT = sim_radii(cell, init_radii, dt, T, args.optimizer)
+  QQ, PP, TT, all_fixed = sim_radii(cell, init_radii, dt, T, args.optimizer)
   sim_dir = os.path.join(args.exp_dir, 'sim_ckpt')
   os.mkdir(sim_dir)
   autils.save_dynamics_simulation(sim_dir, QQ, PP, TT, init_radii, cell)
 
   # Turn this into a sequence of control point sets.
   ref_ctrl = cell.radii_to_ctrl(init_radii)
-  ctrl_seq, _ = cell.unflatten_dynamics_sequence(QQ, PP, ref_ctrl)
+  ctrl_seq, _ = cell.unflatten_dynamics_sequence(QQ, PP, all_fixed)
 
   print('Saving result in video.')
   vid_path = os.path.join(args.exp_dir, 'sim.mp4')

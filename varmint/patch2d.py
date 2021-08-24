@@ -6,6 +6,7 @@ import quadpy
 
 from .exceptions import LabelError
 from .bsplines import (
+  bspline1d_derivs_hand,
   mesh,
   bspline2d,
   bspline2d_basis,
@@ -96,12 +97,18 @@ class Patch2D:
 
     # We need the span volumes for performing integration later.
     self.span_volumes = xwidths[:,np.newaxis] * ywidths[np.newaxis,:]
+    self.xwidths = xwidths
+    self.ywidths = ywidths
 
     # Ask quadpy for a quadrature scheme.
     scheme = quadpy.c2.get_good_scheme(self.quad_deg)
 
+    # Scheme for line integrals
+    line_scheme = quadpy.c1.gauss_legendre(3 * self.quad_deg)
+
     # Change the domain from (-1,1)^2 to (0,1)^2
     points = scheme.points.T/2 + 0.5
+    line_points  = line_scheme.points / 2 + 0.5
 
     # Repeat the quadrature points for each knot span, scaled appropriately.
     offset_mesh = mesh(uniq_xknots[:-1], uniq_yknots[:-1])
@@ -111,11 +118,23 @@ class Patch2D:
                              * width_mesh[:,:,np.newaxis,:] \
                              + offset_mesh[:,:,np.newaxis,:],
                              (-1, 2))
+    self.x_line_points = np.reshape(
+        line_points[np.newaxis, :] \
+        * xwidths[:, np.newaxis] \
+        + uniq_xknots[:-1][:, np.newaxis],
+    (-1,))
+    self.y_line_points = np.reshape(
+        line_points[np.newaxis, :] \
+        * ywidths[:, np.newaxis] \
+        + uniq_yknots[:-1][:, np.newaxis],
+    (-1,))
 
     # FIXME: Why don't I have to divide this by 4 to accommodate the change in
     # interval?
     # Answer(doktay): Because for some reason quadpy.c2 weights sum to 1 instead of 4.
     self.weights = np.reshape(scheme.weights, (1, 1, -1))
+    self.line_weights = np.reshape(line_scheme.weights / 2, (1, -1))
+    #self.line_weights = np.ones_like(self.line_weights)
 
   def num_quad_pts(self):
     return self.points.shape[0]
@@ -136,6 +155,41 @@ class Patch2D:
         self.spline_deg
       )
     return deformation_fn
+  
+  def get_line_deformation_fn(self):
+    ''' Get a function that produces deformations along a certain side of the cell.
+
+    The line depends on the orientation: 0 - left, 1 - top, 2 - right, 3 - bottom
+    '''
+    def line_deformation_fn(ctrl, orientation):
+      # Create a (# quad pts, 2) array
+      n_points = self.y_line_points.shape[0]
+      points = jax.lax.cond(
+        orientation == 0,
+        lambda _: np.stack([np.zeros(n_points), self.y_line_points], axis=-1),
+        lambda _: jax.lax.cond(
+          orientation == 1,
+          lambda _: np.stack([self.x_line_points, np.ones(n_points)], axis=-1),
+          lambda _: jax.lax.cond(
+            orientation == 2,
+            lambda _: np.stack([np.ones(n_points), self.y_line_points], axis=-1),
+            lambda _: np.stack([self.x_line_points, np.zeros(n_points)], axis=-1),
+            operand=None,
+          ),
+          operand=None,
+        ),
+        operand=None,
+      )
+
+      return bspline2d(
+        points,
+        ctrl,
+        self.xknots,
+        self.yknots,
+        self.spline_deg
+      )
+
+    return line_deformation_fn
 
   def get_jacobian_u_fn(self):
     ''' Take control points, return 2x2 Jacobians wrt quad points. '''
@@ -147,6 +201,50 @@ class Patch2D:
         self.yknots,
         self.spline_deg
       )
+    return jacobian_u_fn
+  
+
+  def get_line_derivs_u_fn(self):
+    ''' Take control points, return 2x1 Jacobians wrt boundary quad points. '''
+    def jacobian_u_fn(ctrl, orientation):
+      points = jax.lax.cond(
+        np.logical_or(orientation == 0, orientation == 2),
+        lambda _: self.y_line_points,
+        lambda _: self.x_line_points,
+        operand=None,
+      )
+
+      knots = jax.lax.cond(
+        np.logical_or(orientation == 0, orientation == 2),
+        lambda _: self.yknots,
+        lambda _: self.xknots,
+        operand=None,
+      )
+
+      sel_ctrl = jax.lax.cond(
+        orientation == 0,
+        lambda _: ctrl[0, :],
+        lambda _: jax.lax.cond(
+          orientation == 1,
+          lambda _: ctrl[:, -1],
+          lambda _: jax.lax.cond(
+            orientation == 2,
+            lambda _: ctrl[-1, :],
+            lambda _: ctrl[:, 0],
+            operand=None,
+          ),
+          operand=None,
+        ),
+        operand=None,
+      )
+
+      return bspline1d_derivs_hand(
+        points,
+        sel_ctrl,
+        knots,
+        self.spline_deg,
+      )
+
     return jacobian_u_fn
 
   def get_jacobian_ctrl_fn(self):
@@ -235,6 +333,20 @@ class Patch2D:
                     * self.span_volumes.T, axis=(-1,-2)).T
 
     return quad_fn
+  
+  def get_line_quad_fn(self):
+    def line_quad_fn(ordinates, orientation):
+      widths = jax.lax.cond(
+        np.logical_or(orientation == 0, orientation == 2),
+        lambda _: self.ywidths,
+        lambda _: self.xwidths,
+        operand=None,
+      )
+      ords = np.reshape(ordinates, (*widths.shape, -1, *ordinates.shape[1:]))
+
+      return np.sum(np.sum(self.line_weights.T * ords.T, axis=-2) * widths, axis=-1).T
+
+    return line_quad_fn
 
   def get_ctrl_shape(self):
     return self.num_xctrl, self.num_yctrl, 2

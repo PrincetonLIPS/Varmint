@@ -1,6 +1,8 @@
 import jax
 import jax.numpy as np
 
+import numpy.linalg as onpla
+
 import scipy.optimize as spopt
 import scipy.stats
 
@@ -10,11 +12,130 @@ from functools import partial
 from varmint.levmar import get_lmfunc
 from varmint.newtoncg import newtoncg
 from varmint.newtoncg_python import newtoncg_python
+from jaxoptkit.optkit.levmar import get_jittable_lm, lmoptimize
 
 def get_optfun(residual_fun, kind='levmar', **optargs):
   if kind == 'levmar':
     maxiters = optargs.get('maxiters', 50)
     lmfunc = get_lmfunc(residual_fun, maxiters=maxiters)
+    lmfunc = jax.jit(lmfunc)
+
+    # We would like all the optimizer functions
+    # to have the same signature. 
+    def wrapped_lmfunc(x0, args):
+      return lmfunc(x0, *args)
+    return wrapped_lmfunc
+  elif kind == 'levmarnewnojit':
+    print('using new optimizer!')
+    maxiters = optargs.get('maxiters', 100)
+
+    # We would like all the optimizer functions
+    # to have the same signature. 
+    def wrapped_lmfunc(x0, args):
+      return lmoptimize(residual_fun, x0, maxiters=maxiters, args=args)
+    return wrapped_lmfunc
+  
+  elif kind == 'justnewton':
+    print('using standard Newton method for nonlinear equations.')
+    tol = 1e-12
+    jac = jax.jacfwd(residual_fun)
+    def newton_opt(x0, args):
+      xk = x0
+      print(f'Initial norm: {np.linalg.norm(residual_fun(xk, *args))}')
+
+      for _ in range(10):
+        print('starting iteration')
+        t0 = time.time()
+        rk = residual_fun(xk, *args)
+        print(f'got residual at {time.time() - t0}')
+        Jk = jac(xk, *args)
+        print(f'got jacobian at {time.time() - t0}')
+
+
+        pk = onpla.solve(Jk, -rk)
+        print(f'got solution at {time.time() - t0}')
+
+        xk = xk + pk
+        current_norm = np.linalg.norm(residual_fun(xk, *args))
+        print(f'Current norm: {current_norm}')
+        if current_norm < tol:
+          print('Reached tolerance. Breaking.')
+          break
+      print('Final norm:')
+      print(np.linalg.norm(residual_fun(xk, *args)))
+      return xk, None
+    
+    return newton_opt
+  elif kind == 'justnewtonjit':
+    jac = jax.jacfwd(residual_fun)
+    def newton_opt(x0, args):
+      xk = x0
+
+      rk = residual_fun(xk, *args)
+      Jk = jac(xk, *args)
+      pk = np.linalg.solve(Jk, -rk)
+      xk = xk + pk
+
+      rk = residual_fun(xk, *args)
+      Jk = jac(xk, *args)
+      pk = np.linalg.solve(Jk, -rk)
+      xk = xk + pk
+
+      rk = residual_fun(xk, *args)
+      Jk = jac(xk, *args)
+      pk = np.linalg.solve(Jk, -rk)
+      xk = xk + pk
+
+      rk = residual_fun(xk, *args)
+      Jk = jac(xk, *args)
+      pk = np.linalg.solve(Jk, -rk)
+      xk = xk + pk
+
+      rk = residual_fun(xk, *args)
+      Jk = jac(xk, *args)
+      pk = np.linalg.solve(Jk, -rk)
+      xk = xk + pk
+
+      return xk, None
+    return newton_opt
+
+  elif kind == 'justnewtonjitgmres':
+    jac = jax.jacfwd(residual_fun)
+    def newton_opt(x0, args):
+      xk = x0
+
+      rk = residual_fun(xk, *args)
+      Jk = jac(xk, *args)
+      pk, _ = jax.scipy.sparse.linalg.gmres(Jk, -rk)
+      xk = xk + pk
+
+      rk = residual_fun(xk, *args)
+      Jk = jac(xk, *args)
+      pk, _ = jax.scipy.sparse.linalg.gmres(Jk, -rk)
+      xk = xk + pk
+
+      rk = residual_fun(xk, *args)
+      Jk = jac(xk, *args)
+      pk, _ = jax.scipy.sparse.linalg.gmres(Jk, -rk)
+      xk = xk + pk
+
+      rk = residual_fun(xk, *args)
+      Jk = jac(xk, *args)
+      pk, _ = jax.scipy.sparse.linalg.gmres(Jk, -rk)
+      xk = xk + pk
+
+      rk = residual_fun(xk, *args)
+      Jk = jac(xk, *args)
+      pk, _ = jax.scipy.sparse.linalg.gmres(Jk, -rk)
+      xk = xk + pk
+
+      return xk, None
+    return newton_opt
+
+  elif kind == 'levmarnew':
+    print('using new optimizer!')
+    maxiters = optargs.get('maxiters', 100)
+    lmfunc = get_jittable_lm(residual_fun, maxiters=maxiters)
     lmfunc = jax.jit(lmfunc)
 
     # We would like all the optimizer functions
