@@ -305,7 +305,7 @@ def generate_patch_lagrangian(patch):
   mat_density = patch.material.density
   gravity = 981.0 # cm/s^2
 
-  def lagrangian(def_ctrl, def_vels, ref_ctrl, orientation, traction=0.0):
+  def lagrangian(def_ctrl, def_vels, ref_ctrl, orientation, traction):
     """Compute the Lagrangian of this patch.
 
     orientation is a shape (4,) bit array specifying whether that edge has a
@@ -352,7 +352,7 @@ def generate_patch_lagrangian(patch):
       line_positions = line_deformation_fn(def_ctrl, orientation)
       traction_density = np.linalg.norm(line_ref_jacs, axis=-1) * \
           np.sum(traction[orientation] * line_positions, axis=-1)
-      return 6*1e-2 * np.sum(line_quad_fn(traction_density, orientation))
+      return np.sum(line_quad_fn(traction_density, orientation))
     
     total_traction_potential = 0.0
 
@@ -377,6 +377,6 @@ def generate_patch_lagrangian(patch):
     kinetic_energy = 1e-7 * np.sum(kinetic_energy_fn(mass_matrix, def_vels))
 
     # Compute and return lagrangian.
-    return kinetic_energy - gravity_potential - strain_potential - total_traction_potential
+    return kinetic_energy - gravity_potential - strain_potential + total_traction_potential
 
   return lagrangian

@@ -30,6 +30,9 @@ class ShapeUnit2D(object):
     """Returns a binary array that selects the indices of a side."""
     raise NotImplementedError()
 
+  def get_side_orientation(self, side, global_n_patches):
+    raise NotImplementedError()
+
 
 class UnitCell2D(ShapeUnit2D):
   @staticmethod
@@ -138,6 +141,24 @@ class UnitCell2D(ShapeUnit2D):
       raise ValueError(f'Invalid side {side}')
 
     return ind_array
+  
+  def get_side_orientation(self, side, global_n_patches):
+    ind_array = np.zeros((global_n_patches, 4))
+
+    # Always on the "right" side of patch
+    if side == 'top':
+      ind_array[self.patch_offset + 1, 2] = 1
+    elif side == 'bottom':
+      ind_array[self.patch_offset + 3, 2] = 1
+    elif side == 'left':
+      ind_array[self.patch_offset + 0, 2] = 1
+    elif side == 'right':
+      ind_array[self.patch_offset + 2, 2] = 1
+    else:
+      raise ValueError(f'Invalid side {side}')
+
+    return ind_array
+
 
 
 class UnitSquare2D(ShapeUnit2D):
@@ -185,6 +206,22 @@ class UnitSquare2D(ShapeUnit2D):
       ind_array[self.patch_offset, 0, :] = 1
     elif side == 'right':
       ind_array[self.patch_offset, -1, :] = 1
+    else:
+      raise ValueError(f'Invalid side {side}')
+
+    return ind_array
+  
+  def get_side_orientation(self, side, global_n_patches):
+    ind_array = np.zeros((global_n_patches, 4))
+
+    if side == 'top':
+      ind_array[self.patch_offset, 1] = 1
+    elif side == 'bottom':
+      ind_array[self.patch_offset, 3] = 1
+    elif side == 'left':
+      ind_array[self.patch_offset, 0] = 1
+    elif side == 'right':
+      ind_array[self.patch_offset, 2] = 1
     else:
       raise ValueError(f'Invalid side {side}')
 
@@ -255,12 +292,13 @@ def get_connectivity_matrix(num_x, num_y, arr2lin, units, global_ctrl):
 
 
 class MaterialGrid(object):
-  def __init__(self, infile, ncp):
+  def __init__(self, instr, ncp):
     cell_length = 5  # TODO(doktay): This is arbitrary.
 
-    with open(infile, 'r') as f:
-      lines = [l.strip().split(' ') for l in f.readlines()][::-1]
+    #with open(infile, 'r') as f:
+    #  lines = [l.strip().split(' ') for l in f.readlines()][::-1]
     
+    lines = [l.split(' ') for l in instr.strip().split('\n')[::-1]]
     # Grid will be specified as cells or solid squares (maybe add other shapes in the future)
     # Each location has two characters: First is shape type, second is boundary condition class.
     # S - square, C - cell, 0 - empty
@@ -284,8 +322,7 @@ class MaterialGrid(object):
     self.ctrls    = []
     self.fixed    = []
     self.fixed_groups = defaultdict(list)
-    self.traction = []
-    self.compress = []
+    self.traction_groups = defaultdict(list)
 
     npatches = 0
     num_x = cell_array.shape[0]
@@ -317,23 +354,36 @@ class MaterialGrid(object):
 
           if cell_array[i, j][1] != '0':
             group = cell_array[i, j][1]
-            self.fixed.append((len(self.units)-1, 'left'))
-            self.fixed_groups[group].append((len(self.units)-1, 'left'))
+            if group.isdigit():
+              self.fixed.append((len(self.units)-1, 'left'))
+              self.fixed_groups[group].append((len(self.units)-1, 'left'))
+            else:
+              self.traction_groups[group].append((len(self.units)-1, 'left'))
 
           if cell_array[i, j][2] != '0':
             group = cell_array[i, j][2]
-            self.fixed.append((len(self.units)-1, 'top'))
-            self.fixed_groups[group].append((len(self.units)-1, 'top'))
+            if group.isdigit():
+              self.fixed.append((len(self.units)-1, 'top'))
+              self.fixed_groups[group].append((len(self.units)-1, 'top'))
+            else:
+              self.traction_groups[group].append((len(self.units)-1, 'top'))
 
           if cell_array[i, j][3] != '0':
             group = cell_array[i, j][3]
-            self.fixed.append((len(self.units)-1, 'right'))
-            self.fixed_groups[group].append((len(self.units)-1, 'right'))
+            if group.isdigit():
+              self.fixed.append((len(self.units)-1, 'right'))
+              self.fixed_groups[group].append((len(self.units)-1, 'right'))
+            else:
+              self.traction_groups[group].append((len(self.units)-1, 'right'))
 
           if cell_array[i, j][4] != '0':
             group = cell_array[i, j][4]
-            self.fixed.append((len(self.units)-1, 'bottom'))
-            self.fixed_groups[group].append((len(self.units)-1, 'bottom'))
+            if group.isdigit():
+              self.fixed.append((len(self.units)-1, 'bottom'))
+              self.fixed_groups[group].append((len(self.units)-1, 'bottom'))
+            else:
+              self.traction_groups[group].append((len(self.units)-1, 'bottom'))
+
 
     self.ctrls = np.concatenate(self.ctrls, axis=0)
 
@@ -373,3 +423,12 @@ class MaterialGrid(object):
     else:
       self.fixed_labels = []
       self.nonfixed_labels = []
+
+    self.traction_group_labels = {}
+    for group in self.traction_groups:
+      sides = self.traction_groups[group]
+      self.traction_group_labels[group] = \
+        sum(self.units[i].get_side_orientation(side, npatches) for (i, side) in sides)
+    
+    self.all_orientations = np.zeros((npatches, 4)) + \
+        sum(self.traction_group_labels[g] for g in self.traction_group_labels)

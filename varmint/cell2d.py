@@ -29,8 +29,18 @@ def bc_decorator(group, cell):
   return inner
 
 
+def traction_decorator(group, cell):
+  def inner(fn):
+    def decorated(t):
+      return fn(t) * cell.traction_groups[group][..., np.newaxis]
+    
+    cell.traction_fns[group] = decorated
+    return decorated
+  return inner
+
+
 class Cell2D:
-  def __init__(self, cell_shape, fixed_side, material, infile=None):
+  def __init__(self, cell_shape, fixed_side, material, instr=None):
     """
     Initialize the cell class.
 
@@ -44,8 +54,8 @@ class Cell2D:
     xknots = default_knots(self.cs.spline_degree, self.cs.num_cp)
     yknots = default_knots(self.cs.spline_degree, self.cs.num_cp)
 
-    if infile:
-      material_grid = constructive_shape.MaterialGrid(infile, self.cs.num_cp)
+    if instr:
+      material_grid = constructive_shape.MaterialGrid(instr, self.cs.num_cp)
 
       self.n_components, self.index_arr = \
           material_grid.n_components, material_grid.labels
@@ -54,6 +64,11 @@ class Cell2D:
       self.nonfixed_labels = material_grid.nonfixed_labels
       self.group_labels = material_grid.group_labels
       self.bc_movements = dict()
+      self.traction_fns = dict()
+
+      self.orientations = material_grid.all_orientations
+      self.traction_groups = material_grid.traction_group_labels
+
       self.init_ctrls = material_grid.ctrls
       self.init_ctrls = self.init_ctrls.reshape(-1, self.cs.num_cp, self.cs.num_cp, 2)
       self.index_arr = self.index_arr.reshape(-1, self.cs.num_cp, self.cs.num_cp)
@@ -61,9 +76,6 @@ class Cell2D:
       #self.orientations = np.tile(np.array([0,1,2,3]), self.index_arr.shape[0] // 4)
       #self.orientations = np.tile(np.array([]), self.index_arr.shape[0])
       #self.tractions = np.array(material_grid.traction)
-
-      self.orientations = np.zeros((self.index_arr.shape[0], 4))
-      self.tractions = np.zeros((self.index_arr.shape[0], 4, 2))
     else:
       # TODO(doktay): The only thing we use ref_ctrl here for is to determine boundary conditions.
       # So in the current setup we are forced to create a random init_radii just to identify
@@ -208,6 +220,16 @@ class Cell2D:
       return ref_ctrl + sum(fn(t) for fn in fns)
     
     return fixed_locs_fn
+  
+  def get_traction_fn(self):
+    fns = []
+    for group in self.traction_groups:
+      fns.append(self.traction_fns.get(group, lambda _: 0.0))
+    
+    def traction_fn(t):
+      return np.zeros((self.index_arr.shape[0], 4, 2)) + sum(fn(t) for fn in fns)
+    
+    return traction_fn
 
   def get_lagrangian_fun(self, patchwise=False):
     p_lagrangian = generate_patch_lagrangian(self.patch)
@@ -216,10 +238,10 @@ class Cell2D:
       return p_lagrangian
     flatten, unflatten = self.get_dynamics_flatten_unflatten()
 
-    def full_lagrangian(q, qdot, ref_ctrl, displacement):
+    def full_lagrangian(q, qdot, ref_ctrl, displacement, traction):
       def_ctrl, def_vels = unflatten(q, qdot, displacement)
       return np.sum(jax.vmap(p_lagrangian)(def_ctrl, def_vels, ref_ctrl,
-                                           self.orientations, self.tractions))
+                                           self.orientations, traction))
 
     return full_lagrangian
 

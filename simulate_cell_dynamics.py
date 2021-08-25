@@ -13,7 +13,7 @@ from varmint.patch2d      import Patch2D
 from varmint.materials    import Material
 from varmint.constitutive import NeoHookean2D
 from varmint.discretize   import HamiltonianStepper
-from varmint.cell2d       import Cell2D, CellShape, bc_decorator
+from varmint.cell2d       import Cell2D, CellShape, bc_decorator, traction_decorator
 from varmint.movie_utils  import create_movie
 
 import experiment_utils as eutils
@@ -57,7 +57,7 @@ class WigglyMat(Material):
 
 
 def simulate(ref_ctrl, ref_vels, cell, dt, T, optimizer, friction=1e-4):
-  friction_force = lambda q, qdot, ref_ctrl, fixed_dict: -friction * qdot
+  friction_force = lambda q, qdot, ref_ctrl, fixed_dict, tractions: -friction * qdot
 
   flatten, unflatten = cell.get_dynamics_flatten_unflatten()
   full_lagrangian = cell.get_lagrangian_fun()
@@ -68,18 +68,12 @@ def simulate(ref_ctrl, ref_vels, cell, dt, T, optimizer, friction=1e-4):
   # Initially in the ref config with zero momentum.
   q, p = flatten(ref_ctrl, ref_vels)
 
-  @bc_decorator('2', cell)
-  def group_2_movement(t):
-    return t / T * np.array([1.0, 0.0])
-
-  @bc_decorator('3', cell)
-  def group_3_movement(t):
-    return - t / T * np.array([1.0, 0.0])
-
   fixed_locs_fn = cell.get_fixed_locs_fn(ref_ctrl)
+  traction_fn = cell.get_traction_fn()
+  #tractions = np.zeros((cell.index_arr.shape[0], 4, 2))
+
   QQ = [q]; PP = [p]; TT = [0.0]
   all_fixed = [fixed_locs_fn(TT[-1])]
-  #all_fixed = [ref_ctrl]
 
   while TT[-1] < T:
     t0 = time.time()
@@ -88,7 +82,7 @@ def simulate(ref_ctrl, ref_vels, cell, dt, T, optimizer, friction=1e-4):
     success = False
     this_dt = dt
     while True:
-      new_q, new_p = step(QQ[-1], PP[-1], this_dt, ref_ctrl, fixed_locs)
+      new_q, new_p = step(QQ[-1], PP[-1], this_dt, ref_ctrl, fixed_locs, traction_fn(TT[-1]))
 
       success = np.all(np.isfinite(new_q))
       if success:
@@ -101,7 +95,6 @@ def simulate(ref_ctrl, ref_vels, cell, dt, T, optimizer, friction=1e-4):
     PP.append(new_p)
     TT.append(TT[-1] + this_dt)
     all_fixed.append(fixed_locs_fn(TT[-1]))
-    #all_fixed.append(ref_ctrl)
     t1 = time.time()
     print(f'stepped to time {TT[-1]} in {t1-t0} seconds')
 
@@ -137,7 +130,22 @@ def main():
     spline_degree=args.splinedeg,
   )
 
-  cell = Cell2D(cell_shape=cell_shape, fixed_side='left', material=mat, infile='grid.txt')
+  grid_str = "C0A00 C0A00 S0A00\n"\
+             "S0001 S0001 S0001\n"
+  cell = Cell2D(cell_shape=cell_shape, fixed_side='left', material=mat, instr=grid_str)
+
+  @bc_decorator('2', cell)
+  def group_2_movement(t):
+    return t / T * np.array([1.0, 0.0])
+
+  @bc_decorator('3', cell)
+  def group_3_movement(t):
+    return - t / T * np.array([1.0, 0.0])
+  
+  @traction_decorator('A', cell)
+  def group_A_traction(t):
+    return 1e-2 * np.array([0.5, -1.0])
+
   init_radii = cell.generate_random_radii(args.seed)
 
   dt = np.float64(args.dt)
