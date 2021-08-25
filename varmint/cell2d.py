@@ -9,8 +9,7 @@ from varmint.lagrangian   import generate_patch_lagrangian
 from varmint.statics      import generate_patch_free_energy
 from varmint.cellular2d   import index_array_from_ctrl, generate_quad_lattice
 
-import constructive_cells
-import constructive_rectangles
+import constructive_shape
 
 from collections import namedtuple
 
@@ -36,7 +35,7 @@ class Cell2D:
     yknots = default_knots(self.cs.spline_degree, self.cs.num_cp)
 
     if infile:
-      material_grid = constructive_rectangles.MaterialGrid(infile)
+      material_grid = constructive_shape.MaterialGrid(infile, self.cs.num_cp)
 
       self.n_components, self.index_arr = \
           material_grid.n_components, material_grid.labels
@@ -49,8 +48,11 @@ class Cell2D:
       self.index_arr = self.index_arr.reshape(-1, self.cs.num_cp, self.cs.num_cp)
 
       #self.orientations = np.tile(np.array([0,1,2,3]), self.index_arr.shape[0] // 4)
-      self.orientations = np.tile(np.array([1]), self.index_arr.shape[0])
-      self.tractions = np.array(material_grid.traction)
+      #self.orientations = np.tile(np.array([]), self.index_arr.shape[0])
+      #self.tractions = np.array(material_grid.traction)
+
+      self.orientations = np.zeros((self.index_arr.shape[0], 4))
+      self.tractions = np.zeros((self.index_arr.shape[0], 4, 2))
     else:
       # TODO(doktay): The only thing we use ref_ctrl here for is to determine boundary conditions.
       # So in the current setup we are forced to create a random init_radii just to identify

@@ -306,10 +306,18 @@ def generate_patch_lagrangian(patch):
   gravity = 981.0 # cm/s^2
 
   def lagrangian(def_ctrl, def_vels, ref_ctrl, orientation, traction=0.0):
+    """Compute the Lagrangian of this patch.
+
+    orientation is a shape (4,) bit array specifying whether that edge has a
+    Neumann boundary condition. Order is: (left, top, right, bottom)
+
+    traction is shape (4, 2) indicating the direction of traction force
+    for each of the orientations.
+    
+    """
     # Jacobian of reference config wrt parent config.
     def_jacs      = jacobian_u_fn(def_ctrl)
     ref_jacs      = jacobian_u_fn(ref_ctrl)
-    line_ref_jacs = line_jacobian_u_fn(ref_ctrl, orientation)
 
     # Deformation gradients. def_jacs @ ref_jacs_inv computed via a linear solve.
     defgrads = defgrads_fn(def_jacs, ref_jacs)
@@ -328,7 +336,6 @@ def generate_patch_lagrangian(patch):
 
     # Positions in deformed config.
     positions = deformation_fn(def_ctrl)
-    line_positions = line_deformation_fn(def_ctrl, orientation)
 
     # Work density done by gravity.
     grav_energy_density = positions[:,1] * gravity * mass_density
@@ -338,27 +345,25 @@ def generate_patch_lagrangian(patch):
     #              1 - top
     #              2 - right
     #              3 - bottom
-    
-    traction_vec = jax.lax.cond(
-      orientation == 0,
-      lambda _: np.array([-1., 0.]),
-      lambda _: jax.lax.cond(
-        orientation == 1,
-        lambda _: np.array([0., 1.]),
-        lambda _: jax.lax.cond(
-          orientation == 2,
-          lambda _: np.array([1., 0.]),
-          lambda _: np.array([0., -1.]),
-          operand=None,
-        ),
-        operand=None,
-      ),
-      operand=None,
-    )
 
-    traction_density = np.linalg.norm(line_ref_jacs, axis=-1) * \
-        traction * np.sum(traction_vec * line_positions, axis=-1)
-    traction_potential = 6*1e-2 * np.sum(line_quad_fn(traction_density, orientation))
+    # Compute traction
+    def traction_in_dir(orientation):
+      line_ref_jacs = line_jacobian_u_fn(ref_ctrl, orientation)
+      line_positions = line_deformation_fn(def_ctrl, orientation)
+      traction_density = np.linalg.norm(line_ref_jacs, axis=-1) * \
+          np.sum(traction[orientation] * line_positions, axis=-1)
+      return 6*1e-2 * np.sum(line_quad_fn(traction_density, orientation))
+    
+    total_traction_potential = 0.0
+
+    # Should be unrolled by the compiler, and shouldn't be too bad since it's only 4 loops.
+    for i in range(4):
+      total_traction_potential += jax.lax.cond(
+        orientation[i],
+        lambda _: traction_in_dir(i),
+        lambda _: 0.0,
+        operand=None,
+      )
 
     # Total work done by gravity integrated over parent config.
     gravity_potential = 1e-7 * np.sum(quad_fn(grav_energy_density))
@@ -372,6 +377,6 @@ def generate_patch_lagrangian(patch):
     kinetic_energy = 1e-7 * np.sum(kinetic_energy_fn(mass_matrix, def_vels))
 
     # Compute and return lagrangian.
-    return kinetic_energy - gravity_potential - strain_potential - traction_potential
+    return kinetic_energy - gravity_potential - strain_potential - total_traction_potential
 
   return lagrangian

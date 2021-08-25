@@ -31,7 +31,7 @@ eutils.prepare_experiment_args(parser, exp_root='/n/fs/mm-iga/Varmint/experiment
 # Geometry parameters.
 parser.add_argument('-x', '--nx', type=int, default=3)
 parser.add_argument('-y', '--ny', type=int, default=1)
-parser.add_argument('-c', '--ncp', type=int, default=10)
+parser.add_argument('-c', '--ncp', type=int, default=5)
 parser.add_argument('-q', '--quaddeg', type=int, default=10)
 parser.add_argument('-s', '--splinedeg', type=int, default=3)
 
@@ -68,15 +68,18 @@ def simulate(ref_ctrl, ref_vels, cell, dt, T, optimizer, friction=1e-4):
   # Initially in the ref config with zero momentum.
   q, p = flatten(ref_ctrl, ref_vels)
 
-  def fixed_locs_fn(t):
-    return ref_ctrl - t / T * (cell.compressed_labels[..., np.newaxis] * np.array([0.0, 1.0]))
+#  def fixed_locs_fn(t):
+#    return ref_ctrl - t / T * (cell.compressed_labels[..., np.newaxis] * np.array([0.0, 1.0]))
 
   QQ = [q]; PP = [p]; TT = [0.0]
-  all_fixed = [fixed_locs_fn(TT[-1])]
+  #all_fixed = [fixed_locs_fn(TT[-1])]
+  all_fixed = [ref_ctrl]
 
   while TT[-1] < T:
     t0 = time.time()
-    fixed_locs = all_fixed[-1]
+    #fixed_locs = all_fixed[-1]
+    fixed_locs = ref_ctrl
+
 
     success = False
     this_dt = dt
@@ -93,7 +96,8 @@ def simulate(ref_ctrl, ref_vels, cell, dt, T, optimizer, friction=1e-4):
     QQ.append(new_q)
     PP.append(new_p)
     TT.append(TT[-1] + this_dt)
-    all_fixed.append(fixed_locs_fn(TT[-1]))
+    #all_fixed.append(fixed_locs_fn(TT[-1]))
+    all_fixed.append(ref_ctrl)
     t1 = time.time()
     print(f'stepped to time {TT[-1]} in {t1-t0} seconds')
 
