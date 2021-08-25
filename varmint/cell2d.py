@@ -15,11 +15,11 @@ from collections import defaultdict, namedtuple
 
 
 CellShape = namedtuple('CellShape', [
-  'num_x', 'num_y', 'num_cp', 'quad_degree', 'spline_degree'
+  'num_cp', 'quad_degree', 'spline_degree'
 ])
 
 
-def bc_decorator(group, cell):
+def register_dirichlet_bc(group, cell):
   def inner(fn):
     def decorated(t):
       return fn(t) * cell.group_labels[group][..., np.newaxis]
@@ -29,7 +29,7 @@ def bc_decorator(group, cell):
   return inner
 
 
-def traction_decorator(group, cell):
+def register_traction_bc(group, cell):
   def inner(fn):
     def decorated(t):
       return fn(t) * cell.traction_groups[group][..., np.newaxis]
@@ -40,7 +40,7 @@ def traction_decorator(group, cell):
 
 
 class Cell2D:
-  def __init__(self, cell_shape, fixed_side, material, instr=None):
+  def __init__(self, cell_shape, material, instr):
     """
     Initialize the cell class.
 
@@ -54,50 +54,23 @@ class Cell2D:
     xknots = default_knots(self.cs.spline_degree, self.cs.num_cp)
     yknots = default_knots(self.cs.spline_degree, self.cs.num_cp)
 
-    if instr:
-      material_grid = constructive_shape.MaterialGrid(instr, self.cs.num_cp)
+    material_grid = constructive_shape.MaterialGrid(instr, self.cs.num_cp)
 
-      self.n_components, self.index_arr = \
-          material_grid.n_components, material_grid.labels
+    self.n_components, self.index_arr = \
+        material_grid.n_components, material_grid.labels
 
-      self.fixed_labels = material_grid.fixed_labels
-      self.nonfixed_labels = material_grid.nonfixed_labels
-      self.group_labels = material_grid.group_labels
-      self.bc_movements = dict()
-      self.traction_fns = dict()
+    self.fixed_labels = material_grid.fixed_labels
+    self.nonfixed_labels = material_grid.nonfixed_labels
+    self.group_labels = material_grid.group_labels
+    self.bc_movements = dict()
+    self.traction_fns = dict()
 
-      self.orientations = material_grid.all_orientations
-      self.traction_groups = material_grid.traction_group_labels
+    self.orientations = material_grid.all_orientations
+    self.traction_groups = material_grid.traction_group_labels
 
-      self.init_ctrls = material_grid.ctrls
-      self.init_ctrls = self.init_ctrls.reshape(-1, self.cs.num_cp, self.cs.num_cp, 2)
-      self.index_arr = self.index_arr.reshape(-1, self.cs.num_cp, self.cs.num_cp)
-
-      #self.orientations = np.tile(np.array([0,1,2,3]), self.index_arr.shape[0] // 4)
-      #self.orientations = np.tile(np.array([]), self.index_arr.shape[0])
-      #self.tractions = np.array(material_grid.traction)
-    else:
-      # TODO(doktay): The only thing we use ref_ctrl here for is to determine boundary conditions.
-      # So in the current setup we are forced to create a random init_radii just to identify
-      # boundaries even though we never use it. Figure out a better way to represent boundaries.
-      init_radii = self.generate_random_radii()
-
-      ref_ctrl = self.radii_to_ctrl(init_radii)
-      self.n_components, self.index_arr = \
-          index_array_from_ctrl(self.cs.num_x, self.cs.num_y, ref_ctrl)
-
-      self.fixed_side_str = fixed_side
-      if fixed_side == 'left':
-        fixed_side  = onp.array(ref_ctrl[:,:,:,0] == 0.0)
-        nonfixed_side  = onp.array(ref_ctrl[:,:,:,0] != 0.0)
-      elif fixed_side == 'bottom':
-        fixed_side  = onp.array(ref_ctrl[:,:,:,1] == 0.0)
-        nonfixed_side  = onp.array(ref_ctrl[:,:,:,1] != 0.0)
-      else:
-        raise ValueError(f'Unsupported side {fixed_side}')
-
-      self.fixed_labels = np.unique(self.index_arr[fixed_side])
-      self.nonfixed_labels = np.unique(self.index_arr[nonfixed_side])
+    self.init_ctrls = material_grid.ctrls
+    self.init_ctrls = self.init_ctrls.reshape(-1, self.cs.num_cp, self.cs.num_cp, 2)
+    self.index_arr = self.index_arr.reshape(-1, self.cs.num_cp, self.cs.num_cp)
 
     self.patch = Patch2D(
       xknots,
@@ -110,16 +83,17 @@ class Cell2D:
     )
 
   def generate_random_radii(self, seed=None):
-    npr.seed(seed)
-    init_radii = npr.rand(self.cs.num_x, self.cs.num_y, (self.cs.num_cp-1)*4)*0.9 + 0.05
-    return np.array(init_radii)
+    pass
+#    npr.seed(seed)
+#    init_radii = npr.rand(self.cs.num_x, self.cs.num_y, (self.cs.num_cp-1)*4)*0.9 + 0.05
+#    return np.array(init_radii)
 
   def radii_to_ctrl(self, radii):
     if self.init_ctrls is not None:
       return self.init_ctrls
-    widths  = 5 * np.ones(self.cs.num_x)
-    heights = 5 * np.ones(self.cs.num_y)
-    return generate_quad_lattice(widths, heights, radii)
+#    widths  = 5 * np.ones(self.cs.num_x)
+#    heights = 5 * np.ones(self.cs.num_y)
+#    return generate_quad_lattice(widths, heights, radii)
 
   def get_dynamics_flatten_unflatten(self):
     def flatten(unflat_pos, unflat_vel):

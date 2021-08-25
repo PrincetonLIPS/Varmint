@@ -13,7 +13,7 @@ from varmint.patch2d      import Patch2D
 from varmint.materials    import Material
 from varmint.constitutive import NeoHookean2D
 from varmint.discretize   import HamiltonianStepper
-from varmint.cell2d       import Cell2D, CellShape, bc_decorator, traction_decorator
+from varmint.cell2d       import Cell2D, CellShape, register_dirichlet_bc, register_traction_bc
 from varmint.movie_utils  import create_movie
 
 import experiment_utils as eutils
@@ -123,30 +123,28 @@ def main():
   mat = NeoHookean2D(WigglyMat)
 
   cell_shape = CellShape(
-    num_x=args.nx,
-    num_y=args.ny,
     num_cp=args.ncp,
     quad_degree=args.quaddeg,
     spline_degree=args.splinedeg,
   )
 
-  grid_str = "C0A00 C0A00 S0A00\n"\
-             "S0001 S0001 S0001\n"
-  cell = Cell2D(cell_shape=cell_shape, fixed_side='left', material=mat, instr=grid_str)
+  grid_str = "C2A00 C0A00 S0A30\n"\
+             "S0001 00000 S0001\n"
+  cell = Cell2D(cell_shape=cell_shape, material=mat, instr=grid_str)
 
-  @bc_decorator('2', cell)
+  @register_dirichlet_bc('2', cell)
   def group_2_movement(t):
-    return t / T * np.array([1.0, 0.0])
+    return t / args.simtime * np.array([1.0, 0.0])
 
-  @bc_decorator('3', cell)
+  @register_dirichlet_bc('3', cell)
   def group_3_movement(t):
-    return - t / T * np.array([1.0, 0.0])
+    return - t / args.simtime * np.array([1.0, 0.0])
   
-  @traction_decorator('A', cell)
+  @register_traction_bc('A', cell)
   def group_A_traction(t):
     return 1e-2 * np.array([0.5, -1.0])
 
-  init_radii = cell.generate_random_radii(args.seed)
+  init_radii = None
 
   dt = np.float64(args.dt)
   T  = args.simtime
@@ -161,7 +159,7 @@ def main():
   ctrl_seq, _ = cell.unflatten_dynamics_sequence(QQ, PP, all_fixed)
 
   print('Saving result in video.')
-  vid_path = os.path.join(args.exp_dir, 'sim.mp4')
+  vid_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}.mp4')
   create_movie(cell.patch, ctrl_seq, vid_path)
 
 
