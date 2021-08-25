@@ -1,3 +1,4 @@
+from collections import defaultdict
 import numpy as np
 import numpy.random as npr
 
@@ -282,6 +283,7 @@ class MaterialGrid(object):
     self.units    = []
     self.ctrls    = []
     self.fixed    = []
+    self.fixed_groups = defaultdict(list)
     self.traction = []
     self.compress = []
 
@@ -313,8 +315,25 @@ class MaterialGrid(object):
           self.ctrls.append(unit.ctrl.reshape(-1, ncp, ncp, 2))
           self.arr2lin[(i, j)] = len(self.units) - 1
 
-          if cell_array[i, j][1] == 'b':
+          if cell_array[i, j][1] != '0':
+            group = cell_array[i, j][1]
+            self.fixed.append((len(self.units)-1, 'left'))
+            self.fixed_groups[group].append((len(self.units)-1, 'left'))
+
+          if cell_array[i, j][2] != '0':
+            group = cell_array[i, j][2]
+            self.fixed.append((len(self.units)-1, 'top'))
+            self.fixed_groups[group].append((len(self.units)-1, 'top'))
+
+          if cell_array[i, j][3] != '0':
+            group = cell_array[i, j][3]
+            self.fixed.append((len(self.units)-1, 'right'))
+            self.fixed_groups[group].append((len(self.units)-1, 'right'))
+
+          if cell_array[i, j][4] != '0':
+            group = cell_array[i, j][4]
             self.fixed.append((len(self.units)-1, 'bottom'))
+            self.fixed_groups[group].append((len(self.units)-1, 'bottom'))
 
     self.ctrls = np.concatenate(self.ctrls, axis=0)
 
@@ -340,14 +359,17 @@ class MaterialGrid(object):
       all_dists = np.reshape(all_dists, self.ctrls.shape[:-1])
       self.fixed_labels = np.unique(self.labels[all_dists < np.inf])
       self.nonfixed_labels = np.unique(self.labels[all_dists == np.inf])
-      self.compressed_labels = []
-#      comp_array = \
-#          sum(self.units[i].get_side_index_array(side, npatches) for (i, side) in self.compress)
-#      compressed_indices = unflat_indices[comp_array > 0]      
-#      comp_all_dists = dijkstra(spmat, directed=False, indices=compressed_indices,
-#                                unweighted=True, min_only=True)
-#      comp_all_dists = np.reshape(comp_all_dists, self.ctrls.shape[:-1])
-#      self.compressed_labels = comp_all_dists < np.inf
+      self.group_labels = {}
+
+      for group in self.fixed_groups:
+        sides = self.fixed_groups[group]
+        group_array = \
+            sum(self.units[i].get_side_index_array(side, npatches) for (i, side) in sides)
+        group_indices = unflat_indices[group_array > 0]      
+        group_all_dists = dijkstra(spmat, directed=False, indices=group_indices,
+                                  unweighted=True, min_only=True)
+        group_all_dists = np.reshape(group_all_dists, self.ctrls.shape[:-1])
+        self.group_labels[group] = group_all_dists < np.inf
     else:
       self.fixed_labels = []
       self.nonfixed_labels = []

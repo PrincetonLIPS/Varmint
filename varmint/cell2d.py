@@ -11,12 +11,22 @@ from varmint.cellular2d   import index_array_from_ctrl, generate_quad_lattice
 
 import constructive_shape
 
-from collections import namedtuple
+from collections import defaultdict, namedtuple
 
 
 CellShape = namedtuple('CellShape', [
   'num_x', 'num_y', 'num_cp', 'quad_degree', 'spline_degree'
 ])
+
+
+def bc_decorator(group, cell):
+  def inner(fn):
+    def decorated(t):
+      return fn(t) * cell.group_labels[group][..., np.newaxis]
+    
+    cell.bc_movements[group] = decorated
+    return decorated
+  return inner
 
 
 class Cell2D:
@@ -42,7 +52,8 @@ class Cell2D:
 
       self.fixed_labels = material_grid.fixed_labels
       self.nonfixed_labels = material_grid.nonfixed_labels
-      self.compressed_labels = material_grid.compressed_labels
+      self.group_labels = material_grid.group_labels
+      self.bc_movements = dict()
       self.init_ctrls = material_grid.ctrls
       self.init_ctrls = self.init_ctrls.reshape(-1, self.cs.num_cp, self.cs.num_cp, 2)
       self.index_arr = self.index_arr.reshape(-1, self.cs.num_cp, self.cs.num_cp)
@@ -187,6 +198,16 @@ class Cell2D:
       return flat_pos.flatten()
 
     return flatten_add
+
+  def get_fixed_locs_fn(self, ref_ctrl):
+    fns = []
+    for group in self.group_labels:
+      fns.append(self.bc_movements.get(group, lambda _: 0.0))
+    
+    def fixed_locs_fn(t):
+      return ref_ctrl + sum(fn(t) for fn in fns)
+    
+    return fixed_locs_fn
 
   def get_lagrangian_fun(self, patchwise=False):
     p_lagrangian = generate_patch_lagrangian(self.patch)

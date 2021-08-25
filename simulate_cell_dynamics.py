@@ -13,7 +13,7 @@ from varmint.patch2d      import Patch2D
 from varmint.materials    import Material
 from varmint.constitutive import NeoHookean2D
 from varmint.discretize   import HamiltonianStepper
-from varmint.cell2d       import Cell2D, CellShape
+from varmint.cell2d       import Cell2D, CellShape, bc_decorator
 from varmint.movie_utils  import create_movie
 
 import experiment_utils as eutils
@@ -68,18 +68,22 @@ def simulate(ref_ctrl, ref_vels, cell, dt, T, optimizer, friction=1e-4):
   # Initially in the ref config with zero momentum.
   q, p = flatten(ref_ctrl, ref_vels)
 
-#  def fixed_locs_fn(t):
-#    return ref_ctrl - t / T * (cell.compressed_labels[..., np.newaxis] * np.array([0.0, 1.0]))
+  @bc_decorator('2', cell)
+  def group_2_movement(t):
+    return t / T * np.array([1.0, 0.0])
 
+  @bc_decorator('3', cell)
+  def group_3_movement(t):
+    return - t / T * np.array([1.0, 0.0])
+
+  fixed_locs_fn = cell.get_fixed_locs_fn(ref_ctrl)
   QQ = [q]; PP = [p]; TT = [0.0]
-  #all_fixed = [fixed_locs_fn(TT[-1])]
-  all_fixed = [ref_ctrl]
+  all_fixed = [fixed_locs_fn(TT[-1])]
+  #all_fixed = [ref_ctrl]
 
   while TT[-1] < T:
     t0 = time.time()
-    #fixed_locs = all_fixed[-1]
-    fixed_locs = ref_ctrl
-
+    fixed_locs = all_fixed[-1]
 
     success = False
     this_dt = dt
@@ -96,8 +100,8 @@ def simulate(ref_ctrl, ref_vels, cell, dt, T, optimizer, friction=1e-4):
     QQ.append(new_q)
     PP.append(new_p)
     TT.append(TT[-1] + this_dt)
-    #all_fixed.append(fixed_locs_fn(TT[-1]))
-    all_fixed.append(ref_ctrl)
+    all_fixed.append(fixed_locs_fn(TT[-1]))
+    #all_fixed.append(ref_ctrl)
     t1 = time.time()
     print(f'stepped to time {TT[-1]} in {t1-t0} seconds')
 
@@ -142,7 +146,7 @@ def main():
   QQ, PP, TT, all_fixed = sim_radii(cell, init_radii, dt, T, args.optimizer)
   sim_dir = os.path.join(args.exp_dir, 'sim_ckpt')
   os.mkdir(sim_dir)
-  autils.save_dynamics_simulation(sim_dir, QQ, PP, TT, init_radii, cell)
+  #autils.save_dynamics_simulation(sim_dir, QQ, PP, TT, init_radii, cell)
 
   # Turn this into a sequence of control point sets.
   ref_ctrl = cell.radii_to_ctrl(init_radii)
