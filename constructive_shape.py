@@ -1,6 +1,11 @@
 from collections import defaultdict
+from functools import partial
+from jax._src.api import vmap
 import numpy as np
 import numpy.random as npr
+
+import jax
+import jax.numpy as jnp
 
 from scipy.sparse           import csr_matrix
 from scipy.sparse.csgraph   import connected_components, dijkstra
@@ -45,10 +50,10 @@ class UnitCell2D(ShapeUnit2D):
   def _gen_cell_edge(center, corner1, corner2, radii):
     num_ctrl = len(radii)
 
-    right_perim = np.linspace(corner1, corner2, num_ctrl)
-    left_perim = radii[:,np.newaxis] * (right_perim - center) + center
+    right_perim = jnp.linspace(corner1, corner2, num_ctrl)
+    left_perim = radii[:,jnp.newaxis] * (right_perim - center) + center
 
-    ctrl = np.linspace(left_perim, right_perim, num_ctrl)
+    ctrl = jnp.linspace(left_perim, right_perim, num_ctrl)
 
     return ctrl
 
@@ -56,7 +61,7 @@ class UnitCell2D(ShapeUnit2D):
   def _gen_cell(corners, radii):
     sides    = corners.shape[0]
     num_ctrl = (len(radii) // sides) + 1
-    centroid = np.mean(corners, axis=0)
+    centroid = jnp.mean(corners, axis=0)
 
 
     # Computes: left, top, right, bottom
@@ -66,18 +71,18 @@ class UnitCell2D(ShapeUnit2D):
       corner2 = corners[(ii+1) % sides]
       start   = (num_ctrl - 1) * ii
       end     = start + num_ctrl
-      indices = np.arange(start, end)
+      indices = jnp.arange(start, end)
 
       new_ctrl = UnitCell2D._gen_cell_edge(
         centroid,
         corner1,
         corner2,
-        np.take(radii, indices, mode='wrap'),
+        jnp.take(radii, indices, mode='wrap'),
       )
 
       ctrl.append(new_ctrl)
 
-    return np.stack(ctrl, axis=0)
+    return jnp.stack(ctrl, axis=0)
 
   def __init__(self, corners, ncp, patch_offset, side_labels=None, radii=None):
     if radii is None:
@@ -90,6 +95,7 @@ class UnitCell2D(ShapeUnit2D):
       self.side_labels = side_labels
 
     self.ncp = ncp
+    self.corners = corners
     self.ctrl = UnitCell2D._gen_cell(corners, radii)
     n_all_ctrl = self.ctrl.size // self.ctrl.shape[-1]
     self.indices = np.arange(n_all_ctrl).reshape(self.ctrl.shape[:-1])
@@ -170,6 +176,7 @@ class UnitSquare2D(ShapeUnit2D):
     l2 = np.linspace(corners[3], corners[2], ncp)
 
     self.ncp = ncp
+    self.corners = corners
     self.ctrl = np.linspace(l1, l2, ncp)
     n_all_ctrl = self.ctrl.size // self.ctrl.shape[-1]
     self.indices = np.arange(n_all_ctrl).reshape(self.ctrl.shape[:-1])
@@ -294,6 +301,7 @@ def get_connectivity_matrix(num_x, num_y, arr2lin, units, global_ctrl):
 class MaterialGrid(object):
   def __init__(self, instr, ncp):
     cell_length = 5  # TODO(doktay): This is arbitrary.
+    self.ncp = ncp
 
     #with open(infile, 'r') as f:
     #  lines = [l.strip().split(' ') for l in f.readlines()][::-1]
@@ -325,6 +333,7 @@ class MaterialGrid(object):
     self.traction_groups = defaultdict(list)
 
     npatches = 0
+    self.n_cells = 0
     num_x = cell_array.shape[0]
     num_y = cell_array.shape[1]
 
@@ -344,6 +353,7 @@ class MaterialGrid(object):
           elif cell_array[i, j][0] == 'C':
             # Construct a cell.
             unit = UnitCell2D(corners, ncp, npatches)
+            self.n_cells += 1
           else:
             raise ValueError("Invalid shape.")
           
@@ -432,3 +442,25 @@ class MaterialGrid(object):
     
     self.all_orientations = np.zeros((npatches, 4)) + \
         sum(self.traction_group_labels[g] for g in self.traction_group_labels)
+  
+  def get_radii_to_ctrl_fn(self):
+    # Returns a JAX-able function that maps radii to control points of this shape.
+
+    all_corners = []
+    all_indices = []
+    for u in self.units:
+      if isinstance(u, UnitCell2D):
+        all_corners.append(u.corners)
+        all_indices.extend(list(range(u.patch_offset, u.patch_offset + 4)))
+
+    all_corners = np.stack(all_corners, axis=0)
+    all_indices = np.array(all_indices)
+
+    vmap_gencell = jax.vmap(UnitCell2D._gen_cell)
+    vmap_gencell = partial(vmap_gencell, all_corners)
+    
+    def radii_to_ctrl(radii):
+      cell_ctrls = vmap_gencell(radii).reshape((-1, self.ncp, self.ncp, 2))
+      return jax.ops.index_update(self.ctrls, all_indices, cell_ctrls,
+                                  indices_are_sorted=True)
+    return radii_to_ctrl

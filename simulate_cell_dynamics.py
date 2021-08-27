@@ -29,8 +29,6 @@ eutils.prepare_experiment_args(parser, exp_root='/n/fs/mm-iga/Varmint/experiment
 
 
 # Geometry parameters.
-parser.add_argument('-x', '--nx', type=int, default=3)
-parser.add_argument('-y', '--ny', type=int, default=1)
 parser.add_argument('-c', '--ncp', type=int, default=5)
 parser.add_argument('-q', '--quaddeg', type=int, default=10)
 parser.add_argument('-s', '--splinedeg', type=int, default=3)
@@ -103,7 +101,7 @@ def simulate(ref_ctrl, ref_vels, cell, dt, T, optimizer, friction=1e-4):
 
 def sim_radii(cell, radii, dt, T, optimizer):
   # Construct reference shape.
-  ref_ctrl = cell.radii_to_ctrl(radii)
+  ref_ctrl = cell.radii_to_ctrl_fn(radii)
 
   # Simulate the reference shape.
   QQ, PP, TT, all_fixed = simulate(ref_ctrl, np.zeros_like(ref_ctrl), cell, dt, T, optimizer)
@@ -128,7 +126,7 @@ def main():
     spline_degree=args.splinedeg,
   )
 
-  grid_str = "C2A00 C0A00 S0A30\n"\
+  grid_str = "CA000 C0000 C00B0\n"\
              "S0001 00000 S0001\n"
   cell = Cell2D(cell_shape=cell_shape, material=mat, instr=grid_str)
 
@@ -142,20 +140,30 @@ def main():
   
   @register_traction_bc('A', cell)
   def group_A_traction(t):
-    return 1e-2 * np.array([0.5, -1.0])
+    return 1e-2 * np.array([1.0, 0.0])
+
+  @register_traction_bc('B', cell)
+  def group_A_traction(t):
+    return 1e-2 * np.array([-1.0, 0.0])
 
   init_radii = None
 
   dt = np.float64(args.dt)
   T  = args.simtime
 
-  QQ, PP, TT, all_fixed = sim_radii(cell, init_radii, dt, T, args.optimizer)
+  radii = np.concatenate(
+    (
+      cell.generate_rectangular_radii((cell.n_cells,)),
+    )
+  )
+
+  QQ, PP, TT, all_fixed = sim_radii(cell, radii, dt, T, args.optimizer)
   sim_dir = os.path.join(args.exp_dir, 'sim_ckpt')
   os.mkdir(sim_dir)
   #autils.save_dynamics_simulation(sim_dir, QQ, PP, TT, init_radii, cell)
 
   # Turn this into a sequence of control point sets.
-  ref_ctrl = cell.radii_to_ctrl(init_radii)
+  ref_ctrl = cell.radii_to_ctrl_fn(radii)
   ctrl_seq, _ = cell.unflatten_dynamics_sequence(QQ, PP, all_fixed)
 
   print('Saving result in video.')

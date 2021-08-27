@@ -64,6 +64,8 @@ class Cell2D:
     self.group_labels = material_grid.group_labels
     self.bc_movements = dict()
     self.traction_fns = dict()
+    self.radii_to_ctrl_fn = material_grid.get_radii_to_ctrl_fn()
+    self.n_cells = material_grid.n_cells
 
     self.orientations = material_grid.all_orientations
     self.traction_groups = material_grid.traction_group_labels
@@ -82,18 +84,18 @@ class Cell2D:
       self.fixed_labels, # <-- Labels not locations
     )
 
-  def generate_random_radii(self, seed=None):
+  ### Some helper functions to generate radii
+  def generate_random_radii(self, shape, seed=None):
+    npr.seed(seed)
+    init_radii = npr.rand(*shape, (self.cs.num_cp-1)*4)*0.9 + 0.05
+    return init_radii
+  
+  def generate_rectangular_radii(self, shape):
+    init_radii = np.ones((*shape, (self.cs.num_cp-1)*4)) * 0.5 * 0.9 + 0.05
+    return init_radii
+  
+  def generate_circular_radii(self, shape):
     pass
-#    npr.seed(seed)
-#    init_radii = npr.rand(self.cs.num_x, self.cs.num_y, (self.cs.num_cp-1)*4)*0.9 + 0.05
-#    return np.array(init_radii)
-
-  def radii_to_ctrl(self, radii):
-    if self.init_ctrls is not None:
-      return self.init_ctrls
-#    widths  = 5 * np.ones(self.cs.num_x)
-#    heights = 5 * np.ones(self.cs.num_y)
-#    return generate_quad_lattice(widths, heights, radii)
 
   def get_dynamics_flatten_unflatten(self):
     def flatten(unflat_pos, unflat_vel):
