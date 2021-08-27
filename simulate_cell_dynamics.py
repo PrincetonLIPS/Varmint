@@ -126,13 +126,15 @@ def main():
     spline_degree=args.splinedeg,
   )
 
-  grid_str = "CA000 C0000 C00B0\n"\
-             "S0001 00000 S0001\n"
+#  grid_str = "C0200 C0200 C0200\n"\
+#             "C0000 C0000 C0000\n"\
+#             "C0001 C0001 C0001\n"
+  grid_str = "C0001\n"
   cell = Cell2D(cell_shape=cell_shape, material=mat, instr=grid_str)
 
   @register_dirichlet_bc('2', cell)
   def group_2_movement(t):
-    return t / args.simtime * np.array([1.0, 0.0])
+    return t / args.simtime * np.array([0.0, -8.0])
 
   @register_dirichlet_bc('3', cell)
   def group_3_movement(t):
@@ -153,7 +155,7 @@ def main():
 
   radii = np.concatenate(
     (
-      cell.generate_rectangular_radii((cell.n_cells,)),
+      cell.generate_bertoldi_radii((cell.n_cells,), 0.1, -0.2),
     )
   )
 

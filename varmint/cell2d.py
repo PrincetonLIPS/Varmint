@@ -95,7 +95,18 @@ class Cell2D:
     return init_radii
   
   def generate_circular_radii(self, shape):
-    pass
+    one_arc = 0.6 * np.cos(np.linspace(-np.pi/4, np.pi/4, self.cs.num_cp)[:-1])
+    init_radii = np.broadcast_to(np.tile(one_arc, 4), (*shape, (self.cs.num_cp-1)*4))
+    return init_radii
+  
+  def generate_bertoldi_radii(self, shape, c1, c2, L0=5, phi0=0.5):
+    # L0 is used in the original formula, but we want 0 to 1.
+    r0 = np.sqrt(2 * phi0 / np.pi * (2 + c1**2 + c2**2))
+    thetas = np.linspace(-np.pi/4, np.pi/4, self.cs.num_cp)[:-1]
+    r_theta = r0 * (1 + c1 * np.cos(4 * thetas) + c2 * np.cos(8 * thetas))
+    xs_theta = np.cos(thetas) * r_theta
+    init_radii = np.broadcast_to(np.tile(xs_theta, 4), (*shape, (self.cs.num_cp-1)*4))
+    return init_radii
 
   def get_dynamics_flatten_unflatten(self):
     def flatten(unflat_pos, unflat_vel):
