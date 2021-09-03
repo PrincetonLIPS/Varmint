@@ -38,7 +38,7 @@ parser.add_argument('--dt', type=float, default=0.05)
 
 parser.add_argument('--mat_model', choices=['NeoHookean2D', 'LinearElastic2D'],
                     default='NeoHookean2D')
-parser.add_argument('--E', type=float, default=0.0001)
+parser.add_argument('--E', type=float, default=0.005)
 
 parser.add_argument('--save', dest='save', action='store_true')
 parser.add_argument('--optimizer', choices=['levmar', 'scipy-lm', 'newtoncg', 'newtoncg-python',
@@ -54,7 +54,7 @@ class WigglyMat(Material):
   _density = 1.0
 
 
-def simulate(ref_ctrl, ref_vels, cell, dt, T, optimizer, friction=1e-4):
+def simulate(ref_ctrl, ref_vels, cell, dt, T, optimizer, friction=1e-3):
   friction_force = lambda q, qdot, ref_ctrl, fixed_pos, fixed_vel, tractions: -friction * qdot
 
   flatten, unflatten = cell.get_dynamics_flatten_unflatten()
@@ -141,7 +141,7 @@ def main():
 
   @register_dirichlet_bc('2', cell)
   def group_2_movement(t):
-    return t / args.simtime * np.array([0.0, -4.0])
+    return t / args.simtime * np.array([0.0, -3.5])
 
   @register_dirichlet_bc('3', cell)
   def group_3_movement(t):
@@ -162,7 +162,7 @@ def main():
 
   radii = np.concatenate(
     (
-      cell.generate_circular_radii((cell.n_cells,)),
+      cell.generate_bertoldi_radii((cell.n_cells,), 0.0, 0.0),
     )
   )
 
