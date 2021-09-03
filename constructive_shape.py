@@ -453,6 +453,10 @@ class MaterialGrid(object):
         all_corners.append(u.corners)
         all_indices.extend(list(range(u.patch_offset, u.patch_offset + 4)))
 
+    # Case when we have no cells.
+    if len(all_corners) == 0:
+      return lambda _: self.ctrls
+
     all_corners = np.stack(all_corners, axis=0)
     all_indices = np.array(all_indices)
 

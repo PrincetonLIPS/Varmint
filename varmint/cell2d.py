@@ -21,10 +21,14 @@ CellShape = namedtuple('CellShape', [
 
 def register_dirichlet_bc(group, cell):
   def inner(fn):
+    vel_fn = jax.jacfwd(fn)  # Differentiate position to get velocity.
     def decorated(t):
       return fn(t) * cell.group_labels[group][..., np.newaxis]
     
-    cell.bc_movements[group] = decorated
+    def decorated_vel(t):
+      return vel_fn(t) * cell.group_labels[group][..., np.newaxis]
+    
+    cell.bc_movements[group] = (decorated, decorated_vel)
     return decorated
   return inner
 
@@ -120,11 +124,14 @@ class Cell2D:
 
       return flat_pos.flatten(), flat_vel.flatten()
 
-    def unflatten(flat_pos, flat_vel, fixed_locs):
+    def unflatten(flat_pos, flat_vel, fixed_locs, fixed_vels):
       kZeros = np.zeros((self.n_components, 2))
 
       fixed_locs = jax.ops.index_update(kZeros, self.index_arr, fixed_locs)
       fixed_locs = np.take(fixed_locs, self.fixed_labels, axis=0)
+
+      fixed_vels = jax.ops.index_update(kZeros, self.index_arr, fixed_vels)
+      fixed_vels = np.take(fixed_vels, self.fixed_labels, axis=0)
 
       unflat_pos  = kZeros
       unflat_vel  = kZeros
@@ -138,16 +145,16 @@ class Cell2D:
       fixed_pos = jax.ops.index_update(unflat_pos, self.fixed_labels,
                                                    fixed_locs)
       fixed_vel = jax.ops.index_update(unflat_vel, self.fixed_labels,
-                                                   np.zeros_like(fixed_locs))
+                                                   fixed_vels)
 
       return np.take(fixed_pos, self.index_arr, axis=0), \
              np.take(fixed_vel, self.index_arr, axis=0)
 
     return flatten, unflatten
 
-  def unflatten_dynamics_sequence(self, QQ, PP, fixed_locs):
+  def unflatten_dynamics_sequence(self, QQ, PP, fixed_locs, fixed_vels):
     _, unflatten = self.get_dynamics_flatten_unflatten()
-    unflat_pos, unflat_vel = zip(*[unflatten(q, p, f) for q, p, f in zip(QQ, PP, fixed_locs)])
+    unflat_pos, unflat_vel = zip(*[unflatten(q, p, f, v) for q, p, f, v in zip(QQ, PP, fixed_locs, fixed_vels)])
 
     return unflat_pos, unflat_vel
 
@@ -199,14 +206,22 @@ class Cell2D:
     return flatten_add
 
   def get_fixed_locs_fn(self, ref_ctrl):
-    fns = []
+    pos_fns = []
+    vel_fns = []
     for group in self.group_labels:
-      fns.append(self.bc_movements.get(group, lambda _: 0.0))
+      pos, vel = self.bc_movements.get(group, (None, None))
+
+      if pos is not None:
+        pos_fns.append(pos)
+        vel_fns.append(vel)
     
     def fixed_locs_fn(t):
-      return ref_ctrl + sum(fn(t) for fn in fns)
+      return ref_ctrl + sum(fn(t) for fn in pos_fns)
     
-    return fixed_locs_fn
+    def fixed_vels_fn(t):
+      return np.zeros_like(ref_ctrl) + sum(fn(t) for fn in vel_fns)
+    
+    return fixed_locs_fn, fixed_vels_fn
   
   def get_traction_fn(self):
     fns = []
@@ -225,8 +240,8 @@ class Cell2D:
       return p_lagrangian
     flatten, unflatten = self.get_dynamics_flatten_unflatten()
 
-    def full_lagrangian(q, qdot, ref_ctrl, displacement, traction):
-      def_ctrl, def_vels = unflatten(q, qdot, displacement)
+    def full_lagrangian(q, qdot, ref_ctrl, displacement, velocity, traction):
+      def_ctrl, def_vels = unflatten(q, qdot, displacement, velocity)
       return np.sum(jax.vmap(p_lagrangian)(def_ctrl, def_vels, ref_ctrl,
                                            self.orientations, traction))
 

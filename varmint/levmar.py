@@ -161,8 +161,8 @@ def optfun_jvp(fun, jacfun, cond_fun, body_fun, factor, primals, tangents):
 def get_lmfunc(
     fun,
     maxiters=np.float64(100.0),
-    xtol=np.float64(1e-8),
-    ftol=np.float64(1e-8),
+    xtol=np.float64(1e-12),
+    ftol=np.float64(1e-12),
     factor=np.float64(100.0),
     sigma=np.float64(0.1),
     full_result=False,

@@ -33,8 +33,8 @@ parser.add_argument('-c', '--ncp', type=int, default=5)
 parser.add_argument('-q', '--quaddeg', type=int, default=10)
 parser.add_argument('-s', '--splinedeg', type=int, default=3)
 
-parser.add_argument('--simtime', type=float, default=0.5)
-parser.add_argument('--dt', type=float, default=0.005)
+parser.add_argument('--simtime', type=float, default=5.0)
+parser.add_argument('--dt', type=float, default=0.05)
 
 parser.add_argument('--mat_model', choices=['NeoHookean2D', 'LinearElastic2D'],
                     default='NeoHookean2D')
@@ -55,7 +55,7 @@ class WigglyMat(Material):
 
 
 def simulate(ref_ctrl, ref_vels, cell, dt, T, optimizer, friction=1e-4):
-  friction_force = lambda q, qdot, ref_ctrl, fixed_dict, tractions: -friction * qdot
+  friction_force = lambda q, qdot, ref_ctrl, fixed_pos, fixed_vel, tractions: -friction * qdot
 
   flatten, unflatten = cell.get_dynamics_flatten_unflatten()
   full_lagrangian = cell.get_lagrangian_fun()
@@ -66,21 +66,23 @@ def simulate(ref_ctrl, ref_vels, cell, dt, T, optimizer, friction=1e-4):
   # Initially in the ref config with zero momentum.
   q, p = flatten(ref_ctrl, ref_vels)
 
-  fixed_locs_fn = cell.get_fixed_locs_fn(ref_ctrl)
+  fixed_locs_fn, fixed_vels_fn = cell.get_fixed_locs_fn(ref_ctrl)
   traction_fn = cell.get_traction_fn()
   #tractions = np.zeros((cell.index_arr.shape[0], 4, 2))
 
   QQ = [q]; PP = [p]; TT = [0.0]
   all_fixed = [fixed_locs_fn(TT[-1])]
+  all_fixed_vels = [fixed_vels_fn(TT[-1])]
 
   while TT[-1] < T:
     t0 = time.time()
     fixed_locs = all_fixed[-1]
+    fixed_vels = all_fixed_vels[-1]
 
     success = False
     this_dt = dt
     while True:
-      new_q, new_p = step(QQ[-1], PP[-1], this_dt, ref_ctrl, fixed_locs, traction_fn(TT[-1]))
+      new_q, new_p = step(QQ[-1], PP[-1], this_dt, ref_ctrl, fixed_locs, fixed_vels, traction_fn(TT[-1]))
 
       success = np.all(np.isfinite(new_q))
       if success:
@@ -93,10 +95,11 @@ def simulate(ref_ctrl, ref_vels, cell, dt, T, optimizer, friction=1e-4):
     PP.append(new_p)
     TT.append(TT[-1] + this_dt)
     all_fixed.append(fixed_locs_fn(TT[-1]))
+    all_fixed_vels.append(fixed_locs_fn(TT[-1]))
     t1 = time.time()
     print(f'stepped to time {TT[-1]} in {t1-t0} seconds')
 
-  return QQ, PP, TT, all_fixed
+  return QQ, PP, TT, all_fixed, all_fixed_vels
 
 
 def sim_radii(cell, radii, dt, T, optimizer):
@@ -104,9 +107,9 @@ def sim_radii(cell, radii, dt, T, optimizer):
   ref_ctrl = cell.radii_to_ctrl_fn(radii)
 
   # Simulate the reference shape.
-  QQ, PP, TT, all_fixed = simulate(ref_ctrl, np.zeros_like(ref_ctrl), cell, dt, T, optimizer)
+  QQ, PP, TT, all_fixed, all_fixed_vels = simulate(ref_ctrl, np.zeros_like(ref_ctrl), cell, dt, T, optimizer)
 
-  return QQ, PP, TT, all_fixed
+  return QQ, PP, TT, all_fixed, all_fixed_vels
 
 
 def main():
@@ -126,15 +129,19 @@ def main():
     spline_degree=args.splinedeg,
   )
 
-#  grid_str = "C0200 C0200 C0200\n"\
-#             "C0000 C0000 C0000\n"\
-#             "C0001 C0001 C0001\n"
-  grid_str = "C0001\n"
+  grid_str = "C0200 C0200 C0200\n"\
+             "C0000 C0000 C0000\n"\
+             "C0001 C0001 C0001\n"
+#  grid_str = "C0204\n"
   cell = Cell2D(cell_shape=cell_shape, material=mat, instr=grid_str)
+
+  @register_dirichlet_bc('1', cell)
+  def group_1_movement(t):
+    return t / args.simtime * np.array([0.0, 0.0])
 
   @register_dirichlet_bc('2', cell)
   def group_2_movement(t):
-    return t / args.simtime * np.array([0.0, -8.0])
+    return t / args.simtime * np.array([0.0, -4.0])
 
   @register_dirichlet_bc('3', cell)
   def group_3_movement(t):
@@ -155,18 +162,18 @@ def main():
 
   radii = np.concatenate(
     (
-      cell.generate_bertoldi_radii((cell.n_cells,), 0.1, -0.2),
+      cell.generate_circular_radii((cell.n_cells,)),
     )
   )
 
-  QQ, PP, TT, all_fixed = sim_radii(cell, radii, dt, T, args.optimizer)
+  QQ, PP, TT, all_fixed, all_fixed_vels = sim_radii(cell, radii, dt, T, args.optimizer)
   sim_dir = os.path.join(args.exp_dir, 'sim_ckpt')
   os.mkdir(sim_dir)
   #autils.save_dynamics_simulation(sim_dir, QQ, PP, TT, init_radii, cell)
 
   # Turn this into a sequence of control point sets.
   ref_ctrl = cell.radii_to_ctrl_fn(radii)
-  ctrl_seq, _ = cell.unflatten_dynamics_sequence(QQ, PP, all_fixed)
+  ctrl_seq, _ = cell.unflatten_dynamics_sequence(QQ, PP, all_fixed, all_fixed_vels)
 
   print('Saving result in video.')
   vid_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}.mp4')
