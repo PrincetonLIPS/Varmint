@@ -1,3 +1,0 @@
-[submodule "jax-optkit"]
-	path = jax-optkit
-	url = https://github.com/PrincetonLIPS/jax-optkit
