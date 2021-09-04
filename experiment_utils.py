@@ -8,7 +8,7 @@ import pickle
 
 import pandas as pd
 
-import surrogate_nns
+import surrogate_sim.surrogate_nns
 import jax.numpy as np
 
 from collections import namedtuple
@@ -111,8 +111,8 @@ def read_surrogate_experiment(ds_root, ds_name, expname):
   with open(os.path.join(expdir, 'model.pkl'), 'rb') as f:
     params = pickle.load(f)
 
-  _, nn_fun = surrogate_nns.get_mlp(args['nfeat'], args['nn_whidden'],
-                                    args['nn_nhidden'], args['nn_activation'])
+  _, nn_fun = surrogate_sim.surrogate_nns.get_mlp(args['nfeat'], args['nn_whidden'],
+                                                  args['nn_nhidden'], args['nn_activation'])
 
   def predict_fun(old_q, old_p, radii):
     inputs = np.concatenate((old_q, old_p, radii), axis=1)

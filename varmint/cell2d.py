@@ -7,7 +7,6 @@ from varmint.patch2d      import Patch2D
 from varmint.bsplines     import default_knots
 from varmint.lagrangian   import generate_patch_lagrangian
 from varmint.statics      import generate_patch_free_energy
-from varmint.cellular2d   import index_array_from_ctrl, generate_quad_lattice
 
 import constructive_shape
 

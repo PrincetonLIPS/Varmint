@@ -9,10 +9,10 @@ import scipy.stats
 import time
 from functools import partial
 
-from varmint.levmar import get_lmfunc
-from varmint.newtoncg import newtoncg
-from varmint.newtoncg_python import newtoncg_python
-from jaxoptkit.optkit.levmar import get_jittable_lm, lmoptimize
+from varmint.optimization.levmar import get_lmfunc
+from varmint.optimization.newtoncg import newtoncg
+from varmint.optimization.newtoncg_python import newtoncg_python
+#from jaxoptkit.optkit.levmar import get_jittable_lm, lmoptimize
 
 def get_optfun(residual_fun, kind='levmar', **optargs):
   if kind == 'levmar':
