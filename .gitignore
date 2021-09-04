@@ -134,6 +134,11 @@ old_videos/
 experiments/
 notebooks/
 .vscode/
+savedoptcheckpoints/
+preconditioner_learning/
+surrogate_sim/
+experiments.txt
+experiment_launch.sh
 
 # Vim swap files
 *.swp
