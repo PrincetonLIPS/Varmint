@@ -90,7 +90,7 @@ class Cell2D:
   ### Some helper functions to generate radii
   def generate_random_radii(self, shape, seed=None):
     npr.seed(seed)
-    init_radii = npr.rand(*shape, (self.cs.num_cp-1)*4)*0.9 + 0.05
+    init_radii = npr.rand(*shape, (self.cs.num_cp-1)*4)*0.7 + 0.15
     return init_radii
   
   def generate_rectangular_radii(self, shape):
@@ -241,6 +241,15 @@ class Cell2D:
 
     def full_lagrangian(q, qdot, ref_ctrl, displacement, velocity, traction):
       def_ctrl, def_vels = unflatten(q, qdot, displacement, velocity)
+
+      # Map instead of vmap over each patch to save memory. Otherwise
+      # vmap will be over all patches, elements, and quad points.
+      def fn_for_map(x):
+        return p_lagrangian(*x)
+      
+      #return np.sum(jax.lax.map(fn_for_map, (def_ctrl, def_vels, ref_ctrl,
+      #                                       self.orientations, traction)))
+
       return np.sum(jax.vmap(p_lagrangian)(def_ctrl, def_vels, ref_ctrl,
                                            self.orientations, traction))
 

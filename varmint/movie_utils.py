@@ -17,6 +17,7 @@ def create_movie(
     ctrl_seq,
     filename,
     fig_kwargs={},
+    comet_exp=None,
 ):
   t0 = time.time()
 
@@ -103,6 +104,10 @@ def create_movie(
   )
   anim.save(filename)
 
+  if comet_exp is not None:
+    comet_exp.log_figure(figure_name='movie')
+
+
   plt.close(fig)
   t1 = time.time()
   print(f'Generated movie with {len(ctrl_seq)} frames and '
@@ -170,6 +175,7 @@ def create_static_image(
                       linewidth=1)
 
   plt.savefig(filename)
+
   plt.close(fig)
   t1 = time.time()
   print(f'Generated image with {len(ctrl_sol)} patches in {t1-t0} seconds.')
