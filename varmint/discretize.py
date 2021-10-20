@@ -4,6 +4,7 @@ import jax.numpy as np
 from . import utils
 
 from varmint.optimizers import (InvertEveryFewStepsOptimizer,
+                                SparseInvertEveryFewStepsOptimizer,
                                 InvertEveryTimeOptimizer,
                                 InvertOncePerStepOptimizer,
                                 LearnedDiagonalOptimizer,
@@ -113,7 +114,7 @@ class HamiltonianStepper:
 
 
 class PreconditioningStrategyStepper:
-  def __init__(self, L, F=None, save=False):
+  def __init__(self, L, F=None, save=False, cell=None):
     # For thinking about forces, see West thesis:
     # https://thesis.library.caltech.edu/2492/1/west_thesis.pdf
     # Page 16, Sec 1.5.6.
@@ -122,6 +123,8 @@ class PreconditioningStrategyStepper:
     self.D0_Ld, self.D1_Ld = discretize_hamiltonian(L)
     self.F = F
     self.save = save
+    self.L = L
+    self.cell = cell
 
   def residual_fun(self, new_q, args):
     old_q, p, dt, l_args = args
@@ -150,6 +153,9 @@ class PreconditioningStrategyStepper:
     elif strategy == 'inverteveryfewsteps':
       print('Using inverteveryfewsteps')
       optimizer = InvertEveryFewStepsOptimizer()
+    elif strategy == 'sparseinverteveryfewsteps':
+      print('Using sparseinverteveryfewsteps')
+      optimizer = SparseInvertEveryFewStepsOptimizer(cell=self.cell)
     elif strategy == 'learneddiagonal':
       print('Using learneddiagonal')
       optimizer = LearnedDiagonalOptimizer(size)

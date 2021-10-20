@@ -23,6 +23,6 @@ def map_jacfwd(f, N):
       return jax.jvp(f, (xk,), (v,))[1]
     
     all_vs = np.eye(N)
-    reshaped_vs = all_vs.reshape((-1, 73, N))
+    reshaped_vs = all_vs.reshape((-1, 1, N))
     return jax.lax.map(jax.vmap(jvp_fun), reshaped_vs).reshape((N, N))
   return mapjac

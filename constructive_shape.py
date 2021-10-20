@@ -7,8 +7,10 @@ import numpy.random as npr
 import jax
 import jax.numpy as jnp
 
-from scipy.sparse           import csr_matrix
+from scipy.sparse           import csr_matrix, csc_matrix, kron, save_npz
 from scipy.sparse.csgraph   import connected_components, dijkstra
+
+from varmint.sparsity import pattern_to_reconstruction
 
 
 class ShapeUnit2D(object):
@@ -356,7 +358,7 @@ class MaterialGrid(object):
             self.n_cells += 1
           else:
             raise ValueError("Invalid shape.")
-          
+
           npatches += unit.n_patches
           self.units.append(unit)
           self.ctrls.append(unit.ctrl.reshape(-1, ncp, ncp, 2))
@@ -405,6 +407,14 @@ class MaterialGrid(object):
         return_labels=True
     )
 
+    print(f'Number of degrees of freedom: {2 * n_components}.')  # Each component has 2, one for x and one for y.
+
+    all_mgrid_indices = []
+    for patch_indices in unflat_indices:
+      mgrid_indices = np.stack(np.meshgrid(patch_indices.flatten(), patch_indices.flatten()), axis=-1)
+      all_mgrid_indices.append(mgrid_indices)
+    all_mgrid_indices = np.stack(all_mgrid_indices, axis=0)
+
     labels = np.reshape(labels, self.ctrls.shape[:-1])
     self.n_components = n_components
     self.labels = labels
@@ -434,6 +444,23 @@ class MaterialGrid(object):
       self.fixed_labels = []
       self.nonfixed_labels = []
 
+    print('constructing sparsity overestimate')
+    self.jac_spy_edges = labels.flatten()[all_mgrid_indices].reshape((-1, 2))
+    
+    # Create an overestimate of the Jacobian sparsity pattern.
+    jac_sparsity_graph = \
+      csc_matrix((np.ones_like(self.jac_spy_edges[:, 0]), (self.jac_spy_edges[:, 0], self.jac_spy_edges[:, 1])),
+                 (n_components, n_components), dtype=np.int8)
+    jac_sparsity_graph = jac_sparsity_graph[:, self.nonfixed_labels]
+    jac_sparsity_graph = jac_sparsity_graph[self.nonfixed_labels, :]
+    self.jac_sparsity_graph = kron(jac_sparsity_graph, np.ones((2,2)), format='csc')
+#    save_npz('VERYHUGEsparsemat.npz', self.jac_sparsity_graph)
+    print('constructed sparsity overestimate')
+
+    print('constructing sparsity ops (currently slow)')
+    self.jvpmat, self.reconstruct = pattern_to_reconstruction(self.jac_sparsity_graph)
+    print('constructed sparsity ops')
+
     self.traction_group_labels = {}
     for group in self.traction_groups:
       sides = self.traction_groups[group]
@@ -462,7 +489,7 @@ class MaterialGrid(object):
 
     vmap_gencell = jax.vmap(UnitCell2D._gen_cell)
     vmap_gencell = partial(vmap_gencell, all_corners)
-    
+
     def radii_to_ctrl(radii):
       cell_ctrls = vmap_gencell(radii).reshape((-1, self.ncp, self.ncp, 2))
       return jax.ops.index_update(self.ctrls, all_indices, cell_ctrls,

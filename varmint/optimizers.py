@@ -1,6 +1,7 @@
 import os
 
 import jax
+from jax.core import InconclusiveDimensionOperation
 import jax.numpy as np
 
 import numpy as onp
@@ -245,6 +246,56 @@ class InvertEveryFewStepsOptimizer:
 
     return xk, None
 
+class SparseInvertEveryFewStepsOptimizer:
+  def __init__(self, niter=20, nsteps=1, cell=None):
+    self.niter = niter
+    self.nsteps = nsteps
+    self.step_count = 0
+    self.cell = cell
+
+  def optimize(self, x0, residual_fun, jvp_fun, jac_fun):
+    xk = x0
+
+    tol = 1e-8
+    vmap_jvp = jax.vmap(jvp_fun, in_axes=(None, 0), out_axes=0)
+    for i in range(self.niter):
+      rk = residual_fun(xk)
+      current_norm = np.linalg.norm(rk)
+      if current_norm < tol:
+        print('Reached tolerance. Breaking.')
+        break
+
+      jvp_res = vmap_jvp(xk, self.cell.sparse_jvps_mat)
+
+      sparse_jac = self.cell.sparse_reconstruct(jvp_res)
+      ilu_factor = scipy.sparse.linalg.spilu(sparse_jac) #, fill_factor=5.0)
+
+      M_x = lambda x: ilu_factor.solve(x)
+      self.M_lin_op = scipy.sparse.linalg.LinearOperator((x0.shape[0], x0.shape[0]), M_x)
+
+      Jk = lambda v: jvp_fun(xk, v)
+      jac_lin_op = scipy.sparse.linalg.LinearOperator((x0.shape[0], x0.shape[0]), Jk)
+
+      global icount
+      icount = 0
+      def update_icount(x):
+        global icount
+        icount += 1
+      pk, info = scipy.sparse.linalg.gmres(jac_lin_op, -rk, callback=update_icount, tol=tol, M=self.M_lin_op, maxiter=20)
+      print(f'gmres did {icount} iterations.')
+
+      if info != 0:
+        print(f'GMRES returned info: {info}. Falling back to direct method.')
+        # return np.nan * np.ones_like(x0), None
+        lu_factor = scipy.sparse.linalg.splu(sparse_jac)
+
+        pk = lu_factor.solve(-rk)
+      xk = xk + pk
+    
+    self.step_count += 1
+
+    return xk, None
+
 
 class InvertOncePerStepOptimizer:
   def __init__(self, niter=5):
@@ -274,7 +325,7 @@ class InvertOncePerStepOptimizer:
 
 
 class InvertEveryTimeOptimizer:
-  def __init__(self, niter=5, save=False, savedir='/n/fs/mm-iga/Varmint/jacobians/'):
+  def __init__(self, niter=5, save=False, savedir='/n/fs/mm-iga/Varmint/jacobianssmall/'):
     self.niter = niter
     self.iter_num = 0
     self.savedir = savedir

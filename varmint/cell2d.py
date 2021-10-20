@@ -73,6 +73,10 @@ class Cell2D:
     self.orientations = material_grid.all_orientations
     self.traction_groups = material_grid.traction_group_labels
 
+    # Sparsity things
+    self.sparse_jvps_mat = material_grid.jvpmat
+    self.sparse_reconstruct = material_grid.reconstruct
+
     self.init_ctrls = material_grid.ctrls
     self.init_ctrls = self.init_ctrls.reshape(-1, self.cs.num_cp, self.cs.num_cp, 2)
     self.index_arr = self.index_arr.reshape(-1, self.cs.num_cp, self.cs.num_cp)

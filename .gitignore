@@ -135,8 +135,10 @@ experiments/
 notebooks/
 .vscode/
 savedoptcheckpoints/
+nogit/
 experiments.txt
 experiment_launch.sh
+*_scratch.ipynb
 
 # Vim swap files
 *.swp
