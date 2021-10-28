@@ -11,12 +11,13 @@ from scipy.sparse import diags
 
 class Preconditioner(object):
     """Base class. Does nothing."""
+
     def __init__(self, A, *args, **kwargs):
         raise NotImplementedError
 
     def get_apply_fn(self):
         raise NotImplementedError
-    
+
     def get_apply_T_fn(self):
         raise NotImplementedError
 
@@ -26,12 +27,12 @@ class DiagonalPreconditioner(Preconditioner):
 
     def __init__(self, A):
         self.diag = jnp.sqrt(jnp.diag(A))
-    
+
     def get_apply_fn(self):
         def apply(x):
             return x / self.diag
         return apply
-    
+
     def get_apply_T_fn(self):
         def apply_T(x):
             return x / self.diag
@@ -43,12 +44,12 @@ class FixedDiagonalPreconditioner(Preconditioner):
 
     def __init__(self, A, B):
         self.diag = jnp.sqrt(jnp.diag(B))
-    
+
     def get_apply_fn(self):
         def apply(x):
             return x / self.diag
         return apply
-    
+
     def get_apply_T_fn(self):
         def apply_T(x):
             return x / self.diag
@@ -60,12 +61,12 @@ class ExactPreconditioner(Preconditioner):
 
     def __init__(self, A):
         self.L = jnp.linalg.cholesky(jnp.linalg.inv(A))
-    
+
     def get_apply_fn(self):
         def apply(x):
             return self.L @ x
         return apply
-    
+
     def get_apply_T_fn(self):
         def apply_T(x):
             return self.L.T @ x
@@ -77,12 +78,12 @@ class FixedMatrixPreconditioner(Preconditioner):
 
     def __init__(self, A, B):
         self.L = jnp.linalg.cholesky(jnp.linalg.inv(B))
-    
+
     def get_apply_fn(self):
         def apply(x):
             return self.L @ x
         return apply
-    
+
     def get_apply_T_fn(self):
         def apply_T(x):
             return self.L.T @ x
@@ -91,6 +92,7 @@ class FixedMatrixPreconditioner(Preconditioner):
 
 class IdentityPreconditioner(Preconditioner):
     """Do nothing."""
+
     def __init__(self, A):
         pass
 
@@ -98,7 +100,7 @@ class IdentityPreconditioner(Preconditioner):
         def apply(x):
             return x
         return apply
-    
+
     def get_apply_T_fn(self):
         def apply_T(x):
             return x
@@ -115,12 +117,12 @@ class IncompleteCholPreconditioner(Preconditioner):
 
         # Want to scale columns of L.
         self.L = self.invA_approx.L @ diags(diag_sqrts)
-    
+
     def get_apply_fn(self):
         def apply(x):
             return jnp.array(spsolve_triangular(self.L.T, x, lower=False))
         return apply
-    
+
     def get_apply_T_fn(self):
         def apply_T(x):
             return jnp.array(spsolve_triangular(self.L, x, lower=True))
