@@ -1,30 +1,27 @@
+import time
+import os
+import argparse
+import analysis_utils as autils
+import experiment_utils as eutils
+from varmint.statics import DenseStaticsSolver, SparseStaticsSolver
+from varmint.movie_utils import create_static_image
+from varmint.cell2d import Cell2D, CellShape
+from varmint.materials import Material
+from varmint.constitutive import NeoHookean2D, LinearElastic2D
+from varmint.patch2d import Patch2D
+import numpy.random as npr
+import numpy as onp
+import jax.numpy as np
 import jax
 
 # Let's do 64-bit. Does not seem to degrade performance much.
 from jax.config import config
 config.update("jax_enable_x64", True)
 
-import jax.numpy as np
-import numpy as onp
-import numpy.random as npr
-
-from varmint.patch2d      import Patch2D
-from varmint.constitutive import NeoHookean2D, LinearElastic2D
-from varmint.materials    import Material
-from varmint.cell2d       import Cell2D, CellShape
-from varmint.movie_utils  import create_static_image
-from varmint.statics      import DenseStaticsSolver, SparseStaticsSolver
-
-import experiment_utils as eutils
-import analysis_utils as autils
-
-import argparse
-import os
-import time
-
 
 parser = argparse.ArgumentParser()
-eutils.prepare_experiment_args(parser, exp_root='/n/fs/mm-iga/Varmint/experiments')
+eutils.prepare_experiment_args(
+    parser, exp_root='/n/fs/mm-iga/Varmint/experiments')
 
 
 # Geometry parameters.
@@ -43,60 +40,61 @@ parser.add_argument('--optimizer', choices=['newton', 'newtoncg-scipy', 'trustnc
 
 
 class WigglyMat(Material):
-  _E = 0.003
-  _nu = 0.48
-  _density = 1.0
+    _E = 0.003
+    _nu = 0.48
+    _density = 1.0
 
 
 def simulate(ref_ctrl, cell, sparse=False, optimkind='newton'):
-  flatten, unflatten = cell.get_statics_flatten_unflatten()
+    flatten, unflatten = cell.get_statics_flatten_unflatten()
 
-  q = flatten(ref_ctrl)
-  if sparse:
-    print(f'Using sparse solver.')
-    solver = SparseStaticsSolver(cell)
-  else:
-    print(f'Using dense solver.')
-    solver = DenseStaticsSolver(cell)
-  solve  = solver.get_solver_fun(optimkind=optimkind)
+    q = flatten(ref_ctrl)
+    if sparse:
+        print(f'Using sparse solver.')
+        solver = SparseStaticsSolver(cell)
+    else:
+        print(f'Using dense solver.')
+        solver = DenseStaticsSolver(cell)
+    solve = solver.get_solver_fun(optimkind=optimkind)
 
-  new_q = solve(q, ref_ctrl)
+    new_q = solve(q, ref_ctrl)
 
-  return unflatten(new_q, ref_ctrl)
+    return unflatten(new_q, ref_ctrl)
 
 
 def main():
-  args = parser.parse_args()
-  eutils.prepare_experiment_directories(args)
-  # args.seed and args.exp_dir should be set.
+    args = parser.parse_args()
+    eutils.prepare_experiment_directories(args)
+    # args.seed and args.exp_dir should be set.
 
-  eutils.save_args(args)
-  npr.seed(args.seed)
+    eutils.save_args(args)
+    npr.seed(args.seed)
 
-  WigglyMat._E = args.E
-  mat = eval(args.mat_model)(WigglyMat)
+    WigglyMat._E = args.E
+    mat = eval(args.mat_model)(WigglyMat)
 
-  cell_shape = CellShape(
-    num_x=args.nx,
-    num_y=args.ny,
-    num_cp=args.ncp,
-    quad_degree=args.quaddeg,
-    spline_degree=args.splinedeg,
-  )
+    cell_shape = CellShape(
+        num_x=args.nx,
+        num_y=args.ny,
+        num_cp=args.ncp,
+        quad_degree=args.quaddeg,
+        spline_degree=args.splinedeg,
+    )
 
-  cell = Cell2D(cell_shape=cell_shape, fixed_side='left', material=mat, infile='grid.txt')
-  init_radii = cell.generate_random_radii(args.seed)
+    cell = Cell2D(cell_shape=cell_shape, fixed_side='left',
+                  material=mat, infile='grid.txt')
+    init_radii = cell.generate_random_radii(args.seed)
 
-  print('Starting statics simulation')
-  ctrl_sol = simulate(cell.radii_to_ctrl(init_radii), cell,
-                      sparse=args.sparse, optimkind=args.optimizer)
-  print('Saving result in figure.')
-  im_path = os.path.join(args.exp_dir, 'result.png')
-  create_static_image(cell.patch, ctrl_sol, im_path)
+    print('Starting statics simulation')
+    ctrl_sol = simulate(cell.radii_to_ctrl(init_radii), cell,
+                        sparse=args.sparse, optimkind=args.optimizer)
+    print('Saving result in figure.')
+    im_path = os.path.join(args.exp_dir, 'result.png')
+    create_static_image(cell.patch, ctrl_sol, im_path)
 
 
 if __name__ == '__main__':
-  main()
+    main()
 
 
 # TODO(doktay): Incorporate adjoint optimization again.

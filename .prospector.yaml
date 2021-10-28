@@ -1,8 +1,4 @@
 pep8:
-  disable:
-    - E114 # bad-indentation (I prefer two spaces)
 
 pylint:
-  disable:
-    - W0311 # bad-indentation (I prefer two spaces)
     - R0913 # too-many-arguments

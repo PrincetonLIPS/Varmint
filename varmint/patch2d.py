@@ -1,404 +1,281 @@
 import jax
-import jax.numpy         as np
-import numpy             as onp
+import jax.numpy as np
+import numpy as onp
 import matplotlib.pyplot as plt
 import quadpy
 
 from .exceptions import LabelError
 from .bsplines import (
-  bspline1d_derivs_hand,
-  mesh,
-  bspline2d,
-  bspline2d_basis,
-  bspline2d_basis_derivs,
-  bspline2d_derivs,
-  bspline2d_derivs_ctrl,
+    bspline1d_derivs_hand,
+    mesh,
+    bspline2d,
+    bspline2d_basis,
+    bspline2d_basis_derivs,
+    bspline2d_derivs,
+    bspline2d_derivs_ctrl,
 )
 
 
 class Patch2D:
-  ''' Class for individual patches in two dimensions.
+    ''' Class for individual patches in two dimensions.
 
-  A patch corresponds to a two-dimensional bspline with tensor product basis
-  functions.  They are individual maps from [0,1]^2 to R^2, parameterized
-  by control points.
-  '''
-
-  def __init__(
-      self,
-      xknots,
-      yknots,
-      spline_deg,
-      material,
-      quad_deg,
-      labels=None,
-      fixed=[],
-  ):
-    ''' Constructor for two dimensional patch.
-
-    Parameters:
-    -----------
-     - xknots: A length-M one-dimensional array of bspline knots for the x
-               dimension. These are assumed to be in non-decreasing order from
-               0.0 to 1.0.
-
-     - yknots: A length-N one-dimensional array of bspline knots for the y
-               dimension. These are assumed to be in non-decreasing order from
-               0.0 to 1.0.
-
-     - spline_deg: The degree of the bspline.
-
-    # FIXME
-
-     - labels: An optional M x N array of strings that allow constraints to be
-               specified across patches. Labels are used to specify coincidence
-               constraints and to specify fixed locations in space.  Note that
-               they will get dimension-specific extensions appended to them.
-
-     - fixed: An optional dictionary that maps labels to 2d locations, as
-              appropriate. FIXME: just a list/set now.
+    A patch corresponds to a two-dimensional bspline with tensor product basis
+    functions.  They are individual maps from [0,1]^2 to R^2, parameterized
+    by control points.
     '''
-    self.xknots     = xknots
-    self.yknots     = yknots
-    self.spline_deg = spline_deg
-    self.fixed      = fixed
-    self.material   = material
-    self.quad_deg   = quad_deg
 
-    # Determine the number of control points.
-    num_xknots = self.xknots.shape[0]
-    num_yknots = self.yknots.shape[0]
+    def __init__(
+        self,
+        xknots,
+        yknots,
+        spline_deg,
+        material,
+        quad_deg,
+    ):
+        ''' Constructor for two dimensional patch.
 
-    self.num_xctrl  = num_xknots - self.spline_deg - 1
-    self.num_yctrl  = num_yknots - self.spline_deg - 1
+        Parameters:
+        -----------
+         - xknots: A length-M one-dimensional array of bspline knots for the x
+                   dimension. These are assumed to be in non-decreasing order from
+                   0.0 to 1.0.
 
-    if labels is None:
-      # Generate an empty label matrix.
-      self.labels = onp.zeros((self.num_xctrl, self.num_yctrl),
-                              dtype='<U256')
+         - yknots: A length-N one-dimensional array of bspline knots for the y
+                   dimension. These are assumed to be in non-decreasing order from
+                   0.0 to 1.0.
 
-    else:
-      # Expand the given label matrix to include dimensions.
-      if labels.shape != (self.num_xctrl,self.num_yctrl):
-        raise DimensionError('The labels must have shape %d x %d.' \
-                             % (self.num_xctrl, self.num_yctrl))
-      self.labels = labels
+         - spline_deg: The degree of the bspline.
 
-    self.compute_quad_points()
+        '''
+        self.xknots = xknots
+        self.yknots = yknots
+        self.spline_deg = spline_deg
+        self.material = material
+        self.quad_deg = quad_deg
 
-  def compute_quad_points(self):
+        # Determine the number of control points.
+        num_xknots = self.xknots.shape[0]
+        num_yknots = self.yknots.shape[0]
 
-    # Each knot span has its own quadrature.
-    uniq_xknots = onp.unique(self.xknots)
-    uniq_yknots = onp.unique(self.yknots)
+        self.num_xctrl = num_xknots - self.spline_deg - 1
+        self.num_yctrl = num_yknots - self.spline_deg - 1
 
-    xwidths = onp.diff(uniq_xknots)
-    ywidths = onp.diff(uniq_yknots)
+        self.compute_quad_points()
 
-    # We need the span volumes for performing integration later.
-    self.span_volumes = xwidths[:,np.newaxis] * ywidths[np.newaxis,:]
-    self.xwidths = xwidths
-    self.ywidths = ywidths
+    def compute_quad_points(self):
 
-    # Ask quadpy for a quadrature scheme.
-    scheme = quadpy.c2.get_good_scheme(self.quad_deg)
+        # Each knot span has its own quadrature.
+        uniq_xknots = onp.unique(self.xknots)
+        uniq_yknots = onp.unique(self.yknots)
 
-    # Scheme for line integrals
-    line_scheme = quadpy.c1.gauss_legendre(3 * self.quad_deg)
+        xwidths = onp.diff(uniq_xknots)
+        ywidths = onp.diff(uniq_yknots)
 
-    # Change the domain from (-1,1)^2 to (0,1)^2
-    points = scheme.points.T/2 + 0.5
-    line_points  = line_scheme.points / 2 + 0.5
+        # We need the span volumes for performing integration later.
+        self.span_volumes = xwidths[:, np.newaxis] * ywidths[np.newaxis, :]
+        self.xwidths = xwidths
+        self.ywidths = ywidths
 
-    # Repeat the quadrature points for each knot span, scaled appropriately.
-    offset_mesh = mesh(uniq_xknots[:-1], uniq_yknots[:-1])
-    width_mesh  = mesh(xwidths, ywidths)
+        # Ask quadpy for a quadrature scheme.
+        scheme = quadpy.c2.get_good_scheme(self.quad_deg)
 
-    self.points = np.reshape(points[np.newaxis,np.newaxis,:,:] \
-                             * width_mesh[:,:,np.newaxis,:] \
-                             + offset_mesh[:,:,np.newaxis,:],
-                             (-1, 2))
-    self.x_line_points = np.reshape(
-        line_points[np.newaxis, :] \
-        * xwidths[:, np.newaxis] \
-        + uniq_xknots[:-1][:, np.newaxis],
-    (-1,))
-    self.y_line_points = np.reshape(
-        line_points[np.newaxis, :] \
-        * ywidths[:, np.newaxis] \
-        + uniq_yknots[:-1][:, np.newaxis],
-    (-1,))
+        # Scheme for line integrals
+        line_scheme = quadpy.c1.gauss_legendre(3 * self.quad_deg)
 
-    # FIXME: Why don't I have to divide this by 4 to accommodate the change in
-    # interval?
-    # Answer(doktay): Because for some reason quadpy.c2 weights sum to 1 instead of 4.
-    self.weights = np.reshape(scheme.weights, (1, 1, -1))
-    self.line_weights = np.reshape(line_scheme.weights / 2, (1, -1))
-    #self.line_weights = np.ones_like(self.line_weights)
+        # Change the domain from (-1,1)^2 to (0,1)^2
+        points = scheme.points.T/2 + 0.5
+        line_points = line_scheme.points / 2 + 0.5
 
-  def num_quad_pts(self):
-    return self.points.shape[0]
+        # Repeat the quadrature points for each knot span, scaled appropriately.
+        offset_mesh = mesh(uniq_xknots[:-1], uniq_yknots[:-1])
+        width_mesh = mesh(xwidths, ywidths)
 
-  def get_deformation_fn(self):
-    ''' Get a function that produces deformations
+        self.points = np.reshape(points[np.newaxis, np.newaxis, :, :]
+                                 * width_mesh[:, :, np.newaxis, :]
+                                 + offset_mesh[:, :, np.newaxis, :],
+                                 (-1, 2))
+        self.x_line_points = np.reshape(
+            line_points[np.newaxis, :]
+            * xwidths[:, np.newaxis]
+            + uniq_xknots[:-1][:, np.newaxis],
+            (-1,))
+        self.y_line_points = np.reshape(
+            line_points[np.newaxis, :]
+            * ywidths[:, np.newaxis]
+            + uniq_yknots[:-1][:, np.newaxis],
+            (-1,))
 
-    Takes in control points and returns a deformation for each quad point.
+        # FIXME: Why don't I have to divide this by 4 to accommodate the change in
+        # interval?
+        # Answer(doktay): Because for some reason quadpy.c2 weights sum to 1 instead of 4.
+        self.weights = np.reshape(scheme.weights, (1, 1, -1))
+        self.line_weights = np.reshape(line_scheme.weights / 2, (1, -1))
+        #self.line_weights = np.ones_like(self.line_weights)
 
-    This is assumed to be in cm.
-    '''
-    def deformation_fn(ctrl):
-      return bspline2d(
-        self.points,
-        ctrl,
-        self.xknots,
-        self.yknots,
-        self.spline_deg
-      )
-    return deformation_fn
-  
-  def get_line_deformation_fn(self):
-    ''' Get a function that produces deformations along a certain side of the cell.
+    def num_quad_pts(self):
+        return self.points.shape[0]
 
-    The line depends on the orientation: 0 - left, 1 - top, 2 - right, 3 - bottom
-    '''
-    def line_deformation_fn(ctrl, orientation):
-      # Create a (# quad pts, 2) array
-      n_points = self.y_line_points.shape[0]
-      points = jax.lax.cond(
-        orientation == 0,
-        lambda _: np.stack([np.zeros(n_points), self.y_line_points], axis=-1),
-        lambda _: jax.lax.cond(
-          orientation == 1,
-          lambda _: np.stack([self.x_line_points, np.ones(n_points)], axis=-1),
-          lambda _: jax.lax.cond(
-            orientation == 2,
-            lambda _: np.stack([np.ones(n_points), self.y_line_points], axis=-1),
-            lambda _: np.stack([self.x_line_points, np.zeros(n_points)], axis=-1),
-            operand=None,
-          ),
-          operand=None,
-        ),
-        operand=None,
-      )
+    def get_deformation_fn(self):
+        ''' Get a function that produces deformations
 
-      return bspline2d(
-        points,
-        ctrl,
-        self.xknots,
-        self.yknots,
-        self.spline_deg
-      )
+        Takes in control points and returns a deformation for each quad point.
 
-    return line_deformation_fn
+        This is assumed to be in cm.
+        '''
+        def deformation_fn(ctrl):
+            return bspline2d(
+                self.points,
+                ctrl,
+                self.xknots,
+                self.yknots,
+                self.spline_deg
+            )
+        return deformation_fn
 
-  def get_jacobian_u_fn(self):
-    ''' Take control points, return 2x2 Jacobians wrt quad points. '''
-    def jacobian_u_fn(ctrl):
-      return bspline2d_derivs(
-        self.points,
-        ctrl,
-        self.xknots,
-        self.yknots,
-        self.spline_deg
-      )
-    return jacobian_u_fn
-  
+    def get_line_deformation_fn(self):
+        ''' Get a function that produces deformations along a certain side of the cell.
 
-  def get_line_derivs_u_fn(self):
-    ''' Take control points, return 2x1 Jacobians wrt boundary quad points. '''
-    def jacobian_u_fn(ctrl, orientation):
-      points = jax.lax.cond(
-        np.logical_or(orientation == 0, orientation == 2),
-        lambda _: self.y_line_points,
-        lambda _: self.x_line_points,
-        operand=None,
-      )
+        The line depends on the orientation: 0 - left, 1 - top, 2 - right, 3 - bottom
+        '''
+        def line_deformation_fn(ctrl, orientation):
+            # Create a (# quad pts, 2) array
+            n_points = self.y_line_points.shape[0]
+            points = jax.lax.cond(
+                orientation == 0,
+                lambda _: np.stack(
+                    [np.zeros(n_points), self.y_line_points], axis=-1),
+                lambda _: jax.lax.cond(
+                    orientation == 1,
+                    lambda _: np.stack(
+                        [self.x_line_points, np.ones(n_points)], axis=-1),
+                    lambda _: jax.lax.cond(
+                        orientation == 2,
+                        lambda _: np.stack(
+                            [np.ones(n_points), self.y_line_points], axis=-1),
+                        lambda _: np.stack(
+                            [self.x_line_points, np.zeros(n_points)], axis=-1),
+                        operand=None,
+                    ),
+                    operand=None,
+                ),
+                operand=None,
+            )
 
-      knots = jax.lax.cond(
-        np.logical_or(orientation == 0, orientation == 2),
-        lambda _: self.yknots,
-        lambda _: self.xknots,
-        operand=None,
-      )
+            return bspline2d(
+                points,
+                ctrl,
+                self.xknots,
+                self.yknots,
+                self.spline_deg
+            )
 
-      sel_ctrl = jax.lax.cond(
-        orientation == 0,
-        lambda _: ctrl[0, :],
-        lambda _: jax.lax.cond(
-          orientation == 1,
-          lambda _: ctrl[:, -1],
-          lambda _: jax.lax.cond(
-            orientation == 2,
-            lambda _: ctrl[-1, :],
-            lambda _: ctrl[:, 0],
-            operand=None,
-          ),
-          operand=None,
-        ),
-        operand=None,
-      )
+        return line_deformation_fn
 
-      return bspline1d_derivs_hand(
-        points,
-        sel_ctrl,
-        knots,
-        self.spline_deg,
-      )
+    def get_jacobian_u_fn(self):
+        ''' Take control points, return 2x2 Jacobians wrt quad points. '''
+        def jacobian_u_fn(ctrl):
+            return bspline2d_derivs(
+                self.points,
+                ctrl,
+                self.xknots,
+                self.yknots,
+                self.spline_deg
+            )
+        return jacobian_u_fn
 
-    return jacobian_u_fn
+    def get_line_derivs_u_fn(self):
+        ''' Take control points, return 2x1 Jacobians wrt boundary quad points. '''
+        def jacobian_u_fn(ctrl, orientation):
+            points = jax.lax.cond(
+                np.logical_or(orientation == 0, orientation == 2),
+                lambda _: self.y_line_points,
+                lambda _: self.x_line_points,
+                operand=None,
+            )
 
-  def get_jacobian_ctrl_fn(self):
-    ''' Take control points, return Jacobian wrt control points. '''
-    def jacobian_ctrl_fn(ctrl):
-      return bspline2d_derivs_ctrl(
-        self.points,
-        ctrl,
-        self.xknots,
-        self.yknots,
-        self.spline_deg,
-      )
-    return jacobian_ctrl_fn
+            knots = jax.lax.cond(
+                np.logical_or(orientation == 0, orientation == 2),
+                lambda _: self.yknots,
+                lambda _: self.xknots,
+                operand=None,
+            )
 
-  def get_cached_deformation_fn(self):
-    ''' Get a function that produces deformations
+            sel_ctrl = jax.lax.cond(
+                orientation == 0,
+                lambda _: ctrl[0, :],
+                lambda _: jax.lax.cond(
+                    orientation == 1,
+                    lambda _: ctrl[:, -1],
+                    lambda _: jax.lax.cond(
+                        orientation == 2,
+                        lambda _: ctrl[-1, :],
+                        lambda _: ctrl[:, 0],
+                        operand=None,
+                    ),
+                    operand=None,
+                ),
+                operand=None,
+            )
 
-    Takes in control points and returns a deformation for each quad point.
+            return bspline1d_derivs_hand(
+                points,
+                sel_ctrl,
+                knots,
+                self.spline_deg,
+            )
 
-    This is assumed to be in cm.
+        return jacobian_u_fn
 
-    NOTE: At least for statics, caching is done magically by XLA compilation.
-    '''
-    basis_xy = bspline2d_basis(self.points, self.xknots,
-                               self.yknots, self.spline_deg)
+    def get_jacobian_ctrl_fn(self):
+        ''' Take control points, return Jacobian wrt control points. '''
+        def jacobian_ctrl_fn(ctrl):
+            return bspline2d_derivs_ctrl(
+                self.points,
+                ctrl,
+                self.xknots,
+                self.yknots,
+                self.spline_deg,
+            )
+        return jacobian_ctrl_fn
 
-    def deformation_fn(ctrl):
-      return np.tensordot(basis_xy, ctrl, ((1,2), (0,1)))
-    return deformation_fn
+    def get_energy_fn(self):
+        ''' Get the energy density function associated with the material model.
 
-  def get_cached_jacobian_u_fn(self):
-    ''' Take control points, return 2x2 Jacobians wrt quad points.
-    
-    NOTE: At least for statics, caching is done magically by XLA compilation.
-    '''
-    basis_derivs = bspline2d_basis_derivs(self.points, self.xknots,
-                                          self.yknots, self.spline_deg)
+        The various material properties are in GPa, and Pa = N/m^3 so GPa is
+        billons of Newtons per cubic meter = GN/m^3.  To get a sense of how this
+        varies, it is roughly quadratic in the log of the scale of deformation
+        gradient.
+        '''
+        return self.material.get_energy_fn()
 
-    def jacobian_u_fn(ctrl):
-      return np.swapaxes(
-        np.tensordot(
-          basis_derivs,
-          ctrl,
-          ((1,2), (0,1)),
-        ),
-        1, 2, # exchange the last two axes
-      )
-    return jacobian_u_fn
+    def get_quad_fn(self):
+        def quad_fn(ordinates):
 
-  def get_cached_jacobian_ctrl_fn(self):
-    ''' Take control points, return Jacobian wrt control points.
-    
-    NOTE: At least for statics, caching is done magically by XLA compilation.
-    '''
-    basis = bspline2d_basis(
-      self.points, self.xknots, self.yknots, self.spline_deg)[:,np.newaxis,:,:,np.newaxis]
-    zeros = np.zeros_like(basis)
-    precomputed = np.concatenate([np.concatenate([basis, zeros], axis=1),
-                                  np.concatenate([zeros, basis], axis=1)],
-                                  axis=4)
+            # Need to get into kind of a fancy shape to both broadcast correctly
+            # and to be able to sum in two stages with quadrature weights.
+            ords = np.reshape(ordinates,
+                              (*self.span_volumes.shape, -1, *ordinates.shape[1:]))
 
-    def jacobian_ctrl_fn(ctrl):
-      return precomputed
-    return jacobian_ctrl_fn
+            # The transpose makes it possible to sum over additional dimensions.
+            return np.sum(np.sum(self.weights.T * ords.T, axis=-3)
+                          * self.span_volumes.T, axis=(-1, -2)).T
 
-  def get_energy_fn(self):
-    ''' Get the energy density function associated with the material model.
+        return quad_fn
 
-    The various material properties are in GPa, and Pa = N/m^3 so GPa is
-    billons of Newtons per cubic meter = GN/m^3.  To get a sense of how this
-    varies, it is roughly quadratic in the log of the scale of deformation
-    gradient.
-    '''
-    return self.material.get_energy_fn()
+    def get_line_quad_fn(self):
+        def line_quad_fn(ordinates, orientation):
+            widths = jax.lax.cond(
+                np.logical_or(orientation == 0, orientation == 2),
+                lambda _: self.ywidths,
+                lambda _: self.xwidths,
+                operand=None,
+            )
+            ords = np.reshape(
+                ordinates, (*widths.shape, -1, *ordinates.shape[1:]))
 
-  def get_quad_fn(self):
-    def quad_fn(ordinates):
+            return np.sum(np.sum(self.line_weights.T * ords.T, axis=-2) * widths, axis=-1).T
 
-      # Need to get into kind of a fancy shape to both broadcast correctly
-      # and to be able to sum in two stages with quadrature weights.
-      ords = np.reshape(ordinates,
-                        (*self.span_volumes.shape, -1, *ordinates.shape[1:]))
+        return line_quad_fn
 
-      # The transpose makes it possible to sum over additional dimensions.
-      return np.sum(np.sum(self.weights.T * ords.T, axis=-3) \
-                    * self.span_volumes.T, axis=(-1,-2)).T
-
-    return quad_fn
-  
-  def get_line_quad_fn(self):
-    def line_quad_fn(ordinates, orientation):
-      widths = jax.lax.cond(
-        np.logical_or(orientation == 0, orientation == 2),
-        lambda _: self.ywidths,
-        lambda _: self.xwidths,
-        operand=None,
-      )
-      ords = np.reshape(ordinates, (*widths.shape, -1, *ordinates.shape[1:]))
-
-      return np.sum(np.sum(self.line_weights.T * ords.T, axis=-2) * widths, axis=-1).T
-
-    return line_quad_fn
-
-  def get_ctrl_shape(self):
-    return self.num_xctrl, self.num_yctrl, 2
-
-  def has_label(self, label):
-    ''' Predicate for verifying that one of the control points has a label.
-
-    Parameters:
-    -----------
-     - label: A string representing the label.
-
-    Returns:
-    --------
-     True if one of the labels matches the string, otherwise False.
-    '''
-    return onp.any(self.labels == label)
-
-  def label2idx(self, label):
-    ''' Identify the control point associated with the label, throwing an error
-        if the label is not present.
-
-    Params:
-    -------
-     - label: A string representing the label.
-
-    Returns:
-    --------
-     An index tuple indicating which control point has the label.
-
-    Raises:
-    -------
-     Throws a LabelError exception if the label is not present or more than one
-     of the labels is present.
-    '''
-    rows, cols = onp.nonzero(self.labels == label)
-    if rows.shape[0] > 1 or cols.shape[0] > 1:
-      raise LabelError('More than one control point has label %s.' % (label))
-    elif rows.shape[0] == 0 or cols.shape[0] == 0:
-      raise LabelError('No control points have label %s.' % (label))
-    return rows[0], cols[0]
-
-  def get_labels(self):
-    ''' Get all the labels at once, along with their indices.
-
-    Returns:
-    --------
-     A list of (label, indices) tuples. Could be length zero.
-    '''
-    indices = onp.nonzero(self.labels != '')
-    labels  = self.labels[indices]
-    return list(zip(labels, onp.column_stack(indices)))
-
-  def get_fixed(self):
-    ''' Get all fixed control points. '''
-    return self.fixed
+    def get_ctrl_shape(self):
+        return self.num_xctrl, self.num_yctrl, 2

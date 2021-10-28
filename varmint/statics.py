@@ -1,7 +1,7 @@
 import jax
-import jax.numpy        as np
+import jax.numpy as np
 import jax.numpy.linalg as npla
-import numpy            as onp
+import numpy as onp
 
 from varmint.optimizers import get_statics_optfun
 
@@ -9,132 +9,135 @@ import time
 
 
 def generate_patch_free_energy(patch):
-  """Generates a function that computes the free energy for a single patch.
+    """Generates a function that computes the free energy for a single patch.
 
-  Assumes homogeneous patches.
-  """
+    Assumes homogeneous patches.
+    """
 
-  jacobian_u_fn  = patch.get_cached_jacobian_u_fn()
-  energy_fn      = patch.get_energy_fn()
-  quad_fn        = patch.get_quad_fn()
-  deformation_fn = patch.get_cached_deformation_fn()
-  vmap_energy_fn = jax.vmap(energy_fn, in_axes=(0,))
-  jac_dets_fn    = jax.vmap(npla.det, in_axes=(0,))
+    jacobian_u_fn = patch.get_cached_jacobian_u_fn()
+    energy_fn = patch.get_energy_fn()
+    quad_fn = patch.get_quad_fn()
+    deformation_fn = patch.get_cached_deformation_fn()
+    vmap_energy_fn = jax.vmap(energy_fn, in_axes=(0,))
+    jac_dets_fn = jax.vmap(npla.det, in_axes=(0,))
 
-  defgrads_fn = jax.vmap(
-    lambda A, B: npla.solve(B.T, A.T).T,
-    in_axes=(0,0),
-  )
+    defgrads_fn = jax.vmap(
+        lambda A, B: npla.solve(B.T, A.T).T,
+        in_axes=(0, 0),
+    )
 
-  mat_density = patch.material.density
-  gravity = 981.0 # cm/s^2
+    mat_density = patch.material.density
+    gravity = 981.0  # cm/s^2
 
-  def free_energy(def_ctrl, ref_ctrl):
-    # Jacobian of reference config wrt parent config.
-    def_jacs = jacobian_u_fn(def_ctrl)
-    ref_jacs = jacobian_u_fn(ref_ctrl)
+    def free_energy(def_ctrl, ref_ctrl):
+        # Jacobian of reference config wrt parent config.
+        def_jacs = jacobian_u_fn(def_ctrl)
+        ref_jacs = jacobian_u_fn(ref_ctrl)
 
-    # Deformation gradients. def_jacs @ ref_jacs_inv computed via a linear solve.
-    defgrads = defgrads_fn(def_jacs, ref_jacs)
+        # Deformation gradients. def_jacs @ ref_jacs_inv computed via a linear solve.
+        defgrads = defgrads_fn(def_jacs, ref_jacs)
 
-    # Jacobian determinants of reference config wrt parent.
-    ref_jac_dets = jac_dets_fn(ref_jacs)
+        # Jacobian determinants of reference config wrt parent.
+        ref_jac_dets = jac_dets_fn(ref_jacs)
 
-    # Strain energy density wrt to parent config.
-    strain_energy_density = vmap_energy_fn(defgrads) * np.abs(ref_jac_dets)
+        # Strain energy density wrt to parent config.
+        strain_energy_density = vmap_energy_fn(defgrads) * np.abs(ref_jac_dets)
 
-    # Total potential energy via integrating over parent config.
-    strain_potential = 1e3 * np.sum(quad_fn(strain_energy_density))
+        # Total potential energy via integrating over parent config.
+        strain_potential = 1e3 * np.sum(quad_fn(strain_energy_density))
 
-    # Mass density in parent config.
-    mass_density = mat_density * np.abs(ref_jac_dets)
+        # Mass density in parent config.
+        mass_density = mat_density * np.abs(ref_jac_dets)
 
-    # Positions in deformed config.
-    positions = deformation_fn(def_ctrl)
+        # Positions in deformed config.
+        positions = deformation_fn(def_ctrl)
 
-    # Work density done by gravity.
-    grav_energy_density = positions[:,1] * gravity * mass_density
+        # Work density done by gravity.
+        grav_energy_density = positions[:, 1] * gravity * mass_density
 
-    # Total work done by gravity integrated over parent config.
-    gravity_potential = 1e-7 * np.sum(quad_fn(grav_energy_density))
+        # Total work done by gravity integrated over parent config.
+        gravity_potential = 1e-7 * np.sum(quad_fn(grav_energy_density))
 
-    # Returning total energy here.
-    return strain_potential + gravity_potential
+        # Returning total energy here.
+        return strain_potential + gravity_potential
 
-  return free_energy
+    return free_energy
 
 
 class DenseStaticsSolver:
-  def __init__(self, cell):
-    self.cell = cell
+    def __init__(self, cell):
+        self.cell = cell
 
-  def get_loss_fun(self):
-    return self.cell.get_free_energy_fun(patchwise=False)
+    def get_loss_fun(self):
+        return self.cell.get_free_energy_fun(patchwise=False)
 
-  def get_solver_fun(self, optimkind='newton', opt_params={}):
-    loss_fun = jax.jit(self.get_loss_fun())
-    grad_fun = jax.jit(jax.grad(self.get_loss_fun()))
-    hess_fun = jax.jit(jax.hessian(self.get_loss_fun()))
+    def get_solver_fun(self, optimkind='newton', opt_params={}):
+        loss_fun = jax.jit(self.get_loss_fun())
+        grad_fun = jax.jit(jax.grad(self.get_loss_fun()))
+        hess_fun = jax.jit(jax.hessian(self.get_loss_fun()))
 
-    def hessp_gen_fun(q, ref_ctrl):
-      hess = hess_fun(q, ref_ctrl)
-      def hessp(_q, p, _ref_ctrl):
-        return hess @ p
-      return hessp
+        def hessp_gen_fun(q, ref_ctrl):
+            hess = hess_fun(q, ref_ctrl)
 
-    solve = get_statics_optfun(loss_fun, grad_fun, hessp_gen_fun=hessp_gen_fun, kind=optimkind)
-    return solve
+            def hessp(_q, p, _ref_ctrl):
+                return hess @ p
+            return hessp
+
+        solve = get_statics_optfun(
+            loss_fun, grad_fun, hessp_gen_fun=hessp_gen_fun, kind=optimkind)
+        return solve
 
 
 class SparseStaticsSolver:
-  def __init__(self, cell):
-    self.cell = cell
+    def __init__(self, cell):
+        self.cell = cell
 
-  def get_loss_fun(self):
-    p_free_energy = self.cell.get_free_energy_fun(patchwise=True)
-    _, unflatten = self.cell.get_statics_flatten_unflatten()
+    def get_loss_fun(self):
+        p_free_energy = self.cell.get_free_energy_fun(patchwise=True)
+        _, unflatten = self.cell.get_statics_flatten_unflatten()
 
-    def loss(q, ref_ctrl):
-      def_ctrl = unflatten(q, ref_ctrl)
-      all_args = np.stack([def_ctrl, ref_ctrl], axis=-1)
-      return np.sum(jax.vmap(lambda x: p_free_energy(x[..., 0], x[..., 1]))(all_args))
+        def loss(q, ref_ctrl):
+            def_ctrl = unflatten(q, ref_ctrl)
+            all_args = np.stack([def_ctrl, ref_ctrl], axis=-1)
+            return np.sum(jax.vmap(lambda x: p_free_energy(x[..., 0], x[..., 1]))(all_args))
 
-    return loss
+        return loss
 
-  def get_solver_fun(self, optimkind='newton', opt_params={}):
-    niters = opt_params.get('niters', 10)
+    def get_solver_fun(self, optimkind='newton', opt_params={}):
+        niters = opt_params.get('niters', 10)
 
-    p_free_energy = self.cell.get_free_energy_fun(patchwise=True)
-    flatten, unflatten = self.cell.get_statics_flatten_unflatten()
-    flatten_add = self.cell.get_statics_flatten_add()
+        p_free_energy = self.cell.get_free_energy_fun(patchwise=True)
+        flatten, unflatten = self.cell.get_statics_flatten_unflatten()
+        flatten_add = self.cell.get_statics_flatten_add()
 
-    loss_fun = jax.jit(self.get_loss_fun())
-    grad_fun = jax.jit(jax.grad(self.get_loss_fun()))
+        loss_fun = jax.jit(self.get_loss_fun())
+        grad_fun = jax.jit(jax.grad(self.get_loss_fun()))
 
-    @jax.jit
-    def block_hess_fn(q, ref_ctrl):
-      def_ctrl = unflatten(q, ref_ctrl)
-      all_args = np.stack([def_ctrl, ref_ctrl], axis=-1)
-      return jax.vmap(lambda x: jax.hessian(p_free_energy)(x[..., 0], x[..., 1]))(all_args)
+        @jax.jit
+        def block_hess_fn(q, ref_ctrl):
+            def_ctrl = unflatten(q, ref_ctrl)
+            all_args = np.stack([def_ctrl, ref_ctrl], axis=-1)
+            return jax.vmap(lambda x: jax.hessian(p_free_energy)(x[..., 0], x[..., 1]))(all_args)
 
-    def single_patch_hvp(patch_hess, patch_ctrl):
-      flat_ctrl = patch_ctrl.ravel()
-      ravel_len = flat_ctrl.shape[0]
+        def single_patch_hvp(patch_hess, patch_ctrl):
+            flat_ctrl = patch_ctrl.ravel()
+            ravel_len = flat_ctrl.shape[0]
 
-      patch_hess = patch_hess.reshape((ravel_len, ravel_len))
-      return (patch_hess @ flat_ctrl).reshape(patch_ctrl.shape)
-    multi_patch_hvp = jax.vmap(single_patch_hvp, in_axes=(0, 0))
+            patch_hess = patch_hess.reshape((ravel_len, ravel_len))
+            return (patch_hess @ flat_ctrl).reshape(patch_ctrl.shape)
+        multi_patch_hvp = jax.vmap(single_patch_hvp, in_axes=(0, 0))
 
-    def generate_hessp(q, ref_ctrl):
-      block_hess = block_hess_fn(q, ref_ctrl)
+        def generate_hessp(q, ref_ctrl):
+            block_hess = block_hess_fn(q, ref_ctrl)
 
-      @jax.jit
-      def hessp(_q, p, _ref_ctrl):
-        unflat = unflatten(p, np.zeros_like(ref_ctrl))
-        hvp_unflat = multi_patch_hvp(block_hess, unflat)
-        return flatten_add(hvp_unflat)
+            @jax.jit
+            def hessp(_q, p, _ref_ctrl):
+                unflat = unflatten(p, np.zeros_like(ref_ctrl))
+                hvp_unflat = multi_patch_hvp(block_hess, unflat)
+                return flatten_add(hvp_unflat)
 
-      return hessp
+            return hessp
 
-    solve = get_statics_optfun(loss_fun, grad_fun, hessp_gen_fun=generate_hessp, kind=optimkind)
-    return solve
+        solve = get_statics_optfun(
+            loss_fun, grad_fun, hessp_gen_fun=generate_hessp, kind=optimkind)
+        return solve

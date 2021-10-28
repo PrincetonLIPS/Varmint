@@ -10,9 +10,11 @@ def row_inds(spm, i):
     # i is the column index
     return spm.indices[spm.indptr[i]:spm.indptr[i+1]]
 
+
 def row_inds_exclude(spm, i, exc_set):
     indices = set(row_inds(spm, i))
     return indices - exc_set
+
 
 class IndexCacher:
     def __init__(self, spm):
@@ -24,8 +26,9 @@ class IndexCacher:
 
         # Store a iteration number k along with the included index pattern.
         for i in self.inc_list:
-            self.indices[i] = (row_inds_exclude(self.spm, i, self.exc_list), self.k)
-    
+            self.indices[i] = (row_inds_exclude(
+                self.spm, i, self.exc_list), self.k)
+
     def row_inds(self, i, k):
         # Get the indices of column i at iteration k.
         # If the indices have not been updated, update them.
@@ -34,10 +37,12 @@ class IndexCacher:
             self.indices[i] = (row_inds_exclude(self.spm, i, self.exc_list), k)
         elif cur_k > k:
             print('inconsistency!! something is wrong.')
-        
+
         return self.indices[i][0]  # returns a python set
 
 # NOTE: Must be a csc_matrix
+
+
 def jvp_groups(sparsemat_csc):
     ic = IndexCacher(sparsemat_csc)
     ncols = sparsemat_csc.shape[0]
@@ -50,7 +55,8 @@ def jvp_groups(sparsemat_csc):
 
         # Find the columns that cover the maximum number of
         # row indices that are not accounted for by symmetry.
-        sorted_indices = sorted(ic.inc_list, key=lambda x: len(ic.row_inds(x, k)), reverse=True)
+        sorted_indices = sorted(ic.inc_list, key=lambda x: len(
+            ic.row_inds(x, k)), reverse=True)
 
         # A list of column indices belonging to this group
         kth_group = []
@@ -68,7 +74,7 @@ def jvp_groups(sparsemat_csc):
                 kth_group.append(i)
                 rows[i] = inds  # This column will provide these row indices
                 kth_rows = kth_rows.union(inds)  # Update row indices
-        
+
         # Keep track of all groups
         groups.append(kth_group)
 
@@ -81,6 +87,7 @@ def jvp_groups(sparsemat_csc):
 
     return groups, rows
 
+
 def construct_jvp_mat(sparsemat_csc, groups, rows):
     jvps_mat = np.zeros((len(groups), sparsemat_csc.shape[0]))
 
@@ -88,6 +95,7 @@ def construct_jvp_mat(sparsemat_csc, groups, rows):
         jvps_mat[i][group] = 1
 
     return jvps_mat
+
 
 def jvps_to_spmat(sparsemat_csc, groups, rows):
     all_rows = []
@@ -106,17 +114,19 @@ def jvps_to_spmat(sparsemat_csc, groups, rows):
         for inds in indices:
             all_rows.append(inds[0])
             all_cols.append(inds[1])
-        
+
         jvp_indexer[all_group_rows] = True
-    
+
     # row indices, col indices, and binary index array to get data for sparse matrix... (probably)
     return all_rows + all_cols, all_cols + all_rows, jvp_indexer
+
 
 def pattern_to_reconstruction(sparsemat_csc):
     groups, rows = jvp_groups(sparsemat_csc)
 
     jvp_mat = jnp.array(construct_jvp_mat(sparsemat_csc, groups, rows))
-    all_rows, all_cols, jvp_indexer = jvps_to_spmat(sparsemat_csc, groups, rows)
+    all_rows, all_cols, jvp_indexer = jvps_to_spmat(
+        sparsemat_csc, groups, rows)
 
     def reconstruct(jvp_result):
         """Takes as input (njvps, ndof) matrix."""
@@ -133,5 +143,5 @@ def pattern_to_reconstruction(sparsemat_csc):
         reconstructed = reconstructed - diags(reconstructed.diagonal()) / 2
 
         return reconstructed
-    
+
     return jvp_mat, reconstruct

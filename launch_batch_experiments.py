@@ -7,7 +7,7 @@ Example use:
 """
 
 import re
-import os 
+import os
 import stat
 import shutil
 import argparse
@@ -16,16 +16,16 @@ import itertools
 
 
 slurm_param_dict = {
-    'mem':'32G',
-    'time':'34:00:00',
-    'gres':'gpu:1',
-    'job_name':'untitled',
-    'output':'output.txt',
+    'mem': '32G',
+    'time': '34:00:00',
+    'gres': 'gpu:1',
+    'job_name': 'untitled',
+    'output': 'output.txt',
 }
 
 
 TEMPLATE = \
-'''#!/bin/sh
+    '''#!/bin/sh
 
 #SBATCH --job-name={job_name}
 #SBATCH --output={output}
@@ -37,6 +37,7 @@ TEMPLATE = \
 #
 
 '''
+
 
 def make_exec(filename):
     st = os.stat(filename)
@@ -52,12 +53,17 @@ def substitute_command_parameters(command, substitutions):
 def main():
     # Training settings
     parser = argparse.ArgumentParser(description='SLURM Parameter Sweeper')
-    parser.add_argument('filename', help='python file (relative or absolute) to run')
+    parser.add_argument(
+        'filename', help='python file (relative or absolute) to run')
     parser.add_argument('--experiment-name', help='experiment name')
-    parser.add_argument('--slurm-overrides', help='changes from slurm defaults')
-    parser.add_argument('--experiment-dir', default='/n/fs/mm-iga/Varmint/', help='experiment base directory')
-    parser.add_argument('--overwrite', action='store_true', help='Overwrite the existing experiment directory.')
-    parser.add_argument('-v', '--verbose', action='store_true', help='Show full command to run for each worker.')
+    parser.add_argument('--slurm-overrides',
+                        help='changes from slurm defaults')
+    parser.add_argument(
+        '--experiment-dir', default='/n/fs/mm-iga/Varmint/', help='experiment base directory')
+    parser.add_argument('--overwrite', action='store_true',
+                        help='Overwrite the existing experiment directory.')
+    parser.add_argument('-v', '--verbose', action='store_true',
+                        help='Show full command to run for each worker.')
     args = parser.parse_args()
     print("Using experiment file {}".format(args.filename))
 
@@ -70,7 +76,8 @@ def main():
 
     # Create experiment directory
     exp_dir = os.path.join(base_dir, '{}'.format(args.experiment_name))
-    slurm_output_dir = os.path.join(base_dir, '{}'.format(args.experiment_name), 'slurm_output')
+    slurm_output_dir = os.path.join(
+        base_dir, '{}'.format(args.experiment_name), 'slurm_output')
     print("Creating experiment {} in {}".format(args.experiment_name, exp_dir))
     if os.path.isdir(exp_dir) and args.overwrite:
         print("Overwriting existing directory.")
@@ -81,7 +88,8 @@ def main():
 
     os.mkdir(exp_dir)
     os.mkdir(slurm_output_dir)
-    shutil.copyfile(args.filename, os.path.join(exp_dir, 'experiment_commands.txt'))
+    shutil.copyfile(args.filename, os.path.join(
+        exp_dir, 'experiment_commands.txt'))
 
     # Parse slurm arguments
     if args.slurm_overrides:
@@ -102,14 +110,16 @@ def main():
     # TODO(doktay) Add more features.
     files_list = []
     i = 0
-    pattern = re.compile("( \-\-| \-)([a-zA-Z0-9\-\_]+)(=?[ ]*){P:([^\{]*):P\}")
+    pattern = re.compile(
+        "( \-\-| \-)([a-zA-Z0-9\-\_]+)(=?[ ]*){P:([^\{]*):P\}")
     for exp_pre in exps:
         # If we have parameters of the form {P:1,2,3:P} expand to three different experiments.
         iterators = {}
         match = pattern.findall(exp_pre)
         for prefix, param, space, values in match:
             print(space)
-            combinations = ['{}{}{}{}'.format(prefix, param, space, val) for val in values.split(',')]
+            combinations = ['{}{}{}{}'.format(
+                prefix, param, space, val) for val in values.split(',')]
             iterators[param] = combinations
 
         if len(iterators) > 0:
@@ -122,14 +132,18 @@ def main():
 
                 slurm_dict_copy = slurm_param_dict.copy()
                 slurm_dict_copy['output'] = \
-                        os.path.join(slurm_output_dir, 'wid{0:04}output.txt'.format(i))
-                slurm_dict_copy['job_name'] = str(args.experiment_name) + 'wid{0:04}'.format(i)
+                    os.path.join(slurm_output_dir,
+                                 'wid{0:04}output.txt'.format(i))
+                slurm_dict_copy['job_name'] = str(
+                    args.experiment_name) + 'wid{0:04}'.format(i)
                 slurm_out = TEMPLATE.format(**slurm_dict_copy)
                 command = 'srun ' + exp
-                command = substitute_command_parameters(command, {'wid': '{0:04}'.format(i), 'expdir': exp_dir})
+                command = substitute_command_parameters(
+                    command, {'wid': '{0:04}'.format(i), 'expdir': exp_dir})
 
                 slurm_out = slurm_out + command + '\n'
-                worker_filename = os.path.join(exp_dir, 'wid{0:04}exp.sh'.format(i))
+                worker_filename = os.path.join(
+                    exp_dir, 'wid{0:04}exp.sh'.format(i))
                 with open(worker_filename, 'w') as f:
                     f.write(slurm_out)
                 make_exec(worker_filename)
@@ -142,14 +156,17 @@ def main():
             exp = exp_pre
             slurm_dict_copy = slurm_param_dict.copy()
             slurm_dict_copy['output'] = \
-                    os.path.join(slurm_output_dir, 'wid{0:04}output.txt'.format(i))
-            slurm_dict_copy['job_name'] = str(args.experiment_name) + 'wid{0:04}'.format(i)
+                os.path.join(slurm_output_dir, 'wid{0:04}output.txt'.format(i))
+            slurm_dict_copy['job_name'] = str(
+                args.experiment_name) + 'wid{0:04}'.format(i)
             slurm_out = TEMPLATE.format(**slurm_dict_copy)
             command = 'srun ' + exp
-            command = substitute_command_parameters(command, {'wid': '{0:04}'.format(i), 'expdir': exp_dir})
+            command = substitute_command_parameters(
+                command, {'wid': '{0:04}'.format(i), 'expdir': exp_dir})
 
             slurm_out = slurm_out + command + '\n'
-            worker_filename = os.path.join(exp_dir, 'wid{0:04}exp.sh'.format(i))
+            worker_filename = os.path.join(
+                exp_dir, 'wid{0:04}exp.sh'.format(i))
             with open(worker_filename, 'w') as f:
                 f.write(slurm_out)
             make_exec(worker_filename)
@@ -158,7 +175,6 @@ def main():
             if args.verbose:
                 print('Will run the command: \n\t{}'.format(command))
             i += 1
-            
 
     print('Should I submit batch jobs? Y/N')
     while True:
@@ -174,6 +190,7 @@ def main():
             break
         else:
             print('Y or N')
+
 
 if __name__ == '__main__':
     main()
