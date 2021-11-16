@@ -9,3 +9,5 @@ Array2D = Union[jnp.ndarray, np.ndarray]
 Array3D = Union[jnp.ndarray, np.ndarray]
 Array4D = Union[jnp.ndarray, np.ndarray]
 ArrayND = Union[jnp.ndarray, np.ndarray]
+
+CtrlArray = Union[jnp.ndarray, np.ndarray]

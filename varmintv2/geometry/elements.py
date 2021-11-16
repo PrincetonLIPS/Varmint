@@ -1,12 +1,12 @@
 from abc import ABC, abstractmethod
 from typing import Callable, Iterable, Tuple
 import jax
-from jax._src.numpy.vectorize import NDArray
 import jax.numpy as jnp
 import numpy as onp
 import matplotlib.pyplot as plt
 import quadpy
 
+from varmintv2.utils.typing import CtrlArray, ArrayND, Array2D, Array3D
 from varmintv2.geometry.bsplines import (
     bspline1d_derivs,
     mesh,
@@ -41,7 +41,7 @@ class Element(ABC):
     """
 
     @abstractmethod
-    def get_map_fn(self) -> Callable[[NDArray], NDArray]:
+    def get_map_fn(self) -> Callable[[CtrlArray], Array2D]:
         """Get function to compute the parent -> physical map at
         each interior quad point, given control points.
 
@@ -55,7 +55,7 @@ class Element(ABC):
         pass
 
     @abstractmethod
-    def get_map_boundary_fn(self, index: int) -> Callable[[NDArray], NDArray]:
+    def get_map_boundary_fn(self, index: int) -> Callable[[CtrlArray], Array2D]:
         """Get function to compute the parent -> physical map at
         each boundary quad point, given control points.
 
@@ -69,7 +69,7 @@ class Element(ABC):
         pass
 
     @abstractmethod
-    def get_map_jac_fn(self) -> Callable[[NDArray], NDArray]:
+    def get_map_jac_fn(self) -> Callable[[CtrlArray], Array3D]:
         """Get function to compute Jacobian of the parent -> physical map
         at all quad points at the interior of the element, given control points.
         
@@ -85,7 +85,7 @@ class Element(ABC):
         pass
 
     @abstractmethod
-    def get_map_boundary_jac_fn(self, index: int) -> Callable[[NDArray], NDArray]:
+    def get_map_boundary_jac_fn(self, index: int) -> Callable[[CtrlArray], Array2D]:
         """Get function to compute Jacobian of the parent -> physical map
         at all quad points at the boundary of the element, given control points.
         As the boundary is parameterized by a scalar, the Jacobian will be
@@ -102,7 +102,7 @@ class Element(ABC):
         pass
 
     @abstractmethod
-    def get_ctrl_jacobian_fn(self) -> Callable[[NDArray], NDArray]:
+    def get_ctrl_jacobian_fn(self) -> Callable[[CtrlArray], ArrayND]:
         """Get function that computes the Jacobian with respect to the control
         points at each interior quad point, given control points.
 
@@ -141,7 +141,7 @@ class Element(ABC):
         pass
 
     @abstractmethod
-    def get_quad_fn(self) -> Callable[[NDArray], float]:
+    def get_quad_fn(self) -> Callable[[ArrayND], float]:
         """Compute interior integration by quadrature.
         
         Returns a function that given a quantity computed at all quad points,
@@ -156,7 +156,7 @@ class Element(ABC):
         pass
 
     @abstractmethod
-    def get_boundary_quad_fn(self, index: int) -> Callable[[NDArray], float]:
+    def get_boundary_quad_fn(self, index: int) -> Callable[[ArrayND], float]:
         """Compute boundary integration by quadrature.
         
         Returns a function that given a quantity computed at all quad points,
@@ -168,6 +168,12 @@ class Element(ABC):
         e.g. Patch2D it will always be $[0, 1]$.
 
         """
+        pass
+    
+    @property
+    @abstractmethod
+    def n_d(self):
+        """Embedding dimension."""
         pass
 
 
@@ -479,3 +485,7 @@ class Patch2D(Element):
             return self.x_line_points.shape[0]
         else:
             raise ValueError(f"Invalid boundary index {index} for Patch2D.")
+
+    @property
+    def n_d(self):
+        return 2
