@@ -141,10 +141,9 @@ class SEBoundaryConditions:
     @property
     def active_traction_boundaries(self):
         """Helper function to aggregate all active traction boundaries."""
-        return np.zeros((self.n_elements, self.element.num_boundaries)) + \
+        return onp.zeros((self.n_elements, self.element.num_boundaries)) + \
                     sum(self.traction_labels[g]
                         for g in self.traction_labels)
-
 
     def register_dirichlet_bc(self, group):
         """Decorator function to declare a Dirichlet condition."""

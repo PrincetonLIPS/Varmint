@@ -69,3 +69,4 @@ class Test_SEGeometry(ut.TestCase):
         nptest.assert_array_equal(l_vel, ctrl_vel)
 
     def test_boundary_conditions(self):
+        pass

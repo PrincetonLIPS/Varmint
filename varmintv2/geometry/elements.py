@@ -38,6 +38,10 @@ class Element(ABC):
     The interiors and boundaries are handled separately. There are separate
     quadrature points for each. Boundaries are indexed by an integer,
     with a maximum specified by Element.num_boundaries().
+
+    TODO(doktay): Elements should have an internal sparsity pattern specified.
+    This will be used by Geometry to construct the sparsity pattern of
+    the Jacobian.
     """
 
     @abstractmethod
