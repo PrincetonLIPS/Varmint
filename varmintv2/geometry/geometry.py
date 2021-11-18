@@ -8,6 +8,7 @@ import jax.numpy as jnp
 import numpy as onp
 from scipy.sparse.csr import csr_matrix
 from scipy.sparse.csgraph import connected_components, dijkstra
+from varmintv2.geometry import geometry_utils
 
 from varmintv2.utils.typing import Array1D, ArrayND
 from varmintv2.geometry.elements import Element
@@ -331,6 +332,8 @@ class SingleElementGeometry(Geometry):
                            item is of size (n_elements, element.num_boundaries).
 
         """
+        if not geometry_utils.verify_constraints(init_ctrl, constraints):
+            print('WARNING: Constraints are not satisfied by init_ctrl.')
         
         self.element = element
         # TODO(doktay): Construct element_lagrangian.
