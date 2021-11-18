@@ -10,8 +10,8 @@ import unittest as ut
 
 from varmintv2.geometry.geometry import SingleElementGeometry
 from varmintv2.geometry import elements
-from varmintv2.geometry import geometry_utils
 from varmintv2.geometry import bsplines
+from varmintv2.utils import geometry_utils
 
 
 class Test_SEGeometry(ut.TestCase):

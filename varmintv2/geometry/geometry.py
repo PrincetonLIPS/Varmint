@@ -8,7 +8,7 @@ import jax.numpy as jnp
 import numpy as onp
 from scipy.sparse.csr import csr_matrix
 from scipy.sparse.csgraph import connected_components, dijkstra
-from varmintv2.geometry import geometry_utils
+from varmintv2.utils import geometry_utils
 
 from varmintv2.utils.typing import Array1D, ArrayND
 from varmintv2.geometry.elements import Element
