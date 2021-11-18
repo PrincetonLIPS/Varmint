@@ -6,7 +6,8 @@ from typing import Callable, Dict, List, Tuple
 import jax
 import jax.numpy as jnp
 import numpy as onp
-from sympy.core.symbol import Str
+from scipy.sparse.csr import csr_matrix
+from scipy.sparse.csgraph import connected_components, dijkstra
 
 from varmintv2.utils.typing import Array1D, ArrayND
 from varmintv2.geometry.elements import Element
@@ -112,31 +113,35 @@ class Geometry(ABC):
         pass
 
 
-@dataclass
-class SEBoundaryConditions:
-    """Contains prerequisites to construct boundary conditions in a SingleElementGeometry."""
+class SingleElementGeometry(Geometry):
+    """Geometry composed of a single type of Element."""
 
-    # Number of elements and element description.
-    n_elements: int
     element: Element
+    n_elements: int
+
+    element_lagrangian: Callable
+
+    ###########################################################
+    ##### Utilities to keep track of boundary conditions. #####
+    ###########################################################
 
     # Maps a Dirichlet boundary condition label to a boolean array in local
     # coordinates that selects out control points in the group. Each item is
     # of size (n_elements, element.ctrl_shape[:-1]).
-    dirichlet_labels: Dict[Str, ArrayND]
+    dirichlet_labels: Dict[str, ArrayND]
 
     # Maps a traction boundary condition label to a boolean array 
     # that selects out boundaries in the group. Each item is
     # of size (n_elements, element.num_boundaries).
-    traction_labels: Dict[Str, ArrayND]
+    traction_labels: Dict[str, ArrayND]
 
     # Maps a Dirichlet boundary condition label to functions that map time to
     # the displacement and velocity of control points (given time) within the group.
-    dirichlet_fns: Dict[Str, Tuple[Callable, Callable]] = field(default_factory=dict)
+    dirichlet_fns: Dict[str, Tuple[Callable, Callable]] = field(default_factory=dict)
 
     # Maps a traction boundary condition label to a function that gives the
     # traction force on a control point (given time) within the group.
-    traction_fns: Dict[Str, Callable] = field(default_factory=dict)
+    traction_fns: Dict[str, Callable] = field(default_factory=dict)
 
     @property
     def active_traction_boundaries(self):
@@ -171,14 +176,41 @@ class SEBoundaryConditions:
             return decorated
         return inner
 
+    def get_fixed_locs_fn(self, ref_l_position):
+        pos_fns = []
+        vel_fns = []
 
-@dataclass
-class SEGlobalLocalMap:
-    """Contains prerequisites to construct global <-> local maps in a SingleElementGeometry."""
+        for group in self.dirichlet_labels:
+            pos, vel = self.dirichlet_fns.get(group, (None, None))
 
-    # Number of elements and element description.
-    n_elements: int
-    element: Element
+            if pos is not None:
+                pos_fns.append(pos)
+                vel_fns.append(vel)
+        
+        def fixed_locs_fn(t):
+            return ref_l_position + sum(fn(t) for fn in pos_fns)
+        
+        def fixed_vels_fn(t):
+            return jnp.zeros_like(ref_l_position) + sum(fn(t) for fn in vel_fns)
+        
+        return fixed_locs_fn, fixed_vels_fn
+    
+    def get_traction_fn(self):
+        fns = []
+        for group in self.traction_labels:
+            fns.append(self.traction_fns.get(group, lambda _: 0.0))
+
+        def traction_fn(t):
+            return jnp.zeros((self.index_array.shape[0], \
+                              self.element.num_boundaries, \
+                              self.element.n_d)) + \
+                sum(fn(t) for fn in fns)
+        
+        return traction_fn
+
+    ########################################################################
+    ##################### Global <-> Local conversion. #####################
+    ########################################################################
 
     # Gives the component of each control point in local coordinates. Control
     # points in the same component are considered the same. This has shape
@@ -240,59 +272,6 @@ class SEGlobalLocalMap:
 
         return local_to_global, global_to_local
 
-
-class SingleElementGeometry(Geometry):
-    """Geometry composed of a single type of Element."""
-
-    element: Element
-    element_lagrangian: Callable
-
-    boundary_conditions: SEBoundaryConditions
-    globallocal_params: SEGlobalLocalMap
-
-    ###########################################################
-    ##### Utilities to keep track of boundary conditions. #####
-    ###########################################################
-    
-    def get_fixed_locs_fn(self, ref_l_position):
-        pos_fns = []
-        vel_fns = []
-
-        for group in self.boundary_conditions.dirichlet_labels:
-            pos, vel = self.boundary_conditions.dirichlet_fns.get(group, (None, None))
-
-            if pos is not None:
-                pos_fns.append(pos)
-                vel_fns.append(vel)
-        
-        def fixed_locs_fn(t):
-            return ref_l_position + sum(fn(t) for fn in pos_fns)
-        
-        def fixed_vels_fn(t):
-            return jnp.zeros_like(ref_l_position) + sum(fn(t) for fn in vel_fns)
-        
-        return fixed_locs_fn, fixed_vels_fn
-    
-    def get_traction_fn(self):
-        fns = []
-        for group in self.boundary_conditions.traction_labels:
-            fns.append(self.boundary_conditions.traction_fns.get(group, lambda _: 0.0))
-
-        def traction_fn(t):
-            return jnp.zeros((self.global_local_map.index_array.shape[0], \
-                              self.element.num_boundaries, \
-                              self.element.n_d)) + \
-                sum(fn(t) for fn in fns)
-        
-        return traction_fn
-
-    ########################################################################
-    ##################### Global <-> Local conversion. #####################
-    ########################################################################
-
-    def get_global_local_maps(self) -> Tuple[Callable, Callable]:
-        return self.global_local_map.get_global_local_maps()
-
     ########################################################################
     ######################### Lagrangian function. #########################
     ########################################################################
@@ -307,17 +286,90 @@ class SingleElementGeometry(Geometry):
             
             return jnp.sum(jax.vmap(self.element_lagrangian))(
                 def_ctrl, def_vels, ref_l_position,
-                self.boundary_conditions.active_traction_boundaries, traction
+                self.active_traction_boundaries, traction
             )
 
         return lagrangian
 
     def __init__(self, element: Element, material,
-                 boundary_conditions: SEBoundaryConditions,
-                 global_local_map: SEGlobalLocalMap):
+                 init_ctrl: ArrayND, constraints: Tuple[Array1D, Array1D],
+                 dirichlet_labels: Dict[str, ArrayND],
+                 traction_labels: Dict[str, ArrayND]):
+        """Initialize a SingleElementGeometry.
+
+        The node numbers of the local coordinate system will be in flatten
+        order. As in,
+            local_indices = onp.arange(n_cp).reshape(init_ctrl.shape[:-1])
+        where n_cp = init_ctrl.size // init_ctrl.shape[-1]
+
+        Parameters:
+        ===========
+
+        - element: Instance of Element that defines local geometry. Contains
+                   methods for integration as well as intra-element sparsity.
+        
+        - material: TODO(doktay)
+
+        - init_ctrl: Control points in the reference configuration. Has shape
+                     (n_elements, element.ctrl_shape).
+
+        - constraints: Constraints between the nodes. Will be used to construct
+                       an adjacency matrix. Consists of two 1-D ndarrays of 
+                       the same size, (row, col) denoting a row.size constraints
+                       between index row[i] and col[i].
+
+        - dirichlet_labels: Maps a Dirichlet boundary condition label to a
+                            boolean array in local coordinates that selects
+                            out control points in the group. Each item is of
+                            size (n_elements, element.ctrl_shape[:-1]).
+                            Does not necessarily have to obey adjacency
+                            constraints. Will be modified to obey constraints
+                            during initialization.
+
+        - traction_labels: Maps a traction boundary condition label to a boolean
+                           array that selects out boundaries in the group. Each
+                           item is of size (n_elements, element.num_boundaries).
+
+        """
+        
         self.element = element
+        # TODO(doktay): Construct element_lagrangian.
 
-        #TODO(doktay): Construct element_lagrangian
+        # Construct adjacency matrix of the nodes.
+        n_cp = init_ctrl.size // init_ctrl.shape[-1]
+        local_indices = onp.arange(n_cp).reshape(init_ctrl.shape[:-1])
+        self.n_elements = init_ctrl.shape[0]
 
-        self.boundary_conditions = boundary_conditions
-        self.global_local_map = global_local_map
+        all_rows, all_cols = constraints
+        spmat = csr_matrix((onp.ones_like(all_rows), (all_rows, all_cols)),
+                           shape=(n_cp, n_cp), dtype=onp.int8)
+
+        # The connected components in the adjacency matrix will correspond
+        # to the clusters of control points that are incident.
+        n_components, labels = connected_components(
+            csgraph=spmat,
+            directed=False,
+            return_labels=True
+        )
+        self.n_components = n_components
+        self.index_array = onp.reshape(labels, init_ctrl.shape[:-1])
+
+        self.traction_labels = traction_labels
+
+        # Complete the dirichlet_labels according to the sparsity graph.
+        self.dirichlet_labels = {}
+        self.all_dirichlet_indices = onp.zeros(init_ctrl.shape[:-1])
+        for group in dirichlet_labels:
+            indices = local_indices[dirichlet_labels[group] > 0]
+            group_all_dists = dijkstra(spmat, directed=False, indices=indices,
+                                       unweighted=True, min_only=True)
+            group_all_dists = onp.reshape(group_all_dists, init_ctrl.shape[:-1])
+            self.dirichlet_labels[group] = group_all_dists < onp.inf
+            
+            # Aggregate all fixed indices to create fixed_labels needed for
+            # global <-> local conversion.
+            self.all_dirichlet_indices = \
+                self.all_dirichlet_indices + self.dirichlet_labels[group]
+        
+        self.fixed_labels = onp.unique(self.index_array[self.all_dirichlet_indices > 0])
+        self.nonfixed_labels = onp.unique(self.index_array[self.all_dirichlet_indices == 0])

@@ -8,8 +8,9 @@ import numpy.random as npr
 import numpy.testing as nptest
 import unittest as ut
 
-from varmintv2.geometry.geometry import SEGlobalLocalMap, SEBoundaryConditions, SingleElementGeometry
+from varmintv2.geometry.geometry import SingleElementGeometry
 from varmintv2.geometry import elements
+from varmintv2.geometry import geometry_utils
 from varmintv2.geometry import bsplines
 
 
@@ -23,50 +24,64 @@ class Test_SEGeometry(ut.TestCase):
         quad_deg = 10
 
         self.patch = elements.Patch2D(xknots, yknots, spline_deg, quad_deg)
-        self.ctrl = bsplines.mesh(np.arange(10), np.arange(10))
 
-    def test_global_local_map(self):
-        # Construct array with arbitrary shared indices.
-        index_array = np.arange(24)
-        index_array[20:24] = index_array[16:20]
-        index_array = index_array.reshape(4, 6)
-        n_components = 20
+    def test_two_patch_geometry(self):
+        m1 = bsplines.mesh(np.arange(10), np.arange(10))
+        m2 = bsplines.mesh(np.arange(10) + 9, np.arange(10))
+        m = np.stack((m1, m2), axis=0)
 
-        fixed_labels = np.array([0, 1, 2])
-        nonfixed_labels = np.arange(3, 20)
+        n_cp = m.size // m.shape[-1]
+        local_indices = np.arange(n_cp).reshape(m.shape[:-1])
 
-        glmap = SEGlobalLocalMap(n_elements=1,
-                                 element=self.patch,
-                                 index_array=index_array,
-                                 fixed_labels=fixed_labels,
-                                 nonfixed_labels=nonfixed_labels,
-                                 n_components=n_components)
+        constraints = geometry_utils.generate_constraints(m)
+        dirichlet_labels = {}
+        dirichlet_labels['1'] = \
+            geometry_utils.get_patch_side_index_array(m, 0, 'left')
+        traction_labels = {}
 
-        l2g, g2l = glmap.get_global_local_maps()
+        seg = SingleElementGeometry(self.patch, None,
+                                    m, constraints,
+                                    dirichlet_labels, traction_labels)
+        
+        self.assertEqual(seg.n_components, 2 * 10 * 10 - 10)
 
-        ctrl_pos = npr.randn(24, 2)
-        fixed_pos = ctrl_pos.copy()
-        fixed_pos[3:, :] = 0
+        l2g, g2l = seg.get_global_local_maps()
 
-        ctrl_pos[20:24, :] = ctrl_pos[16:20, :]
-        ctrl_pos = ctrl_pos.reshape(4, 6, 2)
-        fixed_pos = fixed_pos.reshape(4, 6, 2)
+        ctrl_pos = npr.randn(*m.shape)
+        ctrl_pos = geometry_utils.constrain_ctrl(ctrl_pos, constraints)
+        ctrl_pos_fixed = ctrl_pos * dirichlet_labels['1'][..., np.newaxis]
 
-        ctrl_vel = npr.randn(24, 2)
-        fixed_vel = ctrl_vel.copy()
-        fixed_vel[3:, :] = 0
+        ctrl_vels = npr.randn(*m.shape)
+        ctrl_vels = geometry_utils.constrain_ctrl(ctrl_vels, constraints)
+        ctrl_vels_fixed = ctrl_vels * dirichlet_labels['1'][..., np.newaxis]
 
-        ctrl_vel[20:24, :] = ctrl_vel[16:20, :]
-        ctrl_vel = ctrl_vel.reshape(4, 6, 2)
-        fixed_vel = fixed_vel.reshape(4, 6, 2)
+        g_pos, g_vel = l2g(ctrl_pos, ctrl_vels)
+        self.assertEqual(g_pos.shape, (2 * (2 * 10 * 10 - 20),))
+        self.assertEqual(g_vel.shape, (2 * (2 * 10 * 10 - 20),))
 
-        g_pos, g_vel = l2g(ctrl_pos, ctrl_vel)
-        self.assertEqual(g_pos.shape, (17*2,))
-        self.assertEqual(g_vel.shape, (17*2,))
+        l_pos, l_vel = g2l(g_pos, g_vel, ctrl_pos_fixed, ctrl_vels_fixed)
+        nptest.assert_equal(l_pos, ctrl_pos)
+        nptest.assert_equal(l_vel, ctrl_vels)
 
-        l_pos, l_vel = g2l(g_pos, g_vel, fixed_pos, fixed_vel)
-        nptest.assert_array_equal(l_pos, ctrl_pos)
-        nptest.assert_array_equal(l_vel, ctrl_vel)
+        self.assertTrue(np.all(seg.active_traction_boundaries == 0))
+        self.assertEqual(local_indices[seg.all_dirichlet_indices > 0].size, 10)
 
-    def test_boundary_conditions(self):
-        pass
+    def test_dirichlet_completion(self):
+        m1 = bsplines.mesh(np.arange(10), np.arange(10))
+        m2 = bsplines.mesh(np.arange(10) + 9, np.arange(10))
+        m = np.stack((m1, m2), axis=0)
+
+        n_cp = m.size // m.shape[-1]
+        local_indices = np.arange(n_cp).reshape(m.shape[:-1])
+
+        constraints = geometry_utils.generate_constraints(m)
+        dirichlet_labels = {}
+        dirichlet_labels['1'] = \
+            geometry_utils.get_patch_side_index_array(m, 0, 'right')
+        traction_labels = {}
+
+        seg = SingleElementGeometry(self.patch, None,
+                                    m, constraints,
+                                    dirichlet_labels, traction_labels)
+
+        self.assertEqual(local_indices[seg.all_dirichlet_indices > 0].size, 20)
