@@ -8,6 +8,8 @@ import jax.numpy as jnp
 import numpy as onp
 from scipy.sparse.csr import csr_matrix
 from scipy.sparse.csgraph import connected_components, dijkstra
+from varmintv2.physics.constitutive import PhysicsModel
+from varmintv2.physics.energy import generate_element_lagrangian
 from varmintv2.utils import geometry_utils
 
 from varmintv2.utils.typing import Array1D, ArrayND
@@ -292,7 +294,7 @@ class SingleElementGeometry(Geometry):
 
         return lagrangian
 
-    def __init__(self, element: Element, material,
+    def __init__(self, element: Element, material: PhysicsModel,
                  init_ctrl: ArrayND, constraints: Tuple[Array1D, Array1D],
                  dirichlet_labels: Dict[str, ArrayND],
                  traction_labels: Dict[str, ArrayND]):
@@ -309,7 +311,7 @@ class SingleElementGeometry(Geometry):
         - element: Instance of Element that defines local geometry. Contains
                    methods for integration as well as intra-element sparsity.
         
-        - material: TODO(doktay)
+        - material: PhysicsModel capturing the material physical properties.
 
         - init_ctrl: Control points in the reference configuration. Has shape
                      (n_elements, element.ctrl_shape).
@@ -336,7 +338,7 @@ class SingleElementGeometry(Geometry):
             print('WARNING: Constraints are not satisfied by init_ctrl.')
         
         self.element = element
-        # TODO(doktay): Construct element_lagrangian.
+        self.element_lagrangian = generate_element_lagrangian(element, material)
 
         # Construct adjacency matrix of the nodes.
         n_cp = init_ctrl.size // init_ctrl.shape[-1]

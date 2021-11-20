@@ -1,3 +1,5 @@
+from abc import ABC, abstractmethod
+from typing import Callable
 import jax
 import jax.numpy as np
 import jax.numpy.linalg as npla
@@ -30,24 +32,36 @@ def neohookean_energy2d(shear, bulk, F):
     return (shear/2) * (J23 * (I1+1) - 3) + (bulk/2)*(J-1)**2
 
 
-class LinearElastic2D:
+class PhysicsModel(ABC):
+    @abstractmethod
+    def get_energy_fn(self) -> Callable:
+        pass
+
+    @property
+    @abstractmethod
+    def density(self) -> float:
+        pass
+
+
+class LinearElastic2D(PhysicsModel):
     def __init__(self, material, thickness=1):
         """ thickness in cm """
         self.material = material
         self.thickness = thickness
         self.lmbda = self.material.lmbda
         self.mu = self.material.mu
-        self.density = self.material.density
+        self._density = self.material.density
 
     def get_energy_fn(self):
         return partial(linear_elastic_energy2d, self.lmbda, self.mu)
 
+    @property
     def density(self):
         # TODO: How should this interact with third dimension?
-        return self.density
+        return self._density
 
 
-class NeoHookean2D:
+class NeoHookean2D(PhysicsModel):
     def __init__(self, material, log=True, thickness=1):
         """ thickness in cm """
         self.material = material
@@ -55,7 +69,7 @@ class NeoHookean2D:
         self.thickness = thickness
         self.shear = self.material.shear
         self.bulk = self.material.bulk
-        self.density = self.material.density
+        self._density = self.material.density
 
     def get_energy_fn(self):
         if self.log:
@@ -63,20 +77,22 @@ class NeoHookean2D:
 
         return partial(neohookean_energy2d, self.shear, self.bulk)
 
+    @property
     def density(self):
         # TODO: How should this interact with third dimension?
-        return self.density
+        return self._density
 
 
-class NeoHookean3D:
+class NeoHookean3D(PhysicsModel):
     def __init__(self, material):
         self.material = material
         self.shear = self.material.shear
         self.bulk = self.material.bulk
-        self.density = self.material.density
+        self._density = self.material.density
 
     def get_energy_fn(self):
         return partial(neohookean_energy3d_log, self.shear, self.bulk)
 
+    @property
     def density(self):
-        return self.density
+        return self._density

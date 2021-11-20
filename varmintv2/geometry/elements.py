@@ -476,6 +476,11 @@ class Patch2D(Element):
     
     @property
     def num_boundaries(self):
+        # Orientation: 0 - left
+        #              1 - top
+        #              2 - right
+        #              3 - bottom
+
         return 4
 
     @property
