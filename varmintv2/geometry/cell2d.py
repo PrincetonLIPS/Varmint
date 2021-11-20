@@ -1,5 +1,6 @@
 from collections import defaultdict
 from functools import partial
+from typing import Callable, Tuple
 from jax._src.api import vmap
 import numpy as np
 import numpy.random as npr
@@ -13,6 +14,7 @@ from scipy.sparse.csgraph import connected_components, dijkstra
 from varmintv2.geometry import elements
 from varmintv2.geometry import bsplines
 from varmintv2.geometry.geometry import SingleElementGeometry
+from varmintv2.physics.constitutive import PhysicsModel
 
 
 class ShapeUnit2D(object):
@@ -299,7 +301,8 @@ def get_connectivity_matrix(num_x, num_y, arr2lin, units, global_ctrl):
     return unflat_indices, (all_rows, all_cols)
 
 
-def construct_cell2D(input_str, patch_ncp, quad_degree, spline_degree):
+def construct_cell2D(input_str, patch_ncp, quad_degree, spline_degree,
+                     material: PhysicsModel) -> Tuple[SingleElementGeometry, Callable, int]:
     cell_length = 5  # TODO(doktay): This is arbitrary.
 
     xknots = bsplines.default_knots(spline_degree, patch_ncp)
@@ -425,41 +428,68 @@ def construct_cell2D(input_str, patch_ncp, quad_degree, spline_degree):
             sum(units[i].get_side_orientation(side, npatches)
                 for (i, side) in sides)
 
+
+    # Construct the radii_to_ctrl function for initialization of control points.
+    all_corners = []
+    all_indices = []
+    for u in units:
+        if isinstance(u, UnitCell2D):
+            all_corners.append(u.corners)
+            all_indices.extend(
+                list(range(u.patch_offset, u.patch_offset + 4)))
+
+    # Case when we have no cells.
+    if len(all_corners) == 0:
+        return lambda _: ctrls
+
+    all_corners = np.stack(all_corners, axis=0)
+    all_indices = np.array(all_indices)
+
+    vmap_gencell = jax.vmap(UnitCell2D._gen_cell)
+    vmap_gencell = partial(vmap_gencell, all_corners)
+
+    def radii_to_ctrl(radii):
+        cell_ctrls = vmap_gencell(radii).reshape(
+            (-1, patch_ncp, patch_ncp, 2))
+        return jax.ops.index_update(ctrls, all_indices, cell_ctrls,
+                                    indices_are_sorted=True)
+
     return SingleElementGeometry(
         element=element,
-        material=None,
+        material=material,
         init_ctrl=ctrls,
         constraints=constraints,
         dirichlet_labels=dirichlet_labels,
         traction_labels=traction_labels
-    )
+    ), radii_to_ctrl, n_cells
 
-"""
-    def get_radii_to_ctrl_fn(self):
-        # Returns a JAX-able function that maps radii to control points of this shape.
 
-        all_corners = []
-        all_indices = []
-        for u in self.units:
-            if isinstance(u, UnitCell2D):
-                all_corners.append(u.corners)
-                all_indices.extend(
-                    list(range(u.patch_offset, u.patch_offset + 4)))
+# Some helper functions to generate radii
+def generate_random_radii(shape, patch_ncp, seed=None):
+    npr.seed(seed)
+    init_radii = npr.rand(*shape, (patch_ncp-1)*4)*0.7 + 0.15
+    return init_radii
 
-        # Case when we have no cells.
-        if len(all_corners) == 0:
-            return lambda _: self.ctrls
 
-        all_corners = np.stack(all_corners, axis=0)
-        all_indices = np.array(all_indices)
+def generate_rectangular_radii(shape, patch_ncp):
+    init_radii = np.ones((*shape, (patch_ncp-1)*4)) * 0.5 * 0.9 + 0.05
+    return init_radii
 
-        vmap_gencell = jax.vmap(UnitCell2D._gen_cell)
-        vmap_gencell = partial(vmap_gencell, all_corners)
 
-        def radii_to_ctrl(radii):
-            cell_ctrls = vmap_gencell(radii).reshape(
-                (-1, self.ncp, self.ncp, 2))
-            return jax.ops.index_update(self.ctrls, all_indices, cell_ctrls,
-                                        indices_are_sorted=True)
-        return radii_to_ctrl
-"""
+def generate_circular_radii(shape, patch_ncp):
+    one_arc = 0.6 * \
+        np.cos(np.linspace(-np.pi/4, np.pi/4, patch_ncp)[:-1])
+    init_radii = np.broadcast_to(
+        np.tile(one_arc, 4), (*shape, (patch_ncp-1)*4))
+    return init_radii
+
+
+def generate_bertoldi_radii(shape, patch_ncp, c1, c2, L0=5, phi0=0.5):
+    # L0 is used in the original formula, but we want 0 to 1.
+    r0 = np.sqrt(2 * phi0 / np.pi * (2 + c1**2 + c2**2))
+    thetas = np.linspace(-np.pi/4, np.pi/4, patch_ncp)[:-1]
+    r_theta = r0 * (1 + c1 * np.cos(4 * thetas) + c2 * np.cos(8 * thetas))
+    xs_theta = np.cos(thetas) * r_theta
+    init_radii = np.broadcast_to(
+        np.tile(xs_theta, 4), (*shape, (patch_ncp-1)*4))
+    return init_radii

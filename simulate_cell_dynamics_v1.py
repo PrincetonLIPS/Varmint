@@ -2,19 +2,14 @@ from comet_ml import Experiment
 import time
 import os
 import argparse
-
-
-from varmintv2.geometry.cell2d import construct_cell2D, generate_bertoldi_radii
-from varmintv2.geometry.elements import Patch2D
-from varmintv2.geometry.geometry import Geometry, SingleElementGeometry
-from varmintv2.physics.constitutive import NeoHookean2D
-from varmintv2.physics.materials import Material
-from varmintv2.solver.discretize import HamiltonianStepper
-from varmintv2.utils.movie_utils import create_movie
-
-import varmintv2.utils.analysis_utils as autils
-import varmintv2.utils.experiment_utils as eutils
-
+import analysis_utils as autils
+import experiment_utils as eutils
+from varmint.movie_utils import create_movie
+from varmint.cell2d import Cell2D, CellShape, register_dirichlet_bc, register_traction_bc
+from varmint.discretize import HamiltonianStepper
+from varmint.constitutive import NeoHookean2D
+from varmint.materials import Material
+from varmint.patch2d import Patch2D
 import numpy.random as npr
 import numpy as onp
 import jax.numpy as np
@@ -54,20 +49,19 @@ class WigglyMat(Material):
     _density = 1.0
 
 
-def simulate(ref_ctrl, ref_vels, cell: Geometry,
-             dt, T, strategy, friction=1e-7):
+def simulate(ref_ctrl, ref_vels, cell, dt, T, strategy, friction=1e-7):
     def friction_force(q, qdot, ref_ctrl, fixed_pos,
                        fixed_vel, tractions): return -friction * qdot
 
-    flatten, unflatten = cell.get_global_local_maps()
-    full_lagrangian = cell.get_lagrangian_fn()
+    flatten, unflatten = cell.get_dynamics_flatten_unflatten()
+    full_lagrangian = cell.get_lagrangian_fun()
 
     # Initially in the ref config with zero momentum.
     q, p = flatten(ref_ctrl, ref_vels)
     print(f'Simulation has {q.shape[0]} degrees of freedom.')
 
     stepper = HamiltonianStepper(
-        full_lagrangian, geometry=cell, F=friction_force, save=True)
+        full_lagrangian, friction_force, save=True, cell=cell)
     step, optimizer = stepper.construct_stepper(q.shape[0], strategy=strategy)
 
     fixed_locs_fn, fixed_vels_fn = cell.get_fixed_locs_fn(ref_ctrl)
@@ -109,9 +103,9 @@ def simulate(ref_ctrl, ref_vels, cell: Geometry,
     return QQ, PP, TT, all_fixed, all_fixed_vels
 
 
-def sim_radii(cell, radii, dt, T, strategy, radii_to_ctrl_fn):
+def sim_radii(cell, radii, dt, T, strategy):
     # Construct reference shape.
-    ref_ctrl = radii_to_ctrl_fn(radii)
+    ref_ctrl = cell.radii_to_ctrl_fn(radii)
 
     # Simulate the reference shape.
     QQ, PP, TT, all_fixed, all_fixed_vels = simulate(
@@ -141,28 +135,31 @@ def main():
     WigglyMat._E = args.E
     mat = NeoHookean2D(WigglyMat)
 
+    cell_shape = CellShape(
+        num_cp=args.ncp,
+        quad_degree=args.quaddeg,
+        spline_degree=args.splinedeg,
+    )
+
     grid_str = "C0500 C0500 C0500\n"\
                "CA000 C0000 C00D0\n"\
                "C0001 C0001 C0001\n"
 
-    cell, radii_to_ctrl_fn, n_cells = \
-        construct_cell2D(input_str=grid_str, patch_ncp=args.ncp,
-                         quad_degree=args.quaddeg, spline_degree=args.splinedeg,
-                         material=mat)
+    cell = Cell2D(cell_shape=cell_shape, material=mat, instr=grid_str)
 
-    @cell.register_dirichlet_bc('1')
+    @register_dirichlet_bc('1', cell)
     def group_1_movement(t):
         return t / args.simtime * np.array([0.0, 0.0])
 
-    @cell.register_dirichlet_bc('5')
+    @register_dirichlet_bc('5', cell)
     def group_2_movement(t):
-        return t / args.simtime * np.array([0.0, -1.0])
+        return t / args.simtime * np.array([0.0, -3.0])
 
-    @cell.register_traction_bc('A')
+    @register_traction_bc('B', cell)
     def group_A_traction(t):
         return 1e-1 * np.array([1.0, 0.0])
 
-    @cell.register_traction_bc('D')
+    @register_traction_bc('D', cell)
     def group_D_traction(t):
         return 1e-1 * np.array([-1.0, 0.0])
 
@@ -173,28 +170,28 @@ def main():
 
     radii = np.concatenate(
         (
-            generate_bertoldi_radii((n_cells,), args.ncp, 0.12, -0.06),
-            # generate_random_radii((cell.n_cells,)),
-            # generate_circular_radii((cell.n_cells,)),
+            cell.generate_bertoldi_radii((cell.n_cells,), 0.12, -0.06),
+            # cell.generate_random_radii((cell.n_cells,)),
+            # cell.generate_circular_radii((cell.n_cells,)),
         )
     )
 
     sim_time = time.time()
     QQ, PP, TT, all_fixed, all_fixed_vels = sim_radii(
-        cell, radii, dt, T, args.strategy, radii_to_ctrl_fn)
+        cell, radii, dt, T, args.strategy)
     print(f'Total simulation time: {time.time() - sim_time}')
     sim_dir = os.path.join(args.exp_dir, 'sim_ckpt')
     os.mkdir(sim_dir)
     #autils.save_dynamics_simulation(sim_dir, QQ, PP, TT, init_radii, cell)
 
     # Turn this into a sequence of control point sets.
-    ref_ctrl = radii_to_ctrl_fn(radii)
+    ref_ctrl = cell.radii_to_ctrl_fn(radii)
     ctrl_seq, _ = cell.unflatten_dynamics_sequence(
         QQ, PP, all_fixed, all_fixed_vels)
 
     print('Saving result in video.')
     vid_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}.mp4')
-    create_movie(cell.element, ctrl_seq, vid_path, comet_exp=experiment)
+    create_movie(cell.patch, ctrl_seq, vid_path, comet_exp=experiment)
 
 
 if __name__ == '__main__':

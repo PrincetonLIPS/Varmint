@@ -90,7 +90,7 @@ class Geometry(ABC):
         pass
 
     @abstractmethod
-    def get_traction_fn(self):
+    def get_traction_fn(self) -> Callable:
         """Get a function that returns traction values through time.
         
         Returns:
@@ -103,7 +103,7 @@ class Geometry(ABC):
         pass
 
     @abstractmethod
-    def get_fixed_locs_fn(self, ref_l_position):
+    def get_fixed_locs_fn(self, ref_l_position) -> Tuple[Callable, Callable]:
         """Get a function that returns Dirichlet conditions through time.
         
         Returns:
@@ -140,11 +140,11 @@ class SingleElementGeometry(Geometry):
 
     # Maps a Dirichlet boundary condition label to functions that map time to
     # the displacement and velocity of control points (given time) within the group.
-    dirichlet_fns: Dict[str, Tuple[Callable, Callable]] = field(default_factory=dict)
+    dirichlet_fns: Dict[str, Tuple[Callable, Callable]]
 
     # Maps a traction boundary condition label to a function that gives the
     # traction force on a control point (given time) within the group.
-    traction_fns: Dict[str, Callable] = field(default_factory=dict)
+    traction_fns: Dict[str, Callable]
 
     @property
     def active_traction_boundaries(self):
@@ -167,6 +167,7 @@ class SingleElementGeometry(Geometry):
 
             self.dirichlet_fns[group] = (decorated, decorated_vel)
             return decorated
+        return inner
 
     def register_traction_bc(self, group):
         """Decorator function to declare a traction condition."""
@@ -287,10 +288,10 @@ class SingleElementGeometry(Geometry):
             def_ctrl, def_vels = g2l(cur_g_position, cur_g_velocity,
                                      fix_l_position, fix_l_velocity)
             
-            return jnp.sum(jax.vmap(self.element_lagrangian))(
+            return jnp.sum(jax.vmap(self.element_lagrangian)(
                 def_ctrl, def_vels, ref_l_position,
                 self.active_traction_boundaries, traction
-            )
+            ))
 
         return lagrangian
 
@@ -337,6 +338,9 @@ class SingleElementGeometry(Geometry):
         if not geometry_utils.verify_constraints(init_ctrl, constraints):
             print('WARNING: Constraints are not satisfied by init_ctrl.')
         
+        self.dirichlet_fns = {}
+        self.traction_fns = {}
+
         self.element = element
         self.element_lagrangian = generate_element_lagrangian(element, material)
 
