@@ -3,6 +3,7 @@ import os
 import jax
 from jax.core import InconclusiveDimensionOperation
 import jax.numpy as np
+import jax.scipy.linalg
 
 import numpy as onp
 
@@ -17,35 +18,81 @@ import scipy.stats
 import time
 from functools import partial
 
+from varmintv2.geometry.geometry import Geometry
+
 
 class SuperLUOptimizer:
-  def __init__(self, niter=5):
-    self.niter = niter
-    self.iter_num = 0
+    def __init__(self, niter=5):
+        self.niter = niter
+        self.iter_num = 0
 
-  def optimize(self, x0, residual_fun, jvp_fun, jac_fun):
-    xk = x0
+        self.stats = {
+            'factorization_time': 0.0,
+            'gmres_time': 0.0,
+            'jvps_time': 0.0,
+            'jac_reconstruction_time': 0.0,
+            'num_gmres_calls': 0,
+            'total_gmres_iters': 0,
+        }
 
-    for i in range(self.niter):
-      jac = jac_fun(xk).block_until_ready()
-      rk = residual_fun(xk).block_until_ready()
 
-      sjac = scipy.sparse.csc_matrix(jac)
-      B = scipy.sparse.linalg.splu(sjac)
-      pk = B.solve(onp.array(-rk))
+    def optimize(self, x0, residual_fun, jvp_fun, jac_fun):
+        xk = x0
 
-      xk = xk + pk
-      self.iter_num += 1
+        for i in range(self.niter):
+            jac = jac_fun(xk).block_until_ready()
+            rk = residual_fun(xk).block_until_ready()
 
-    return xk, None
+            sjac = scipy.sparse.csc_matrix(jac)
+            B = scipy.sparse.linalg.splu(sjac)
+            pk = B.solve(onp.array(-rk))
+
+            xk = xk + pk
+            self.iter_num += 1
+
+        return xk, None
+
+
+class LUOptimizer:
+    def __init__(self, niter=5):
+        self.niter = niter
+        self.iter_num = 0
+
+        self.stats = {
+            'factorization_time': 0.0,
+            'gmres_time': 0.0,
+            'jvps_time': 0.0,
+            'jac_reconstruction_time': 0.0,
+            'num_gmres_calls': 0,
+            'total_gmres_iters': 0,
+        }
+
+
+    def optimize(self, x0, residual_fun, jvp_fun, jac_fun):
+        xk = x0
+
+        for i in range(self.niter):
+            jac = jac_fun(xk).block_until_ready()
+            rk = residual_fun(xk).block_until_ready()
+
+            lu, piv = jax.scipy.linalg.lu_factor(jac)
+            pk = jax.scipy.linalg.lu_solve((lu, piv), -rk)
+
+            xk = xk + pk
+            self.iter_num += 1
+
+        return xk, None
 
 
 class ILUPreconditionedOptimizer:
-    def __init__(self, niter=20, nsteps=1, geometry=None):
+    def __init__(self, geometry: Geometry, niter=20, nsteps=1):
         self.niter = niter
         self.nsteps = nsteps
         self.step_count = 0
         self.geometry = geometry
+
+        self.sparse_reconstruct = geometry.get_jac_reconstruction_fn()
+        self.sparsity_tangents = geometry.jac_reconstruction_tangents
 
         self.stats = {
             'factorization_time': 0.0,
@@ -69,11 +116,11 @@ class ILUPreconditionedOptimizer:
 
             t = time.time()
             jvp_res = vmap_jvp(
-                xk, self.cell.sparse_jvps_mat).block_until_ready()
+                xk, self.geometry.jac_reconstruction_tangents).block_until_ready()
             self.stats['jvps_time'] += time.time() - t
 
             t = time.time()
-            sparse_jac = self.cell.sparse_reconstruct(jvp_res)
+            sparse_jac = self.sparse_reconstruct(jvp_res)
             self.stats['jac_reconstruction_time'] += time.time() - t
 
             t = time.time()

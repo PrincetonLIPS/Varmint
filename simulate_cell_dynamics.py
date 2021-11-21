@@ -44,7 +44,7 @@ parser.add_argument('--E', type=float, default=0.005)
 parser.add_argument('--comet', dest='comet', action='store_true')
 
 parser.add_argument('--save', dest='save', action='store_true')
-parser.add_argument('--strategy', choices=['ilu_preconditioning', 'superlu'],
+parser.add_argument('--strategy', choices=['ilu_preconditioning', 'superlu', 'lu'],
                     default='ilu_preconditioning')
 
 
@@ -142,7 +142,7 @@ def main():
     mat = NeoHookean2D(WigglyMat)
 
     grid_str = "C0500 C0500 C0500\n"\
-               "CA000 C0000 C00D0\n"\
+               "C0000 C0000 C0000\n"\
                "C0001 C0001 C0001\n"
 
     cell, radii_to_ctrl_fn, n_cells = \
@@ -156,7 +156,7 @@ def main():
 
     @cell.register_dirichlet_bc('5')
     def group_2_movement(t):
-        return t / args.simtime * np.array([0.0, -1.0])
+        return t / args.simtime * np.array([0.0, -4.0])
 
     @cell.register_traction_bc('A')
     def group_A_traction(t):
@@ -195,6 +195,7 @@ def main():
     print('Saving result in video.')
     vid_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}.mp4')
     create_movie(cell.element, ctrl_seq, vid_path, comet_exp=experiment)
+    print('Finished simulation {args.exp_name}')
 
 
 if __name__ == '__main__':

@@ -180,6 +180,24 @@ class Element(ABC):
         """Embedding dimension."""
         pass
 
+    @abstractmethod
+    def get_sparsity_pattern(self) -> Array2D:
+        """Return the sparsity pattern for this element.
+        
+        Returns a array of shape (n_ind, 2) of pairs of control point
+        indices that would have non-zero Jacobian entries within the
+        element. n_ind is the number of non-zero entries in the local
+        Jacobian for this Element.
+
+        Local control point ordering is in flatten order:
+            ctrl_points.reshape(-1, n_d)
+        
+        Control point ordering in global array should be an offset to its
+        local ordering, to enable efficient translation between local and global
+        numbering.
+        """
+        pass
+
 
 class Patch2D(Element):
     """Element represented by a BSpline 2D patch.
@@ -494,6 +512,17 @@ class Patch2D(Element):
             return self.x_line_points.shape[0]
         else:
             raise ValueError(f"Invalid boundary index {index} for Patch2D.")
+    
+    def get_sparsity_pattern(self) -> Array2D:
+        local_patch_indices = onp.arange(self.num_xctrl * self.num_yctrl)
+        
+        # TODO(doktay): This is an overestimate of the sparsity pattern.
+        # In reality it should depend on the spline degree, but here for
+        # simplicity we just say all points are connected to all points.
+        mgrid_indices = onp.stack(onp.meshgrid(
+            local_patch_indices, local_patch_indices), axis=-1)
+
+        return mgrid_indices
 
     @property
     def n_d(self):

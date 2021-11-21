@@ -8,6 +8,7 @@ from varmintv2.utils.vmap_utils import map_jacfwd
 
 from varmintv2.solver.optimization import (
     ILUPreconditionedOptimizer,
+    LUOptimizer,
     SuperLUOptimizer,
 )
 
@@ -71,6 +72,9 @@ class HamiltonianStepper:
         elif strategy == 'superlu':
             print('Using SuperLUOptimizer')
             optimizer = SuperLUOptimizer()
+        elif strategy == 'lu':
+            print('Using LUOptimizer')
+            optimizer = LUOptimizer()
         else:
             raise ValueError(
                 f'Unsupported preconditioning strategy: {strategy}.')

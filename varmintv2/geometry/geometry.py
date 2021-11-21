@@ -1,18 +1,24 @@
 from abc import ABC, abstractmethod
 from collections import namedtuple
 from dataclasses import dataclass, field
+from re import I
 from typing import Callable, Dict, List, Tuple
 
 import jax
 import jax.numpy as jnp
 import numpy as onp
+from scipy.sparse.csc import csc_matrix
 from scipy.sparse.csr import csr_matrix
 from scipy.sparse.csgraph import connected_components, dijkstra
+
+import scipy.sparse
+
 from varmintv2.physics.constitutive import PhysicsModel
 from varmintv2.physics.energy import generate_element_lagrangian
 from varmintv2.utils import geometry_utils
+from varmintv2.utils import sparsity
 
-from varmintv2.utils.typing import Array1D, ArrayND
+from varmintv2.utils.typing import Array1D, Array2D, ArrayND
 from varmintv2.geometry.elements import Element
 
 
@@ -115,6 +121,25 @@ class Geometry(ABC):
         """
         pass
 
+    @property
+    @abstractmethod
+    def jac_sparsity_graph(self):
+        pass
+
+    @property
+    @abstractmethod
+    def jac_reconstruction_tangents(self) -> Array2D:
+        """Returns tangent vectors necessary to reconstruct the Jacobian."""
+        pass
+
+    @abstractmethod
+    def get_jac_reconstruction_fn(self) -> Callable:
+        """Returns a function that reconstructs the Jacobian as a csc_matrix.
+
+        Given the result of JVPs with the tangent vectors given by
+        self.jac_reconstruction_tangents, returns the Jacobian as a csc_matrix.
+        """
+        pass
 
 class SingleElementGeometry(Geometry):
     """Geometry composed of a single type of Element."""
@@ -295,6 +320,17 @@ class SingleElementGeometry(Geometry):
 
         return lagrangian
 
+    @property
+    def jac_sparsity_graph(self):
+        return self._jac_sparsity_graph
+
+    @property
+    def jac_reconstruction_tangents(self) -> Array2D:
+        return self._jac_reconstruction_tangents
+
+    def get_jac_reconstruction_fn(self) -> Callable:
+        return self._jac_reconstruction_fn
+
     def __init__(self, element: Element, material: PhysicsModel,
                  init_ctrl: ArrayND, constraints: Tuple[Array1D, Array1D],
                  dirichlet_labels: Dict[str, ArrayND],
@@ -374,11 +410,44 @@ class SingleElementGeometry(Geometry):
                                        unweighted=True, min_only=True)
             group_all_dists = onp.reshape(group_all_dists, init_ctrl.shape[:-1])
             self.dirichlet_labels[group] = group_all_dists < onp.inf
-            
+
             # Aggregate all fixed indices to create fixed_labels needed for
             # global <-> local conversion.
             self.all_dirichlet_indices = \
                 self.all_dirichlet_indices + self.dirichlet_labels[group]
-        
+
         self.fixed_labels = onp.unique(self.index_array[self.all_dirichlet_indices > 0])
         self.nonfixed_labels = onp.unique(self.index_array[self.all_dirichlet_indices == 0])
+
+        ###################################################################
+        # Using the local sparsity pattern for the Element, construct the #
+        # sparsity pattern of the full geometry.                          #
+        ###################################################################
+        local_sparsity = element.get_sparsity_pattern()
+        n_ctrl_per_element = init_ctrl[0].size // init_ctrl.shape[-1]
+
+        # Offset the indices of each element to get global offset.
+        all_local_sparsities = \
+            [local_sparsity.copy() + n_ctrl_per_element * i
+                for i in range(self.n_elements)]
+        all_local_sparsities = onp.stack(all_local_sparsities, axis=0)
+        jac_spy_edges = \
+            self.index_array.flatten()[all_local_sparsities].reshape((-1, 2))
+
+        jac_entries = onp.ones_like(jac_spy_edges[:, 0])
+        jac_rows = jac_spy_edges[:, 0]
+        jac_cols = jac_spy_edges[:, 1]
+        jac_sparsity_graph = \
+            csc_matrix((jac_entries, (jac_rows, jac_cols)),
+                       (n_components, n_components), dtype=onp.int8)
+
+        # Remove the fixed labels from the Jacobian, and use kron to duplicate
+        # for each dimension.
+        jac_sparsity_graph = jac_sparsity_graph[:, self.nonfixed_labels]
+        jac_sparsity_graph = jac_sparsity_graph[self.nonfixed_labels, :]
+        self._jac_sparsity_graph = scipy.sparse.kron(
+            jac_sparsity_graph, onp.ones((element.n_d, element.n_d)), format='csc'
+        )
+
+        self._jac_reconstruction_tangents, self._jac_reconstruction_fn = \
+            sparsity.pattern_to_reconstruction(self._jac_sparsity_graph)
