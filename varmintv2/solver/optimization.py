@@ -22,9 +22,13 @@ from varmintv2.geometry.geometry import Geometry
 
 
 class SuperLUOptimizer:
-    def __init__(self, niter=5):
+    def __init__(self, geometry: Geometry, niter=5):
         self.niter = niter
         self.iter_num = 0
+        self.geometry = geometry
+
+        self.sparse_reconstruct = geometry.get_jac_reconstruction_fn()
+        self.sparsity_tangents = geometry.jac_reconstruction_tangents
 
         self.stats = {
             'factorization_time': 0.0,
@@ -39,11 +43,13 @@ class SuperLUOptimizer:
     def optimize(self, x0, residual_fun, jvp_fun, jac_fun):
         xk = x0
 
+        vmap_jvp = jax.vmap(jvp_fun, in_axes=(None, 0), out_axes=0)
         for i in range(self.niter):
-            jac = jac_fun(xk).block_until_ready()
+            jvp_res = vmap_jvp(
+                xk, self.geometry.jac_reconstruction_tangents).block_until_ready()
             rk = residual_fun(xk).block_until_ready()
 
-            sjac = scipy.sparse.csc_matrix(jac)
+            sjac = self.sparse_reconstruct(jvp_res)
             B = scipy.sparse.linalg.splu(sjac)
             pk = B.solve(onp.array(-rk))
 

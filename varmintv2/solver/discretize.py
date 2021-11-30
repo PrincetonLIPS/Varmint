@@ -71,7 +71,7 @@ class HamiltonianStepper:
             optimizer = ILUPreconditionedOptimizer(geometry=self.geometry)
         elif strategy == 'superlu':
             print('Using SuperLUOptimizer')
-            optimizer = SuperLUOptimizer()
+            optimizer = SuperLUOptimizer(geometry=self.geometry)
         elif strategy == 'lu':
             print('Using LUOptimizer')
             optimizer = LUOptimizer()

@@ -4,7 +4,7 @@ import os
 import argparse
 
 
-from varmintv2.geometry.cell2d import construct_cell2D, generate_bertoldi_radii
+from varmintv2.geometry.metastable2d import construct_metastable2D
 from varmintv2.geometry.elements import Patch2D
 from varmintv2.geometry.geometry import Geometry, SingleElementGeometry
 from varmintv2.physics.constitutive import NeoHookean2D
@@ -109,17 +109,6 @@ def simulate(ref_ctrl, ref_vels, cell: Geometry,
     return QQ, PP, TT, all_fixed, all_fixed_vels
 
 
-def sim_radii(cell, radii, dt, T, strategy, radii_to_ctrl_fn):
-    # Construct reference shape.
-    ref_ctrl = radii_to_ctrl_fn(radii)
-
-    # Simulate the reference shape.
-    QQ, PP, TT, all_fixed, all_fixed_vels = simulate(
-        ref_ctrl, np.zeros_like(ref_ctrl), cell, dt, T, strategy)
-
-    return QQ, PP, TT, all_fixed, all_fixed_vels
-
-
 def main():
     args = parser.parse_args()
     eutils.prepare_experiment_directories(args)
@@ -141,54 +130,31 @@ def main():
     WigglyMat._E = args.E
     mat = NeoHookean2D(WigglyMat)
 
-    grid_str = "C0500 C0500 C0500\n"\
-               "C0000 C0000 C0000\n"\
-               "C0001 C0001 C0001\n"
-
-    cell, radii_to_ctrl_fn, n_cells = \
-        construct_cell2D(input_str=grid_str, patch_ncp=args.ncp,
-                         quad_degree=args.quaddeg, spline_degree=args.splinedeg,
-                         material=mat)
+    cell, init_ctrl = \
+        construct_metastable2D(patch_ncp=args.ncp, quad_degree=args.quaddeg,
+                               spline_degree=args.splinedeg, material=mat)
 
     @cell.register_dirichlet_bc('1')
     def group_1_movement(t):
         return t / args.simtime * np.array([0.0, 0.0])
 
-    @cell.register_dirichlet_bc('5')
+    @cell.register_dirichlet_bc('2')
     def group_2_movement(t):
-        return t / args.simtime * np.array([0.0, -4.0])
-
-    @cell.register_traction_bc('A')
-    def group_A_traction(t):
-        return 1e-1 * np.array([1.0, 0.0])
-
-    @cell.register_traction_bc('D')
-    def group_D_traction(t):
-        return 1e-1 * np.array([-1.0, 0.0])
-
-    init_radii = None
+        return t / args.simtime * np.array([0.0, -0.2])
 
     dt = np.float64(args.dt)
     T = args.simtime
 
-    radii = np.concatenate(
-        (
-            generate_bertoldi_radii((n_cells,), args.ncp, 0.12, -0.06),
-            # generate_random_radii((cell.n_cells,)),
-            # generate_circular_radii((cell.n_cells,)),
-        )
-    )
-
     sim_time = time.time()
-    QQ, PP, TT, all_fixed, all_fixed_vels = sim_radii(
-        cell, radii, dt, T, args.strategy, radii_to_ctrl_fn)
+
+    QQ, PP, TT, all_fixed, all_fixed_vels = \
+        simulate(init_ctrl, np.zeros_like(init_ctrl), cell, dt, T, args.strategy)
+
     print(f'Total simulation time: {time.time() - sim_time}')
     sim_dir = os.path.join(args.exp_dir, 'sim_ckpt')
     os.mkdir(sim_dir)
-    #autils.save_dynamics_simulation(sim_dir, QQ, PP, TT, init_radii, cell)
 
     # Turn this into a sequence of control point sets.
-    ref_ctrl = radii_to_ctrl_fn(radii)
     ctrl_seq, _ = cell.unflatten_dynamics_sequence(
         QQ, PP, all_fixed, all_fixed_vels)
 

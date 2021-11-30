@@ -416,8 +416,10 @@ class SingleElementGeometry(Geometry):
             self.all_dirichlet_indices = \
                 self.all_dirichlet_indices + self.dirichlet_labels[group]
 
-        self.fixed_labels = onp.unique(self.index_array[self.all_dirichlet_indices > 0])
-        self.nonfixed_labels = onp.unique(self.index_array[self.all_dirichlet_indices == 0])
+        self.fixed_labels = \
+            onp.unique(self.index_array[self.all_dirichlet_indices > 0])
+        self.nonfixed_labels = \
+            onp.unique(self.index_array[self.all_dirichlet_indices == 0])
 
         ###################################################################
         # Using the local sparsity pattern for the Element, construct the #

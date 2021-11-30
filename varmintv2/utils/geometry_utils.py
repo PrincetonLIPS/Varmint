@@ -15,7 +15,7 @@ def verify_constraints(ctrl, constraints):
 
     all_rows, all_cols = constraints
     flat_ctrl = ctrl.reshape(-1, ctrl.shape[-1])
-    return onp.all(flat_ctrl[all_rows, :] == flat_ctrl[all_cols, :])
+    return onp.allclose(flat_ctrl[all_rows, :], flat_ctrl[all_cols, :])
 
 
 def generate_constraints(ctrl):
@@ -34,6 +34,22 @@ def generate_constraints(ctrl):
     adjacency = coo_matrix(dists - onp.diag(onp.ones(n_cp)))
 
     return (adjacency.row, adjacency.col)
+
+
+def get_patch_side_indices(ctrl, patch_num, side, ctrl_offset=0):
+    n_cp = ctrl.size // ctrl.shape[-1]
+    local_indices = onp.arange(n_cp).reshape(ctrl.shape[:-1])
+
+    if side == 'top':
+        return local_indices[:, -1] + ctrl_offset
+    elif side == 'bottom':
+        return local_indices[:, 0] + ctrl_offset
+    elif side == 'left':
+        return local_indices[0, :] + ctrl_offset
+    elif side == 'right':
+        return local_indices[-1, :] + ctrl_offset
+    else:
+        raise ValueError(f'Invalid side {side}')
 
 
 def get_patch_side_index_array(ctrl, patch_num, side):
