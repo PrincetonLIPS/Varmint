@@ -141,9 +141,9 @@ def main():
     WigglyMat._E = args.E
     mat = NeoHookean2D(WigglyMat)
 
-    grid_str = "C0500 C0500 C0500\n"\
-               "C0000 C0000 C0000\n"\
-               "C0001 C0001 C0001\n"
+    grid_str = "S0500 C0500 S0500 C0500 S0500 C0500 S0500\n"\
+               "S0000 S0000 S0000 C0000 S0000 S0000 S0000\n"\
+               "S0001 S0001 S0001 S0001 S0001 S0001 S0001\n"
 
     cell, radii_to_ctrl_fn, n_cells = \
         construct_cell2D(input_str=grid_str, patch_ncp=args.ncp,

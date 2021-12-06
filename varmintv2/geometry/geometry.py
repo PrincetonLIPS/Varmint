@@ -188,7 +188,7 @@ class SingleElementGeometry(Geometry):
                 return fn(t) * self.dirichlet_labels[group][..., jnp.newaxis]
 
             def decorated_vel(t):
-                return vel_fn(t) * self.dirichlet_labels[group][..., jnp.newaxis]
+                return 0.0 * vel_fn(t) * self.dirichlet_labels[group][..., jnp.newaxis]
 
             self.dirichlet_fns[group] = (decorated, decorated_vel)
             return decorated
@@ -374,6 +374,7 @@ class SingleElementGeometry(Geometry):
         if not geometry_utils.verify_constraints(init_ctrl, constraints):
             print('WARNING: Constraints are not satisfied by init_ctrl.')
         
+        self.constraints = constraints
         self.dirichlet_fns = {}
         self.traction_fns = {}
 

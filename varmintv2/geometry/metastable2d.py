@@ -68,19 +68,19 @@ def su_cosine_patches (h1, h2, l, t, t1, dx):
 
 
 def construct_metastable2D(patch_ncp, quad_degree, spline_degree,
-                           material: PhysicsModel): # -> Tuple[SingleElementGeometry, Callable, int]:
+                           material: PhysicsModel, multiplier=1.0): # -> Tuple[SingleElementGeometry, Callable, int]:
 
     xknots = bsplines.default_knots(spline_degree, patch_ncp)
     yknots = bsplines.default_knots(spline_degree, patch_ncp)
 
     element = elements.Patch2D(xknots, yknots, spline_degree, quad_degree)
 
-    h1 = 0.5
-    h2 = 0.7
-    h3 = 1.0
-    l = 2.0
-    t = 0.1
-    t1 = 0.05
+    h1 = 0.5 * multiplier
+    h2 = 0.7 * multiplier
+    h3 = 1.0 * multiplier
+    l = 2.0 * multiplier
+    t = 0.1 * multiplier
+    t1 = 0.05 * multiplier
 
     sq_patches_corners = su_corners(h1, h2, h3, l, t, t1)
     patch_cl, patch_cr = su_cosine_patches(h1, h2, l, t, t1, patch_ncp)
@@ -108,8 +108,8 @@ def construct_metastable2D(patch_ncp, quad_degree, spline_degree,
     template_ctrls = template_ctrls[:, :, ::-1, :]
 
     all_ctrls = []
-    num_x = 3
-    num_y = 3
+    num_x = 1
+    num_y = 1
 
     # Use the template to construct a a cellular structure with offsets.
     for i in range(num_x):

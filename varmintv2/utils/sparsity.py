@@ -3,8 +3,6 @@ import jax.numpy as jnp
 
 from scipy.sparse import csc_matrix, diags
 
-from numba import njit
-
 
 def row_inds(spm, i):
     # i is the column index

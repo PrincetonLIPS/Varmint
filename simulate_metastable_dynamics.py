@@ -11,6 +11,7 @@ from varmintv2.physics.constitutive import NeoHookean2D
 from varmintv2.physics.materials import Material
 from varmintv2.solver.discretize import HamiltonianStepper
 from varmintv2.utils.movie_utils import create_movie
+from varmintv2.utils.geometry_utils import verify_constraints
 
 import varmintv2.utils.analysis_utils as autils
 import varmintv2.utils.experiment_utils as eutils
@@ -130,9 +131,11 @@ def main():
     WigglyMat._E = args.E
     mat = NeoHookean2D(WigglyMat)
 
+    multiplier = 10.0
     cell, init_ctrl = \
         construct_metastable2D(patch_ncp=args.ncp, quad_degree=args.quaddeg,
-                               spline_degree=args.splinedeg, material=mat)
+                               spline_degree=args.splinedeg, material=mat,
+                               multiplier=multiplier)
 
     @cell.register_dirichlet_bc('1')
     def group_1_movement(t):
@@ -140,7 +143,7 @@ def main():
 
     @cell.register_dirichlet_bc('2')
     def group_2_movement(t):
-        return t / args.simtime * np.array([0.0, -0.2])
+        return t / args.simtime * np.array([0.0, -0.4 * multiplier])
 
     dt = np.float64(args.dt)
     T = args.simtime

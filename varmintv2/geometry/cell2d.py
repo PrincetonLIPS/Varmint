@@ -10,6 +10,7 @@ import jax.numpy as jnp
 
 from scipy.sparse import csr_matrix, csc_matrix, kron, save_npz
 from scipy.sparse.csgraph import connected_components, dijkstra
+from scipy.spatial import KDTree
 
 from varmintv2.geometry import elements
 from varmintv2.geometry import bsplines
@@ -192,7 +193,7 @@ class UnitSquare2D(ShapeUnit2D):
 
     def compute_internal_constraints(self):
         # Unit squares do not have internal constraints.
-        return (np.array([]), np.array([]))
+        return (np.array([], dtype=np.int), np.array([], dtype=np.int))
 
     def get_side_indices(self, side):
         if side == 'top':
@@ -407,6 +408,11 @@ def construct_cell2D(input_str, patch_ncp, quad_degree, spline_degree,
                             (len(units)-1, 'bottom'))
 
     ctrls = np.concatenate(ctrls, axis=0)
+    #flat_ctrls = ctrls.reshape((-1, 2))
+    #kdtree = KDTree(flat_ctrls)
+    #constraints = kdtree.query_pairs(1e-10)
+    #constraints = np.array(list(constraints))
+    #constraints = (constraints[:, 0], constraints[:, 1])
 
     # Now create index array from matching control points.
     unflat_indices, constraints = get_connectivity_matrix(

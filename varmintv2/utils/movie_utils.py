@@ -48,7 +48,7 @@ def create_movie(
     # Things we need to both initialize and update.
     objects = {}
     N = 100
-    uu = np.linspace(1e-6, 1-1e-6, N)
+    uu = np.linspace(1e-14, 1-1e-14, N)
     path = np.hstack([
         np.vstack([uu[0]*np.ones(N), uu]),
         np.vstack([uu, uu[-1]*np.ones(N)]),

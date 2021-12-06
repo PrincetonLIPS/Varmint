@@ -47,7 +47,8 @@ def generate_element_lagrangian(element: Element, material: PhysicsModel):
         )
 
     mat_density = material.density
-    gravity = 981.0  # cm/s^2
+    gravity = 0.0 # 981.0  # cm/s^2
+    #gravity = 981.0  # cm/s^2
 
     def lagrangian(def_ctrl, def_vels, ref_ctrl, active_boundaries, traction):
         """Compute the Lagrangian of this element.

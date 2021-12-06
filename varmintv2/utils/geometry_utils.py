@@ -15,7 +15,8 @@ def verify_constraints(ctrl, constraints):
 
     all_rows, all_cols = constraints
     flat_ctrl = ctrl.reshape(-1, ctrl.shape[-1])
-    return onp.allclose(flat_ctrl[all_rows, :], flat_ctrl[all_cols, :])
+    return onp.allclose(flat_ctrl[all_rows, :], flat_ctrl[all_cols, :],
+                        rtol=0.0, atol=1e-14)
 
 
 def generate_constraints(ctrl):
