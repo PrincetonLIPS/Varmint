@@ -82,6 +82,7 @@ def generate_element_lagrangian(element: Element, material: PhysicsModel):
         ref_jacs = jacobian_u_fn(ref_ctrl)
 
         # Deformation gradients. def_jacs @ ref_jacs_inv computed via a linear solve.
+        # Should be unitless.
         defgrads = defgrads_fn(def_jacs, ref_jacs)
 
         # Jacobian determinants of reference config wrt parent.

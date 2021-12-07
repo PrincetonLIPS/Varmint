@@ -4,10 +4,10 @@ import os
 import argparse
 
 
-from varmintv2.geometry.metastable2d import construct_metastable2D
+from varmintv2.geometry.multistable2d import construct_multistable2D
 from varmintv2.geometry.elements import Patch2D
 from varmintv2.geometry.geometry import Geometry, SingleElementGeometry
-from varmintv2.physics.constitutive import NeoHookean2D
+from varmintv2.physics.constitutive import NeoHookean2D, LinearElastic2D
 from varmintv2.physics.materials import Material
 from varmintv2.solver.discretize import HamiltonianStepper
 from varmintv2.utils.movie_utils import create_movie
@@ -33,11 +33,11 @@ eutils.prepare_experiment_args(
 
 # Geometry parameters.
 parser.add_argument('-c', '--ncp', type=int, default=5)
-parser.add_argument('-q', '--quaddeg', type=int, default=10)
+parser.add_argument('-q', '--quaddeg', type=int, default=20)
 parser.add_argument('-s', '--splinedeg', type=int, default=3)
 
-parser.add_argument('--simtime', type=float, default=50.0)
-parser.add_argument('--dt', type=float, default=0.5)
+parser.add_argument('--simtime', type=float, default=5000.0)
+parser.add_argument('--dt', type=float, default=50.0)
 
 parser.add_argument('--mat_model', choices=['NeoHookean2D', 'LinearElastic2D'],
                     default='NeoHookean2D')
@@ -56,7 +56,7 @@ class WigglyMat(Material):
 
 
 def simulate(ref_ctrl, ref_vels, cell: Geometry,
-             dt, T, strategy, friction=1e-7):
+             dt, T, strategy, friction=0.0): # 1e-7):
     def friction_force(q, qdot, ref_ctrl, fixed_pos,
                        fixed_vel, tractions): return -friction * qdot
 
@@ -133,7 +133,7 @@ def main():
 
     multiplier = 10.0
     cell, init_ctrl = \
-        construct_metastable2D(patch_ncp=args.ncp, quad_degree=args.quaddeg,
+        construct_multistable2D(patch_ncp=args.ncp, quad_degree=args.quaddeg,
                                spline_degree=args.splinedeg, material=mat,
                                multiplier=multiplier)
 

@@ -67,7 +67,7 @@ def su_cosine_patches (h1, h2, l, t, t1, dx):
     return (patch_l,patch_r)
 
 
-def construct_metastable2D(patch_ncp, quad_degree, spline_degree,
+def construct_multistable2D(patch_ncp, quad_degree, spline_degree,
                            material: PhysicsModel, multiplier=1.0): # -> Tuple[SingleElementGeometry, Callable, int]:
 
     xknots = bsplines.default_knots(spline_degree, patch_ncp)
@@ -114,7 +114,7 @@ def construct_metastable2D(patch_ncp, quad_degree, spline_degree,
     # Use the template to construct a a cellular structure with offsets.
     for i in range(num_x):
         for j in range(num_y):
-            xy_offset = np.array([i*2, j])
+            xy_offset = np.array([i*l, j*h3])
             all_ctrls.append(template_ctrls.copy() + xy_offset)
 
     print('Constructing control points for Metastable2D.')
@@ -125,14 +125,14 @@ def construct_metastable2D(patch_ncp, quad_degree, spline_degree,
     # and much preferable to manually constructing constraints.
     print('Finding constraints.')
     kdtree = KDTree(flat_ctrls)
-    constraints = kdtree.query_pairs(1e-10)
+    constraints = kdtree.query_pairs(1e-14)
     constraints = np.array(list(constraints))
     print('\tDone.')
 
 
     # Dirichlet labels
-    group_1 = np.abs(all_ctrls[..., 1] - 0.0) < 1e-10
-    group_2 = np.abs(all_ctrls[..., 1] - num_y) < 1e-10
+    group_1 = np.abs(all_ctrls[..., 1] - 0.0) < 1e-14
+    group_2 = np.abs(all_ctrls[..., 1] - num_y * h3 * multiplier) < 1e-14
 
     dirichlet_groups = {
         '1': group_1,

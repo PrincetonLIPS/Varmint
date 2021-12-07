@@ -22,7 +22,7 @@ from varmintv2.geometry.geometry import Geometry
 
 
 class SuperLUOptimizer:
-    def __init__(self, geometry: Geometry, niter=5):
+    def __init__(self, geometry: Geometry, niter=200):
         self.niter = niter
         self.iter_num = 0
         self.geometry = geometry
@@ -44,10 +44,16 @@ class SuperLUOptimizer:
         xk = x0
 
         vmap_jvp = jax.vmap(jvp_fun, in_axes=(None, 0), out_axes=0)
+        tol = 1e-6
         for i in range(self.niter):
             jvp_res = vmap_jvp(
                 xk, self.geometry.jac_reconstruction_tangents).block_until_ready()
             rk = residual_fun(xk).block_until_ready()
+
+            current_norm = np.linalg.norm(rk)
+            if current_norm < tol:
+                print(f"breaking after {i} iterations")
+                break
 
             sjac = self.sparse_reconstruct(jvp_res)
             B = scipy.sparse.linalg.splu(sjac)
@@ -55,6 +61,9 @@ class SuperLUOptimizer:
 
             xk = xk + pk
             self.iter_num += 1
+        else:
+            print("ran out of iterations")
+            print(f"norm ended up {current_norm}\n")
 
         return xk, None
 
