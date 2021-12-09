@@ -22,6 +22,8 @@ import numpy as onp
 import jax.numpy as np
 import jax
 
+import matplotlib.pyplot as plt
+
 # Let's do 64-bit. Does not seem to degrade performance much.
 from jax.config import config
 config.update("jax_enable_x64", True)
@@ -98,7 +100,9 @@ def main():
     sim_time = time.time()
     curr_g_pos = l2g(ref_ctrl)
 
-    n_increments = 30
+    n_increments = 20
+    strain_energies = []
+    increments = []
     for i in range(n_increments + 1):
         # Increment displacement a little bit.
         fixed_displacements = {
@@ -130,11 +134,16 @@ def main():
 
         curr_g_pos = results.x
         strain_energy = strain_energy_fn(curr_g_pos, fixed_locs, tractions)
+        strain_energies.append(strain_energy)
+        increments.append(0.4 / n_increments * i)
         print(f'Total strain energy is: {strain_energy} J')
 
-    print('Saving result in video.')
+    print('Saving result in image.')
     image_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}.png')
     create_static_image(cell.element, g2l(curr_g_pos, fixed_locs), image_path)
+    
+    plt.plot(increments, strain_energies)
+    plt.savefig(os.path.join(args.exp_dir, f'strain_energy_graph-{args.exp_name}.png'))
     print(f'Finished simulation {args.exp_name}')
 
 

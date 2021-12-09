@@ -63,7 +63,8 @@ def simulate(ref_ctrl, ref_vels, cell: Geometry,
     full_lagrangian = cell.get_lagrangian_fn()
 
     # Initially in the ref config with zero momentum.
-    q, p = flatten(ref_ctrl, ref_vels)
+    q = flatten(ref_ctrl)
+    p = flatten(ref_vels)
     print(f'Simulation has {q.shape[0]} degrees of freedom.')
 
     stepper = HamiltonianStepper(
