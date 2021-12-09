@@ -1,14 +1,22 @@
+from comet_ml import Experiment
 import time
 import os
 import argparse
-import analysis_utils as autils
-import experiment_utils as eutils
-from varmint.statics import DenseStaticsSolver, SparseStaticsSolver
-from varmint.movie_utils import create_static_image
-from varmint.cell2d import Cell2D, CellShape
-from varmint.materials import Material
-from varmint.constitutive import NeoHookean2D, LinearElastic2D
-from varmint.patch2d import Patch2D
+
+
+from varmintv2.geometry.cell2d import construct_cell2D, generate_bertoldi_radii
+from varmintv2.geometry.elements import Patch2D
+from varmintv2.geometry.geometry import Geometry, SingleElementGeometry
+from varmintv2.physics.constitutive import NeoHookean2D
+from varmintv2.physics.materials import Material
+from varmintv2.solver.discretize import HamiltonianStepper
+from varmintv2.utils.movie_utils import create_movie, create_static_image
+
+import varmintv2.utils.analysis_utils as autils
+import varmintv2.utils.experiment_utils as eutils
+
+import scipy.optimize
+
 import numpy.random as npr
 import numpy as onp
 import jax.numpy as np
@@ -25,41 +33,27 @@ eutils.prepare_experiment_args(
 
 
 # Geometry parameters.
-parser.add_argument('-x', '--nx', type=int, default=3)
-parser.add_argument('-y', '--ny', type=int, default=1)
 parser.add_argument('-c', '--ncp', type=int, default=5)
 parser.add_argument('-q', '--quaddeg', type=int, default=10)
 parser.add_argument('-s', '--splinedeg', type=int, default=3)
 
+parser.add_argument('--simtime', type=float, default=50.0)
+parser.add_argument('--dt', type=float, default=0.5)
+
 parser.add_argument('--mat_model', choices=['NeoHookean2D', 'LinearElastic2D'],
                     default='NeoHookean2D')
 parser.add_argument('--E', type=float, default=0.005)
-parser.add_argument('--sparse', action='store_true')
-parser.add_argument('--optimizer', choices=['newton', 'newtoncg-scipy', 'trustncg-scipy',
-                                            'bfgs-scipy'], default='newton')
+parser.add_argument('--comet', dest='comet', action='store_true')
+
+parser.add_argument('--save', dest='save', action='store_true')
+parser.add_argument('--strategy', choices=['ilu_preconditioning', 'superlu', 'lu'],
+                    default='ilu_preconditioning')
 
 
 class WigglyMat(Material):
-    _E = 0.003
+    _E = 0.03
     _nu = 0.48
     _density = 1.0
-
-
-def simulate(ref_ctrl, cell, sparse=False, optimkind='newton'):
-    flatten, unflatten = cell.get_statics_flatten_unflatten()
-
-    q = flatten(ref_ctrl)
-    if sparse:
-        print(f'Using sparse solver.')
-        solver = SparseStaticsSolver(cell)
-    else:
-        print(f'Using dense solver.')
-        solver = DenseStaticsSolver(cell)
-    solve = solver.get_solver_fun(optimkind=optimkind)
-
-    new_q = solve(q, ref_ctrl)
-
-    return unflatten(new_q, ref_ctrl)
 
 
 def main():
@@ -70,100 +64,82 @@ def main():
     eutils.save_args(args)
     npr.seed(args.seed)
 
+    if args.comet:
+        # Create an experiment with your api key
+        experiment = Experiment(
+            api_key="gTBUDHLLNaIqxMWyjHKQgtlkW",
+            project_name="general",
+            workspace="denizokt",
+        )
+    else:
+        experiment = None
+
     WigglyMat._E = args.E
-    mat = eval(args.mat_model)(WigglyMat)
+    mat = NeoHookean2D(WigglyMat)
 
-    cell_shape = CellShape(
-        num_x=args.nx,
-        num_y=args.ny,
-        num_cp=args.ncp,
-        quad_degree=args.quaddeg,
-        spline_degree=args.splinedeg,
+    grid_str = "C0500 C0500 C0500\n"\
+               "C0000 C0000 C0000\n"\
+               "C0001 C0001 C0001\n"
+
+    cell, radii_to_ctrl_fn, n_cells = \
+        construct_cell2D(input_str=grid_str, patch_ncp=args.ncp,
+                         quad_degree=args.quaddeg, spline_degree=args.splinedeg,
+                         material=mat)
+
+    radii = np.concatenate(
+        (
+            generate_bertoldi_radii((n_cells,), args.ncp, 0.12, -0.06),
+        )
     )
+    ref_ctrl = radii_to_ctrl_fn(radii)
+    potential_energy_fn = cell.get_potential_energy_fn(ref_ctrl)
+    grad_potential_energy_fn = jax.grad(potential_energy_fn)
+    hess_potential_energy_fn = jax.hessian(potential_energy_fn)
 
-    cell = Cell2D(cell_shape=cell_shape, fixed_side='left',
-                  material=mat, infile='grid.txt')
-    init_radii = cell.generate_random_radii(args.seed)
+    potential_energy_fn = jax.jit(potential_energy_fn)
+    grad_potential_energy_fn = jax.jit(grad_potential_energy_fn)
+    hess_potential_energy_fn = jax.jit(hess_potential_energy_fn)
 
-    print('Starting statics simulation')
-    ctrl_sol = simulate(cell.radii_to_ctrl(init_radii), cell,
-                        sparse=args.sparse, optimkind=args.optimizer)
-    print('Saving result in figure.')
-    im_path = os.path.join(args.exp_dir, 'result.png')
-    create_static_image(cell.patch, ctrl_sol, im_path)
+    l2g, g2l = cell.get_global_local_maps()
+
+    sim_time = time.time()
+    curr_g_pos = l2g(ref_ctrl)
+    for i in range(30):
+        # Increment displacement a little bit.
+        fixed_displacements = {
+            '1': np.array([0.0, 0.0]),
+            '5': np.array([0.0, -0.1 * i]),
+        }
+
+        tractions = {}
+
+        fixed_locs = cell.fixed_locs_from_dict(ref_ctrl, fixed_displacements)
+        tractions = cell.tractions_from_dict(tractions)
+
+        # Solve for new state
+        print(f'Starting optimization at iteration {i}.')
+        opt_start = time.time()
+        results = scipy.optimize.minimize(potential_energy_fn, curr_g_pos,
+                                          args=(fixed_locs, tractions),
+                                          method='trust-ncg',
+                                          jac=grad_potential_energy_fn,
+                                          hess=hess_potential_energy_fn,
+                                          #options={'maxiter': 10000}
+                                          )
+        print(f'Optimization succeeded: {results.success}.')
+        print(f'Took {time.time() - opt_start} seconds.')
+        if not results.success:
+            print(f'Optimization failed with status {results.status}.')
+            print(results.message)
+            break
+
+        curr_g_pos = results.x
+
+    print('Saving result in video.')
+    image_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}.png')
+    create_static_image(cell.element, g2l(curr_g_pos, fixed_locs), image_path)
+    print(f'Finished simulation {args.exp_name}')
 
 
 if __name__ == '__main__':
     main()
-
-
-# TODO(doktay): Incorporate adjoint optimization again.
-#  free_energy = cell.get_free_energy_fun(patchwise=True)
-#
-#  def loss_and_adjoint_grad(loss_fn, init_radii):
-#    # loss_fn should be a function of ctrl_seq
-#    grad_loss = jax.jit(jax.grad(loss_fn))
-#    ctrl_sol = simulate(cell.radii_to_ctrl(init_radii), cell)
-#    dJdu = grad_loss(ctrl_sol)
-#
-#    def inner_loss(radii, def_ctrl):
-#      ref_ctrl = cell.radii_to_ctrl(radii)
-#
-#      # So that fixed control points work out. This is hacky.
-#      flat     = flatten(def_ctrl)
-#      unflat   = unflatten(flat, fixed_locations)
-#
-#      all_args = np.stack([def_ctrl, ref_ctrl], axis=-1)
-#      return np.sum(jax.vmap(lambda x: free_energy(x[..., 0], x[..., 1]))(all_args))
-#
-#    loss_val = loss_fn(ctrl_sol)
-#    implicit_fn = jax.jit(jax.grad(inner_loss, argnums=1))
-#    implicit_vjp = jax.jit(jax.vjp(implicit_fn, init_radii, ctrl_sol)[1])
-#
-#    def vjp_ctrl(v):
-#      return implicit_vjp(v)[1]
-#
-#    def vjp_radii(v):
-#      return implicit_vjp(v)[0]
-#
-#    flat_size = ctrl_sol.flatten().shape[0]
-#    unflat_size = ctrl_sol.shape
-#
-#    def spmatvec(v):
-#      v = v.reshape(ctrl_sol.shape)
-#      vjp = implicit_vjp(v)[1]
-#      return vjp.flatten()
-#
-#    A = scipy.sparse.linalg.LinearOperator((flat_size,flat_size), matvec=spmatvec)
-#
-#    # Precomputing full Jacobian might be better
-#    #print('precomputing hessian')
-#    #hess = jax.jacfwd(implicit_fn, argnums=1)(init_radii, ctrl_sol)
-#    #print(f'computed hessian with shape {hess.shape}')
-#
-#    print('solving adjoint equation')
-#
-#    adjoint, info = scipy.sparse.linalg.minres(A, dJdu.flatten())
-#    adjoint = adjoint.reshape(unflat_size)
-#    grad = vjp_radii(adjoint)
-#
-#    return loss_val, -grad, ctrl_sol
-#
-#  def sample_loss_fn(ctrl):
-#    return np.mean(ctrl[..., 0])
-#
-#  def close_to_center_loss_fn(ctrl):
-#    return np.linalg.norm(ctrl[..., 0] - 10)
-#
-#
-#
-#  print('Starting training')
-#  lr = 1.0
-#  for ii in range(1):
-#    loss_val, loss_grad, ctrl_sol = loss_and_adjoint_grad(sample_loss_fn, radii)
-#    print()
-#    print(loss_val)
-#
-#    shape.create_movie([ctrl_sol], 'long-hanging-cells-%d.mp4' % (ii+1), labels=False)
-#
-#    radii = np.clip(radii - lr * loss_grad, 0.05, 0.95)

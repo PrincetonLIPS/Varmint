@@ -14,7 +14,7 @@ from scipy.sparse.csgraph import connected_components, dijkstra
 import scipy.sparse
 
 from varmintv2.physics.constitutive import PhysicsModel
-from varmintv2.physics.energy import generate_element_lagrangian
+from varmintv2.physics.energy import generate_total_energy_fn
 from varmintv2.utils import geometry_utils
 from varmintv2.utils import sparsity
 
@@ -33,8 +33,8 @@ class Geometry(ABC):
 
     @abstractmethod
     def get_global_local_maps(self) \
-        -> Tuple[Callable[[ArrayND, ArrayND], Tuple[ArrayND, ArrayND]],
-                 Callable[[ArrayND, ArrayND, ArrayND, ArrayND], Tuple[ArrayND, ArrayND]]]:
+        -> Tuple[Callable[[ArrayND], ArrayND],
+                 Callable[[ArrayND, ArrayND], ArrayND]]:
         """Get the mapping functions between global and local coordinates.
         
         Returns:
@@ -43,22 +43,19 @@ class Geometry(ABC):
         Two functions, one for global -> local and another for local -> global.
 
         The global -> local function takes in 4 ndarray arguments:
-            - global positions
-            - global velocities
-            - values of fixed positions
-            - values of fixed velocities
+            - global coordinates
+            - values of fixed coordinates
         
         All the above arrays should have the same shape. The function will then
-        return the local positions and velocities that obey the fixed values.
+        return the local coordinates that obey the fixed values.
 
-        The local -> global function takes in 2 ndarray arguments:
-            - local positions
-            - local velocities
+        The local -> global function takes a single ndarray argument:
+            - local coordinates
 
         All the above arrays should have the same shape. The function will then
-        return the global positions and velocities. It will choose an arbitrary
-        value amongst incident local control points (the user should ensure the
-        values are the same).
+        return the global coordinates. It will choose an arbitrary value amongst
+        incident local control points (the user should ensure the values are the
+        same).
         """
         pass
 
@@ -66,15 +63,17 @@ class Geometry(ABC):
                                     fixed_positions, fixed_velocities):
         """Helper function to convert a sequence of global coordinates to local."""
         _, g2l_map = self.get_global_local_maps()
-        local_pos, local_vel = zip(
-            *[g2l_map(q, p, f, v) for q, p, f, v in \
-                zip(positions, velocities, fixed_positions, fixed_velocities)]
-        )
+
+        local_pos = [g2l_map(q, f) for q, f in \
+                zip(positions, fixed_positions)]
+
+        local_vel = [g2l_map(p, v) for p, v in \
+                zip(velocities, fixed_velocities)]
 
         return local_pos, local_vel
     
     @abstractmethod
-    def get_lagrangian_fn(self):
+    def get_lagrangian_fn(self) -> Callable:
         """Return the Lagrangian.
         
         Returns a function that computes the Lagrangian over the domain
@@ -141,6 +140,16 @@ class Geometry(ABC):
         """
         pass
 
+    @abstractmethod
+    def get_stress_field_fn(self) -> Tuple[ArrayND, Callable]:
+        """Returns a function that computes the stress field.
+        
+        Returns a tuple. The first element is the list of points where the 
+        stress field will be computed. The second is a function that takes in
+        deformed and reference control points and outputs the Cauchy stress
+        tensor at each point.
+        """
+
 class SingleElementGeometry(Geometry):
     """Geometry composed of a single type of Element."""
 
@@ -204,6 +213,36 @@ class SingleElementGeometry(Geometry):
             self.traction_fns[group] = decorated
             return decorated
         return inner
+    
+    def fixed_locs_from_dict(self, ref_l_position, displacements):
+        """Used for statics. Given a dictionary of displacements, create
+        a fixed locations array."""
+
+        absolute_positions = \
+            {key: val * self.dirichlet_labels[key][..., jnp.newaxis] 
+                    for key, val in displacements.items()}
+        
+        all_pos = ref_l_position
+        for group in self.dirichlet_labels:
+            pos = absolute_positions.get(group, None)
+
+            if pos is not None:
+                all_pos = all_pos + pos
+        return all_pos
+
+    def tractions_from_dict(self, tractions):
+        """Used for statics. Given a dictionary of traction forces, create
+        a traction specification array."""
+
+        parsed_tractions = \
+            {key: val * self.traction_labels[key][..., jnp.newaxis]
+                    for key, val in tractions.items()}
+
+        zero_tractions = jnp.zeros((self.index_array.shape[0], \
+                                    self.element.num_boundaries, \
+                                    self.element.n_d))
+
+        return zero_tractions + sum(parsed_tractions)
 
     def get_fixed_locs_fn(self, ref_l_position):
         pos_fns = []
@@ -258,46 +297,32 @@ class SingleElementGeometry(Geometry):
     n_components: int
 
     def get_global_local_maps(self) -> Tuple[Callable, Callable]:
-        def local_to_global(local_pos, local_vel):
+        def local_to_global(local_coords):
             kZeros = jnp.zeros((self.n_components, self.element.n_d))
 
-            global_pos = jax.ops.index_update(kZeros, self.index_array, local_pos)
-            global_vel = jax.ops.index_update(kZeros, self.index_array, local_vel)
+            global_coords = jax.ops.index_update(kZeros, self.index_array, local_coords)
+            global_coords = jnp.take(global_coords, self.nonfixed_labels, axis=0)
 
-            global_pos = jnp.take(global_pos, self.nonfixed_labels, axis=0)
-            global_vel = jnp.take(global_vel, self.nonfixed_labels, axis=0)
+            return global_coords.flatten()
 
-            return global_pos.flatten(), global_vel.flatten()
-
-        def global_to_local(global_pos, global_vel, fixed_pos, fixed_vel):
+        def global_to_local(global_coords, fixed_coords):
             kZeros = jnp.zeros((self.n_components, self.element.n_d))
 
             fixed_locs = jax.ops.index_update(
-                kZeros, self.index_array, fixed_pos)
+                kZeros, self.index_array, fixed_coords)
             fixed_locs = jnp.take(fixed_locs, self.fixed_labels, axis=0)
 
-            fixed_vels = jax.ops.index_update(
-                kZeros, self.index_array, fixed_vel)
-            fixed_vels = jnp.take(fixed_vels, self.fixed_labels, axis=0)
-
             local_pos = kZeros
-            local_vel = kZeros
 
-            global_pos = global_pos.reshape((-1, self.element.n_d))
-            global_vel = global_vel.reshape((-1, self.element.n_d))
+            global_pos = global_coords.reshape((-1, self.element.n_d))
 
             local_pos = jax.ops.index_update(
                 local_pos, self.nonfixed_labels, global_pos)
-            local_vel = jax.ops.index_update(
-                local_vel, self.nonfixed_labels, global_vel)
 
             fixed_pos = jax.ops.index_update(local_pos, self.fixed_labels,
                                              fixed_locs)
-            fixed_vel = jax.ops.index_update(local_vel, self.fixed_labels,
-                                             fixed_vels)
 
-            return jnp.take(fixed_pos, self.index_array, axis=0), \
-                jnp.take(fixed_vel, self.index_array, axis=0)
+            return jnp.take(fixed_pos, self.index_array, axis=0)
 
         return local_to_global, global_to_local
 
@@ -310,15 +335,38 @@ class SingleElementGeometry(Geometry):
 
         def lagrangian(cur_g_position, cur_g_velocity, ref_l_position,
                        fix_l_position, fix_l_velocity, traction):
-            def_ctrl, def_vels = g2l(cur_g_position, cur_g_velocity,
-                                     fix_l_position, fix_l_velocity)
+            def_ctrl = g2l(cur_g_position, fix_l_position)
+            def_vels = g2l(cur_g_velocity, fix_l_velocity)
             
-            return jnp.sum(jax.vmap(self.element_lagrangian)(
+            K, G, S, T = jax.vmap(self.element_energy_fn)(
                 def_ctrl, def_vels, ref_l_position,
                 self.active_traction_boundaries, traction
-            ))
+            )
+
+            return jnp.sum(K - G - S - T)
 
         return lagrangian
+
+    def get_potential_energy_fn(self, ref_l_position):
+        l2g, g2l = self.get_global_local_maps()
+
+        def potential_energy(cur_g_position, fix_l_position, traction):
+            def_ctrl = g2l(cur_g_position, fix_l_position)
+            
+            _, G, S, T = jax.vmap(self.element_energy_fn)(
+                def_ctrl, jnp.zeros_like(def_ctrl), ref_l_position,
+                self.active_traction_boundaries, traction
+            )
+
+            return jnp.sum(G + S + T)
+
+        return potential_energy
+
+    def get_stress_field_fn(self):
+        # get quad points for element object.
+        # compute map of quad points for each element in the geometry.
+        # compute generate_stress_fn for each
+        pass
 
     @property
     def jac_sparsity_graph(self):
@@ -379,7 +427,7 @@ class SingleElementGeometry(Geometry):
         self.traction_fns = {}
 
         self.element = element
-        self.element_lagrangian = generate_element_lagrangian(element, material)
+        self.element_energy_fn = generate_total_energy_fn(element, material)
 
         # Construct adjacency matrix of the nodes.
         n_cp = init_ctrl.size // init_ctrl.shape[-1]

@@ -446,7 +446,14 @@ def construct_cell2D(input_str, patch_ncp, quad_degree, spline_degree,
 
     # Case when we have no cells.
     if len(all_corners) == 0:
-        return lambda _: ctrls
+        return SingleElementGeometry(
+            element=element,
+            material=material,
+            init_ctrl=ctrls,
+            constraints=constraints,
+            dirichlet_labels=dirichlet_labels,
+            traction_labels=traction_labels
+        ), lambda _: ctrls, 0
 
     all_corners = np.stack(all_corners, axis=0)
     all_indices = np.array(all_indices)

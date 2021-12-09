@@ -44,8 +44,25 @@ class Element(ABC):
     the Jacobian.
     """
 
+    quad_points: ArrayND
+
     @abstractmethod
-    def get_map_fn(self) -> Callable[[CtrlArray], Array2D]:
+    def get_map_fn(self, points) -> Callable[[CtrlArray], Array2D]:
+        """Get function to compute the parent -> physical map at
+        specified list of points.
+        
+        Returns:
+        ========
+        Function that takes in control points of shape self.ctrl_shape
+        and returns the deformation of all points provided. Shape $(N, n_d)$,
+        where $N$ is number of points given as an argument and $n_d$ is
+        embedding dimension.
+
+        """
+        pass
+
+    @abstractmethod
+    def get_quad_map_fn(self) -> Callable[[CtrlArray], Array2D]:
         """Get function to compute the parent -> physical map at
         each interior quad point, given control points.
 
@@ -59,7 +76,7 @@ class Element(ABC):
         pass
 
     @abstractmethod
-    def get_map_boundary_fn(self, index: int) -> Callable[[CtrlArray], Array2D]:
+    def get_quad_map_boundary_fn(self, index: int) -> Callable[[CtrlArray], Array2D]:
         """Get function to compute the parent -> physical map at
         each boundary quad point, given control points.
 
@@ -73,7 +90,23 @@ class Element(ABC):
         pass
 
     @abstractmethod
-    def get_map_jac_fn(self) -> Callable[[CtrlArray], Array3D]:
+    def get_map_jac_fn(self, points) -> Callable[[CtrlArray], Array2D]:
+        """Get function to compute Jacobian of the parent -> physical map
+        at all specified points, given control points.
+        
+        Returns:
+        ========
+
+        Function that takes in control points of shape self.ctrl_shape
+        and returns a 3d array of Jacobians of physical space wrt parent space
+        for each given point. Ex: In 2D, with N points, the function would
+        return shape (N, 2, 2).
+
+        """
+        pass
+
+    @abstractmethod
+    def get_quad_map_jac_fn(self) -> Callable[[CtrlArray], Array3D]:
         """Get function to compute Jacobian of the parent -> physical map
         at all quad points at the interior of the element, given control points.
         
@@ -89,7 +122,7 @@ class Element(ABC):
         pass
 
     @abstractmethod
-    def get_map_boundary_jac_fn(self, index: int) -> Callable[[CtrlArray], Array2D]:
+    def get_quad_map_boundary_jac_fn(self, index: int) -> Callable[[CtrlArray], Array2D]:
         """Get function to compute Jacobian of the parent -> physical map
         at all quad points at the boundary of the element, given control points.
         As the boundary is parameterized by a scalar, the Jacobian will be
@@ -106,7 +139,23 @@ class Element(ABC):
         pass
 
     @abstractmethod
-    def get_ctrl_jacobian_fn(self) -> Callable[[CtrlArray], ArrayND]:
+    def get_ctrl_jacobian_fn(self, points) -> Callable[[CtrlArray], ArrayND]:
+        """Get function that computes the Jacobian with respect to the control
+        points at each given point, given control points.
+
+        Returns:
+        ========
+        Function that takes in control points of shape self.ctrl_shape
+        and returns the Jacobian of the deformation at all given points with
+        respect to control points.
+        Shape is $(N, n_d, \texttt{*self.ctrl_shape})$ where $N$ is
+        number points, $n_d$ is embedding dimension.
+
+        """
+        pass
+
+    @abstractmethod
+    def get_quad_ctrl_jacobian_fn(self) -> Callable[[CtrlArray], ArrayND]:
         """Get function that computes the Jacobian with respect to the control
         points at each interior quad point, given control points.
 
@@ -173,7 +222,7 @@ class Element(ABC):
 
         """
         pass
-    
+
     @property
     @abstractmethod
     def n_d(self):
@@ -269,10 +318,10 @@ class Patch2D(Element):
         offset_mesh = mesh(uniq_xknots[:-1], uniq_yknots[:-1])
         width_mesh = mesh(xwidths, ywidths)
 
-        self.points = onp.reshape(points[onp.newaxis, onp.newaxis, :, :]
-                                 * width_mesh[:, :, onp.newaxis, :]
-                                 + offset_mesh[:, :, onp.newaxis, :],
-                                 (-1, 2))
+        self.quad_points = onp.reshape(points[onp.newaxis, onp.newaxis, :, :]
+                                       * width_mesh[:, :, onp.newaxis, :]
+                                       + offset_mesh[:, :, onp.newaxis, :],
+                                       (-1, 2))
 
         self.x_line_points = onp.reshape(
             line_points[onp.newaxis, :]
@@ -292,14 +341,10 @@ class Patch2D(Element):
         self.line_weights = onp.reshape(line_scheme.weights / 2, (1, -1))
         #self.line_weights = np.ones_like(self.line_weights)
 
-    def get_map_fn(self):
-        """ Get a function that produces deformations
-
-        Takes in control points and returns a deformation for each quad point.
-        """
+    def get_map_fn(self, points):
         def deformation_fn(ctrl):
             return bspline2d(
-                self.points,
+                points,
                 ctrl,
                 self.xknots,
                 self.yknots,
@@ -307,75 +352,53 @@ class Patch2D(Element):
             )
         return deformation_fn
 
-    def get_map_boundary_fn(self, orientation):
+    def get_quad_map_fn(self):
+        """ Get a function that produces deformations
+
+        Takes in control points and returns a deformation for each quad point.
+        """
+        return self.get_map_fn(self.quad_points)
+
+    def get_quad_map_boundary_fn(self, orientation):
         """ Get a function that produces deformations along a certain side of the cell.
 
         The line depends on the orientation: 0 - left, 1 - top, 2 - right, 3 - bottom
         """
 
         if orientation == 0:
-            def line_deformation_fn(ctrl):
-                y_n_points = self.y_line_points.shape[0]
-                points = jnp.stack(
-                    [jnp.zeros(y_n_points), self.y_line_points], axis=-1)
-
-                return bspline2d(
-                    points,
-                    ctrl,
-                    self.xknots,
-                    self.yknots,
-                    self.spline_deg
-                )
+            y_n_points = self.y_line_points.shape[0]
+            points = jnp.stack(
+                [jnp.zeros(y_n_points), self.y_line_points], axis=-1)
+            line_deformation_fn = self.get_map_fn(points)
 
         elif orientation == 1:
-            def line_deformation_fn(ctrl):
-                x_n_points = self.x_line_points.shape[0]
-                points = jnp.stack(
-                    [self.x_line_points, jnp.ones(x_n_points)], axis=-1)
+            x_n_points = self.x_line_points.shape[0]
+            points = jnp.stack(
+                [self.x_line_points, jnp.ones(x_n_points)], axis=-1)
+            line_deformation_fn = self.get_map_fn(points)
 
-                return bspline2d(
-                    points,
-                    ctrl,
-                    self.xknots,
-                    self.yknots,
-                    self.spline_deg
-                )
         elif orientation == 2:
-            def line_deformation_fn(ctrl):
-                y_n_points = self.y_line_points.shape[0]
-                points = jnp.stack(
-                    [jnp.ones(y_n_points), self.y_line_points], axis=-1)
+            y_n_points = self.y_line_points.shape[0]
+            points = jnp.stack(
+                [jnp.ones(y_n_points), self.y_line_points], axis=-1)
+            line_deformation_fn = self.get_map_fn(points)
 
-                return bspline2d(
-                    points,
-                    ctrl,
-                    self.xknots,
-                    self.yknots,
-                    self.spline_deg
-                )
         elif orientation == 3:
-            def line_deformation_fn(ctrl):
-                x_n_points = self.x_line_points.shape[0]
-                points = jnp.stack(
-                    [self.x_line_points, jnp.zeros(x_n_points)], axis=-1)
+            x_n_points = self.x_line_points.shape[0]
+            points = jnp.stack(
+                [self.x_line_points, jnp.zeros(x_n_points)], axis=-1)
+            line_deformation_fn = self.get_map_fn(points)
 
-                return bspline2d(
-                    points,
-                    ctrl,
-                    self.xknots,
-                    self.yknots,
-                    self.spline_deg
-                )
         else:
             raise ValueError(f"Invalid boundary index {index} for Patch2D.")
 
         return line_deformation_fn
 
-    def get_map_jac_fn(self):
+    def get_map_jac_fn(self, points):
         """ Take control points, return 2x2 Jacobians wrt quad points. """
         def map_jac_fn(ctrl):
             return bspline2d_derivs(
-                self.points,
+                points,
                 ctrl,
                 self.xknots,
                 self.yknots,
@@ -383,7 +406,11 @@ class Patch2D(Element):
             )
         return map_jac_fn
 
-    def get_map_boundary_jac_fn(self, orientation):
+    def get_quad_map_jac_fn(self):
+        """ Take control points, return 2x2 Jacobians wrt quad points. """
+        return self.get_map_jac_fn(self.quad_points)
+
+    def get_quad_map_boundary_jac_fn(self, orientation):
         """ Take control points, return 2x1 Jacobians wrt boundary quad points. """
         if orientation == 0:
             def map_boundary_jac_fn(ctrl):
@@ -442,17 +469,21 @@ class Patch2D(Element):
 
         return map_boundary_jac_fn
 
-    def get_ctrl_jacobian_fn(self):
+    def get_ctrl_jacobian_fn(self, points):
         """ Take control points, return Jacobian wrt control points. """
         def jacobian_ctrl_fn(ctrl):
             return bspline2d_derivs_ctrl(
-                self.points,
+                points,
                 ctrl,
                 self.xknots,
                 self.yknots,
                 self.spline_deg,
             )
         return jacobian_ctrl_fn
+
+    def get_quad_ctrl_jacobian_fn(self):
+        """ Take control points, return Jacobian wrt control points. """
+        return self.get_ctrl_jacobian_fn(self.quad_points)
 
     def get_quad_fn(self):
         def quad_fn(ordinates):
@@ -485,6 +516,8 @@ class Patch2D(Element):
                 )
 
                 return jnp.sum(jnp.sum(self.line_weights.T * ords.T, axis=-2) * widths, axis=-1).T
+        else:
+            raise ValueError(f"Invalid boundary index {orientation} for Patch2D.")
 
         return boundary_quad_fn
 
@@ -503,7 +536,7 @@ class Patch2D(Element):
 
     @property
     def num_quad_pts(self):
-        return self.points.shape[0]
+        return self.quad_points.shape[0]
 
     def num_boundary_quad_pts(self, index):
         if index == 0 or index == 2:

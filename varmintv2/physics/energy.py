@@ -7,16 +7,89 @@ import logging
 
 from varmintv2.geometry.elements import Element
 from varmintv2.physics.constitutive import PhysicsModel
+from varmintv2.utils.typing import ArrayND
 
 
-def generate_element_lagrangian(element: Element, material: PhysicsModel):
-    """ Generate a Lagrangian function over an Element. """
+def generate_strain_energy_fn(element: Element,
+                              material: PhysicsModel,
+                              points: ArrayND):
+    """Given an element, material model, and set of points,
+    return a function that computes strain energy density on those points."""
 
-    jacobian_u_fn = element.get_map_jac_fn()
+    jacobian_u_fn = element.get_map_jac_fn(points)
+    energy_fn = material.get_energy_fn()
+
+    vmap_energy_fn = jax.vmap(energy_fn, in_axes=(0,))
+
+    defgrads_fn = jax.vmap(
+        lambda A, B: jnpla.solve(B.T, A.T).T,
+        in_axes=(0, 0),
+    )
+
+    def strain_energy_fn(def_ctrl, ref_ctrl):
+        # Jacobian of reference config wrt parent config.
+        def_jacs = jacobian_u_fn(def_ctrl)
+        ref_jacs = jacobian_u_fn(ref_ctrl)
+
+        # Deformation gradients. def_jacs @ ref_jacs_inv computed via a linear solve.
+        # Should be unitless.
+        defgrads = defgrads_fn(def_jacs, ref_jacs)
+
+        # Strain energy density wrt parent config.
+        # Units are GPa = 10^9 J / m^3 in the reference configuration.
+        # Convert to J / cm^3 by multiplying by 10^3.
+        return vmap_energy_fn(defgrads) * 1e3
+
+    return strain_energy_fn
+
+
+def generate_stress_fn(element: Element,
+                       material: PhysicsModel,
+                       points: ArrayND):
+    """Given an element, material model, and set of points,
+    return a function that computes the Cauchy stress tensor on those points."""
+
+    jacobian_u_fn = element.get_map_jac_fn(points)
+    energy_fn = material.get_energy_fn()
+    stress_fn = jax.grad(energy_fn)  # Autodiff is great
+
+    vmap_stress_fn = jax.vmap(stress_fn, in_axes=(0,))
+
+    defgrads_fn = jax.vmap(
+        lambda A, B: jnpla.solve(B.T, A.T).T,
+        in_axes=(0, 0),
+    )
+
+    def compute_stress_fn(def_ctrl, ref_ctrl):
+        # Jacobian of reference config wrt parent config.
+        def_jacs = jacobian_u_fn(def_ctrl)
+        ref_jacs = jacobian_u_fn(ref_ctrl)
+
+        # Deformation gradients. def_jacs @ ref_jacs_inv computed via a linear solve.
+        # Should be unitless.
+        defgrads = defgrads_fn(def_jacs, ref_jacs)
+
+        # Strain energy density wrt parent config.
+        # Units are GPa = 10^9 J / m^3 in the reference configuration.
+        # Convert to J / cm^3 by multiplying by 10^3.
+        return vmap_stress_fn(defgrads) * 1e3
+
+    return compute_stress_fn
+
+
+def generate_total_energy_fn(element: Element, material: PhysicsModel):
+    """ Generate a function that returns all components of the energy
+    of the system:
+
+    Kinetic, gravity potential, strain potential, traction potential
+
+    """
+
+    jacobian_u_fn = element.get_quad_map_jac_fn()
 
     line_jacobian_u_fns = []
     for i in range(element.num_boundaries):
-        line_jacobian_u_fns.append(element.get_map_boundary_jac_fn(i))
+        line_jacobian_u_fns.append(element.get_quad_map_boundary_jac_fn(i))
 
     energy_fn = material.get_energy_fn()
     quad_fn = element.get_quad_fn()
@@ -25,13 +98,13 @@ def generate_element_lagrangian(element: Element, material: PhysicsModel):
     for i in range(element.num_boundaries):
         line_quad_fns.append(element.get_boundary_quad_fn(i))
 
-    deformation_fn = element.get_map_fn()
+    deformation_fn = element.get_quad_map_fn()
 
     line_deformation_fns = []
     for i in range(element.num_boundaries):
-        line_deformation_fns.append(element.get_map_boundary_fn(i))
+        line_deformation_fns.append(element.get_quad_map_boundary_fn(i))
 
-    jacobian_ctrl_fn = element.get_ctrl_jacobian_fn()
+    jacobian_ctrl_fn = element.get_quad_ctrl_jacobian_fn()
     vmap_energy_fn = jax.vmap(energy_fn, in_axes=(0,))
     jac_dets_fn = jax.vmap(jnpla.det, in_axes=(0,))
 
@@ -50,8 +123,8 @@ def generate_element_lagrangian(element: Element, material: PhysicsModel):
     gravity = 0.0 # 981.0  # cm/s^2
     #gravity = 981.0  # cm/s^2
 
-    def lagrangian(def_ctrl, def_vels, ref_ctrl, active_boundaries, traction):
-        """Compute the Lagrangian of this element.
+    def all_energy(def_ctrl, def_vels, ref_ctrl, active_boundaries, traction):
+        """Compute the various components of energy of this element.
 
         In the following, n_b is element.num_boundaries, and n_d is element.n_d.
 
@@ -74,7 +147,16 @@ def generate_element_lagrangian(element: Element, material: PhysicsModel):
 
         Returns
         -------
-        Scalar Lagrangian over the element integrated using numerical quadrature.
+        4 scalars representing the energy of the system:
+            - Kinetic energy (K)
+            - Gravity potential energy (G)
+            - Strain potential energy (S)
+            - Traction potential energy (T)
+        
+        These can be combined to create the appropriate quantities for
+        optimization. As an example, the Lagrangian can be computed as:
+
+        L = K - G - S - T
 
         """
         # Jacobian of reference config wrt parent config.
@@ -152,8 +234,8 @@ def generate_element_lagrangian(element: Element, material: PhysicsModel):
         kinetic_energy = 1e-7 * \
             jnp.sum(kinetic_energy_fn(mass_matrix, def_vels))
 
-        # Compute and return lagrangian.
-        return kinetic_energy - gravity_potential - \
-            strain_potential + total_traction_potential
+        # Return all the components of the energy.
+        return kinetic_energy, gravity_potential, \
+               strain_potential, -total_traction_potential
 
-    return lagrangian
+    return all_energy
