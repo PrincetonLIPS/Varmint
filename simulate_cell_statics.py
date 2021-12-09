@@ -93,6 +93,8 @@ def main():
     )
     ref_ctrl = radii_to_ctrl_fn(radii)
     potential_energy_fn = cell.get_potential_energy_fn(ref_ctrl)
+    strain_energy_fn = jax.jit(cell.get_strain_energy_fn(ref_ctrl))
+
     grad_potential_energy_fn = jax.grad(potential_energy_fn)
     hess_potential_energy_fn = jax.hessian(potential_energy_fn)
 
@@ -134,6 +136,8 @@ def main():
             break
 
         curr_g_pos = results.x
+        strain_energy = strain_energy_fn(curr_g_pos, fixed_locs, tractions)
+        print(f'Total strain energy is: {strain_energy} J')
 
     print('Saving result in video.')
     image_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}.png')

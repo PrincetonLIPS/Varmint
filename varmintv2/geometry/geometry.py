@@ -362,6 +362,21 @@ class SingleElementGeometry(Geometry):
 
         return potential_energy
 
+    def get_strain_energy_fn(self, ref_l_position):
+        l2g, g2l = self.get_global_local_maps()
+
+        def strain_energy(cur_g_position, fix_l_position, traction):
+            def_ctrl = g2l(cur_g_position, fix_l_position)
+            
+            _, G, S, T = jax.vmap(self.element_energy_fn)(
+                def_ctrl, jnp.zeros_like(def_ctrl), ref_l_position,
+                self.active_traction_boundaries, traction
+            )
+
+            return jnp.sum(S)
+
+        return strain_energy
+
     def get_stress_field_fn(self):
         # get quad points for element object.
         # compute map of quad points for each element in the geometry.
