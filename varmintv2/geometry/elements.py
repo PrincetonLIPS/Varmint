@@ -248,6 +248,217 @@ class Element(ABC):
         pass
 
 
+class IsoparametricQuad2D(Element):
+    """Standard bilinear quadrilateral element.
+    
+    4 control points define the domain:
+        - bottom left
+        - bottom right
+        - top right
+        - top left
+
+    TODO(doktay): Extend this to arbitrary order Lagrange elements.
+    The implementation should be a bit more general without being particularly
+    more complicated.
+    """
+
+    def __init__(self, quad_deg):
+        """Constructor for Bilinear quadrilateral.
+
+        Parameters:
+        -----------
+         - spline_deg: The degree of the bspline.
+
+        """
+        self.quad_deg = quad_deg
+        self.__compute_quad_points()
+
+    @staticmethod
+    def __single_point_map(point, ctrl):
+        """Mapping of a single point in R2.
+
+        Standard bilinear quadrilateral element.
+        The parent space is [-1,1]x[-1,1].
+
+        point is (2,), ctrl is (4, 2)
+        """
+
+        shape_fn = 0.25 * jnp.array([
+            (1-point[0]) * (1-point[1]),
+            (1+point[0]) * (1-point[1]),
+            (1+point[0]) * (1+point[1]),
+            (1-point[0]) * (1+point[1]),
+        ])
+
+        return shape_fn @ ctrl
+
+    def __compute_quad_points(self):
+        # Ask quadpy for a quadrature scheme.
+        scheme = quadpy.c2.get_good_scheme(self.quad_deg)
+
+        # Scheme for line integrals
+        line_scheme = quadpy.c1.gauss_legendre(3 * self.quad_deg)
+
+        self.quad_points = scheme.points.T
+        self.line_points = line_scheme.points
+
+        self.weights = scheme.weights * 4  # quadpy c2 weights sum to 1 instead
+                                           # of 4 even though the domain is
+                                           # [-1,1]x[-1,1]
+        self.line_weights = line_scheme.weights
+
+    def get_map_fn(self, points):
+        vmap_map = jax.vmap(IsoparametricQuad2D.__single_point_map,
+                            in_axes=(0, None), out_axes=0)
+        def deformation_fn(ctrl):
+            return vmap_map(points, ctrl)
+        return deformation_fn
+
+    def get_quad_map_fn(self):
+        return self.get_map_fn(self.quad_points)
+
+    def get_quad_map_boundary_fn(self, orientation):
+        """ Get a function that produces deformations along a certain side of the cell.
+
+        The line depends on the orientation: 0 - left, 1 - top, 2 - right, 3 - bottom
+        """
+        n_points = self.line_points.shape[0]
+
+        if orientation == 0:
+            points = jnp.stack(
+                [-jnp.ones(n_points), self.line_points], axis=-1)
+            line_deformation_fn = self.get_map_fn(points)
+
+        elif orientation == 1:
+            points = jnp.stack(
+                [self.line_points, jnp.ones(n_points)], axis=-1)
+            line_deformation_fn = self.get_map_fn(points)
+
+        elif orientation == 2:
+            points = jnp.stack(
+                [jnp.ones(n_points), self.line_points], axis=-1)
+            line_deformation_fn = self.get_map_fn(points)
+
+        elif orientation == 3:
+            points = jnp.stack(
+                [self.line_points, -jnp.ones(n_points)], axis=-1)
+            line_deformation_fn = self.get_map_fn(points)
+
+        else:
+            raise ValueError(f"Invalid boundary index {index} for Patch2D.")
+
+        return line_deformation_fn
+
+    def get_map_jac_fn(self, points):
+        jac_map = jax.jacfwd(IsoparametricQuad2D.__single_point_map, argnums=0)
+        vmap_jac_map = jax.vmap(jac_map, in_axes=(0, None), out_axes=0)
+
+        def map_jac_fn(ctrl):
+            return vmap_jac_map(points, ctrl)
+        return map_jac_fn
+
+    def get_quad_map_jac_fn(self):
+        return self.get_map_jac_fn(self.quad_points)
+
+    def get_quad_map_boundary_jac_fn(self, orientation):
+        """ Take control points, return 2x1 Jacobians wrt boundary quad points. """
+        n_points = self.line_points.shape[0]
+        jac_map = jax.jacfwd(IsoparametricQuad2D.__single_point_map, argnums=0)
+        vmap_jac_map = jax.vmap(jac_map, in_axes=(0, None), out_axes=0)
+
+        if orientation == 0:
+            points = jnp.stack(
+                [-jnp.ones(n_points), self.line_points], axis=-1)
+
+            def map_boundary_jac_fn(ctrl):
+                return vmap_jac_map(points, ctrl)[..., 1]
+
+        elif orientation == 1:
+            points = jnp.stack(
+                [self.line_points, jnp.ones(n_points)], axis=-1)
+
+            def map_boundary_jac_fn(ctrl):
+                return vmap_jac_map(points, ctrl)[..., 0]
+
+        elif orientation == 2:
+            points = jnp.stack(
+                [jnp.ones(n_points), self.line_points], axis=-1)
+
+            def map_boundary_jac_fn(ctrl):
+                return vmap_jac_map(points, ctrl)[..., 1]
+
+        elif orientation == 3:
+            points = jnp.stack(
+                [self.line_points, -jnp.ones(n_points)], axis=-1)
+
+            def map_boundary_jac_fn(ctrl):
+                return vmap_jac_map(points, ctrl)[..., 0]
+
+        else:
+            raise ValueError(f"Invalid boundary index {index} for Patch2D.")
+
+        return map_boundary_jac_fn
+
+    def get_ctrl_jacobian_fn(self, points):
+        jac_map = jax.jacfwd(IsoparametricQuad2D.__single_point_map, argnums=1)
+        vmap_jac_map = jax.vmap(jac_map, in_axes=(0, None), out_axes=0)
+
+        def map_jac_fn(ctrl):
+            return vmap_jac_map(points, ctrl)
+        return map_jac_fn
+
+    def get_quad_ctrl_jacobian_fn(self):
+        """ Take control points, return Jacobian wrt control points. """
+        return self.get_ctrl_jacobian_fn(self.quad_points)
+
+    @property
+    def ctrl_shape(self):
+        return 4, 2
+    
+    @property
+    def num_boundaries(self):
+        # Orientation: 0 - left
+        #              1 - top
+        #              2 - right
+        #              3 - bottom
+
+        return 4
+
+    @property
+    def num_quad_pts(self):
+        return self.quad_points.shape[0]
+
+    def num_boundary_quad_pts(self, index):
+        if index in [0, 1, 2, 3]:
+            return self.line_points.shape[0]
+        else:
+            raise ValueError(f"Invalid boundary index {index} for IsoparametericQuad2D.")
+
+    @property
+    def n_d(self):
+        return 2
+
+    def get_sparsity_pattern(self) -> Array2D:
+        local_patch_indices = onp.arange(4)
+        
+        mgrid_indices = onp.stack(onp.meshgrid(
+            local_patch_indices, local_patch_indices), axis=-1)
+
+        return mgrid_indices
+
+    def get_quad_fn(self):
+        def quad_fn(ordinates):
+            return jnp.sum(self.weights.T * ordinates.T, axis=-1).T
+
+        return quad_fn
+
+    def get_boundary_quad_fn(self, orientation):
+        def boundary_quad_fn(ordinates):
+            return jnp.sum(self.line_weights * ordinates.T, axis=-1).T
+
+        return boundary_quad_fn
+
+
 class Patch2D(Element):
     """Element represented by a BSpline 2D patch.
 
