@@ -247,6 +247,14 @@ class Element(ABC):
         """
         pass
 
+    @abstractmethod
+    def get_boundary_path(self) -> Array2D:
+        """Return a path of points that traces the element in the parent domain.
+        
+        Used for generating movies/images.
+        """
+        pass
+
 
 class IsoparametricQuad2D(Element):
     """Standard bilinear quadrilateral element.
@@ -457,6 +465,18 @@ class IsoparametricQuad2D(Element):
             return jnp.sum(self.line_weights * ordinates.T, axis=-1).T
 
         return boundary_quad_fn
+
+    def get_boundary_path(self):
+        N = 10
+        uu = onp.linspace(-1+1e-6, 1-1e-6, N)
+        path = onp.hstack([
+            onp.vstack([uu[0]*onp.ones(N), uu]),
+            onp.vstack([uu, uu[-1]*onp.ones(N)]),
+            onp.vstack([uu[-1]*onp.ones(N), uu[::-1]]),
+            onp.vstack([uu[::-1], uu[0]*onp.ones(N)]),
+        ]).T
+
+        return path
 
 
 class Patch2D(Element):
@@ -771,3 +791,15 @@ class Patch2D(Element):
     @property
     def n_d(self):
         return 2
+
+    def get_boundary_path(self):
+        N = 100
+        uu = np.linspace(1e-6, 1-1e-6, N)
+        path = np.hstack([
+            np.vstack([uu[0]*np.ones(N), uu]),
+            np.vstack([uu, uu[-1]*np.ones(N)]),
+            np.vstack([uu[-1]*np.ones(N), uu[::-1]]),
+            np.vstack([uu[::-1], uu[0]*np.ones(N)]),
+        ]).T
+
+        return path

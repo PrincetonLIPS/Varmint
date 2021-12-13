@@ -113,10 +113,14 @@ def generate_total_energy_fn(element: Element, material: PhysicsModel):
         in_axes=(0, 0),
     )
 
+    # TODO(doktay): Clean this up. control points should probably just be
+    # flat, instead of doing this hack.
+    ctrl_shape = element.ctrl_shape
+    shape_tup = tuple(range(len(ctrl_shape)))
     kinetic_energy_fn = \
         lambda mm, vv: 0.5 * jnp.tensordot(
-            jnp.tensordot(mm, vv, ((3, 4, 5), (0, 1, 2))
-                         ), vv, ((0, 1, 2), (0, 1, 2))
+            jnp.tensordot(mm, vv, len(ctrl_shape)
+                         ), vv, (shape_tup, shape_tup)
         )
 
     mat_density = material.density

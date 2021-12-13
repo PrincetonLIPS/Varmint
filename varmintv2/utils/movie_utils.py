@@ -10,9 +10,11 @@ from varmintv2.geometry.bsplines import bspline2d
 
 import time
 
+from varmintv2.geometry.elements import Element
+
 
 def create_movie(
-    patch,
+    element: Element,
     ctrl_seq,
     filename,
     fig_kwargs={},
@@ -27,10 +29,10 @@ def create_movie(
     max_y = -np.inf
     for ctrl in ctrl_seq:
         for patch_ctrl in ctrl:
-            min_x = float(np.minimum(np.min(patch_ctrl[:, :, 0]), min_x))
-            max_x = float(np.maximum(np.max(patch_ctrl[:, :, 0]), max_x))
-            min_y = float(np.minimum(np.min(patch_ctrl[:, :, 1]), min_y))
-            max_y = float(np.maximum(np.max(patch_ctrl[:, :, 1]), max_y))
+            min_x = float(np.minimum(np.min(patch_ctrl[..., 0]), min_x))
+            max_x = float(np.maximum(np.max(patch_ctrl[..., 0]), max_x))
+            min_y = float(np.minimum(np.min(patch_ctrl[..., 1]), min_y))
+            max_y = float(np.maximum(np.max(patch_ctrl[..., 1]), max_y))
 
     # Pad each end by 10%.
     pad_x = 0.1 * (max_x - min_x)
@@ -47,27 +49,13 @@ def create_movie(
 
     # Things we need to both initialize and update.
     objects = {}
-    N = 100
-    uu = np.linspace(1e-14, 1-1e-14, N)
-    path = np.hstack([
-        np.vstack([uu[0]*np.ones(N), uu]),
-        np.vstack([uu, uu[-1]*np.ones(N)]),
-        np.vstack([uu[-1]*np.ones(N), uu[::-1]]),
-        np.vstack([uu[::-1], uu[0]*np.ones(N)]),
-    ]).T
-
-    jit_bspline2d = jax.jit(bspline2d, static_argnums=(4,))
+    path = element.get_boundary_path()
+    jit_map_fn = jax.jit(element.get_map_fn(path))
 
     def init():
         # Render the first time step.
         for i, patch_ctrl in enumerate(ctrl_seq[0]):
-            locs = jit_bspline2d(
-                path,
-                patch_ctrl,
-                patch.xknots,
-                patch.yknots,
-                patch.spline_deg,
-            )
+            locs = jit_map_fn(patch_ctrl)
             # line, = ax.plot(locs[:,0], locs[:,1], 'b-')
             poly, = ax.fill(locs[:, 0], locs[:, 1],
                             facecolor='lightsalmon',
@@ -80,13 +68,7 @@ def create_movie(
 
     def update(tt):
         for i, patch_ctrl in enumerate(ctrl_seq[tt]):
-            locs = jit_bspline2d(
-                path,
-                patch_ctrl,
-                patch.xknots,
-                patch.yknots,
-                patch.spline_deg,
-            )
+            locs = jit_map_fn(patch_ctrl)
             if tt == 0:
                 objects[(i, 'p')].set_visible(True)
             objects[(i, 'p')].set_xy(locs)
@@ -113,7 +95,7 @@ def create_movie(
 
 
 def create_static_image(
-    patch,
+    element: Element,
     ctrl_sol,
     filename,
     just_cp=False,
@@ -147,26 +129,12 @@ def create_static_image(
     else:
         # Things we need to both initialize and update.
         objects = {}
-        N = 100
-        uu = np.linspace(1e-6, 1-1e-6, N)
-        path = np.hstack([
-            np.vstack([uu[0]*np.ones(N), uu]),
-            np.vstack([uu, uu[-1]*np.ones(N)]),
-            np.vstack([uu[-1]*np.ones(N), uu[::-1]]),
-            np.vstack([uu[::-1], uu[0]*np.ones(N)]),
-        ]).T
-
-        jit_bspline2d = jax.jit(bspline2d, static_argnums=(4,))
+        path = element.get_boundary_path()
+        jit_map_fn = jax.jit(element.get_map_fn(path))
 
         # Render the first time step.
         for patch_ctrl in ctrl_sol:
-            locs = jit_bspline2d(
-                path,
-                patch_ctrl,
-                patch.xknots,
-                patch.yknots,
-                patch.spline_deg,
-            )
+            locs = jit_map_fn(patch_ctrl)
             # line, = ax.plot(locs[:,0], locs[:,1], 'b-')
             poly, = ax.fill(locs[:, 0], locs[:, 1],
                             facecolor='lightsalmon',
