@@ -794,12 +794,12 @@ class Patch2D(Element):
 
     def get_boundary_path(self):
         N = 100
-        uu = np.linspace(1e-6, 1-1e-6, N)
-        path = np.hstack([
-            np.vstack([uu[0]*np.ones(N), uu]),
-            np.vstack([uu, uu[-1]*np.ones(N)]),
-            np.vstack([uu[-1]*np.ones(N), uu[::-1]]),
-            np.vstack([uu[::-1], uu[0]*np.ones(N)]),
+        uu = onp.linspace(1e-6, 1-1e-6, N)
+        path = onp.hstack([
+            onp.vstack([uu[0]*onp.ones(N), uu]),
+            onp.vstack([uu, uu[-1]*onp.ones(N)]),
+            onp.vstack([uu[-1]*onp.ones(N), uu[::-1]]),
+            onp.vstack([uu[::-1], uu[0]*onp.ones(N)]),
         ]).T
 
         return path
