@@ -33,7 +33,7 @@ eutils.prepare_experiment_args(
 
 # Geometry parameters.
 parser.add_argument('-c', '--ncp', type=int, default=5)
-parser.add_argument('-q', '--quaddeg', type=int, default=20)
+parser.add_argument('-q', '--quaddeg', type=int, default=10)
 parser.add_argument('-s', '--splinedeg', type=int, default=3)
 
 parser.add_argument('--simtime', type=float, default=5000.0)
@@ -64,7 +64,8 @@ def simulate(ref_ctrl, ref_vels, cell: Geometry,
     full_lagrangian = cell.get_lagrangian_fn()
 
     # Initially in the ref config with zero momentum.
-    q, p = flatten(ref_ctrl, ref_vels)
+    q = flatten(ref_ctrl)
+    p = flatten(ref_vels)
     print(f'Simulation has {q.shape[0]} degrees of freedom.')
 
     stepper = HamiltonianStepper(
@@ -144,6 +145,14 @@ def main():
     @cell.register_dirichlet_bc('2')
     def group_2_movement(t):
         return t / args.simtime * np.array([0.0, -0.4 * multiplier])
+
+    @cell.register_dirichlet_bc('3')
+    def group_3_movement(t):
+        return t / args.simtime * np.array([0.0, 0.0])
+
+    @cell.register_dirichlet_bc('4')
+    def group_4_movement(t):
+        return t / args.simtime * np.array([0.0, 0.0])
 
     dt = np.float64(args.dt)
     T = args.simtime

@@ -22,17 +22,17 @@ def create_movie(
 ):
     t0 = time.time()
 
+    print('\tDetermining bounds.')
     # Get extrema of control points.
     min_x = np.inf
     max_x = -np.inf
     min_y = np.inf
     max_y = -np.inf
     for ctrl in ctrl_seq:
-        for patch_ctrl in ctrl:
-            min_x = float(np.minimum(np.min(patch_ctrl[..., 0]), min_x))
-            max_x = float(np.maximum(np.max(patch_ctrl[..., 0]), max_x))
-            min_y = float(np.minimum(np.min(patch_ctrl[..., 1]), min_y))
-            max_y = float(np.maximum(np.max(patch_ctrl[..., 1]), max_y))
+        min_x = float(np.minimum(np.min(ctrl[..., 0]), min_x))
+        max_x = float(np.maximum(np.max(ctrl[..., 0]), max_x))
+        min_y = float(np.minimum(np.min(ctrl[..., 1]), min_y))
+        max_y = float(np.maximum(np.max(ctrl[..., 1]), max_y))
 
     # Pad each end by 10%.
     pad_x = 0.1 * (max_x - min_x)
@@ -42,6 +42,7 @@ def create_movie(
     min_y -= pad_y
     max_y += pad_y
 
+    print('\tSetting up figure.')
     # Set up the figure and axes.
     fig = plt.figure(**fig_kwargs)
     ax = plt.axes(xlim=(min_x, max_x), ylim=(min_y, max_y))
@@ -75,6 +76,7 @@ def create_movie(
 
         return objects.values()
 
+    print('\tAnimating..')
     anim = FuncAnimation(
         fig,
         update,

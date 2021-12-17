@@ -132,11 +132,15 @@ def construct_multistable2D(patch_ncp, quad_degree, spline_degree,
 
     # Dirichlet labels
     group_1 = np.abs(all_ctrls[..., 1] - 0.0) < 1e-14
-    group_2 = np.abs(all_ctrls[..., 1] - num_y * h3 * multiplier) < 1e-14
+    group_2 = np.abs(all_ctrls[..., 1] - num_y * h3) < 1e-14
+    group_3 = np.abs(all_ctrls[..., 0] - 1.0) < 1e-14
+    group_4 = np.abs(all_ctrls[..., 0] - 19.0) < 1e-14
 
     dirichlet_groups = {
         '1': group_1,
-        '2': group_2
+        '2': group_2,
+        '3': (group_3, np.array([1, 0])),
+        '4': (group_4, np.array([1, 0])),
     }
 
     traction_groups = {

@@ -12,6 +12,8 @@ from varmintv2.geometry.geometry import SingleElementGeometry
 from varmintv2.geometry import elements
 from varmintv2.geometry import bsplines
 from varmintv2.utils import geometry_utils
+from varmintv2.physics.materials import WigglyMat
+from varmintv2.physics.constitutive import NeoHookean2D
 
 
 class Test_SEGeometry(ut.TestCase):
@@ -39,7 +41,8 @@ class Test_SEGeometry(ut.TestCase):
             geometry_utils.get_patch_side_index_array(m, 0, 'left')
         traction_labels = {}
 
-        seg = SingleElementGeometry(self.patch, None,
+        mat = NeoHookean2D(WigglyMat)
+        seg = SingleElementGeometry(self.patch, mat,
                                     m, constraints,
                                     dirichlet_labels, traction_labels)
         
@@ -49,17 +52,20 @@ class Test_SEGeometry(ut.TestCase):
 
         ctrl_pos = npr.randn(*m.shape)
         ctrl_pos = geometry_utils.constrain_ctrl(ctrl_pos, constraints)
-        ctrl_pos_fixed = ctrl_pos * dirichlet_labels['1'][..., np.newaxis]
+        ctrl_pos_fixed = ctrl_pos# * dirichlet_labels['1'][..., np.newaxis]
 
         ctrl_vels = npr.randn(*m.shape)
         ctrl_vels = geometry_utils.constrain_ctrl(ctrl_vels, constraints)
-        ctrl_vels_fixed = ctrl_vels * dirichlet_labels['1'][..., np.newaxis]
+        ctrl_vels_fixed = ctrl_vels# * dirichlet_labels['1'][..., np.newaxis]
 
-        g_pos, g_vel = l2g(ctrl_pos, ctrl_vels)
+        g_pos = l2g(ctrl_pos)
+        g_vel = l2g(ctrl_vels)
         self.assertEqual(g_pos.shape, (2 * (2 * 10 * 10 - 20),))
         self.assertEqual(g_vel.shape, (2 * (2 * 10 * 10 - 20),))
 
-        l_pos, l_vel = g2l(g_pos, g_vel, ctrl_pos_fixed, ctrl_vels_fixed)
+        l_pos = g2l(g_pos, ctrl_pos_fixed)
+        l_vel = g2l(g_vel, ctrl_vels_fixed)
+
         nptest.assert_equal(l_pos, ctrl_pos)
         nptest.assert_equal(l_vel, ctrl_vels)
 
@@ -80,7 +86,8 @@ class Test_SEGeometry(ut.TestCase):
             geometry_utils.get_patch_side_index_array(m, 0, 'right')
         traction_labels = {}
 
-        seg = SingleElementGeometry(self.patch, None,
+        mat = NeoHookean2D(WigglyMat)
+        seg = SingleElementGeometry(self.patch, mat,
                                     m, constraints,
                                     dirichlet_labels, traction_labels)
 

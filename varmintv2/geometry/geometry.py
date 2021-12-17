@@ -59,18 +59,19 @@ class Geometry(ABC):
         """
         pass
 
+    def unflatten_sequence(self, value, fixed_value):
+        _, g2l_map = self.get_global_local_maps()
+
+        local_value = [g2l_map(q, f) for q, f in \
+                zip(value, fixed_value)]
+        
+        return local_value
+
     def unflatten_dynamics_sequence(self, positions, velocities,
                                     fixed_positions, fixed_velocities):
         """Helper function to convert a sequence of global coordinates to local."""
-        _, g2l_map = self.get_global_local_maps()
-
-        local_pos = [g2l_map(q, f) for q, f in \
-                zip(positions, fixed_positions)]
-
-        local_vel = [g2l_map(p, v) for p, v in \
-                zip(velocities, fixed_velocities)]
-
-        return local_pos, local_vel
+        return self.unflatten_sequence(positions, fixed_positions), \
+               self.unflatten_sequence(velocities, fixed_velocities)
     
     @abstractmethod
     def get_lagrangian_fn(self) -> Callable:
@@ -97,7 +98,7 @@ class Geometry(ABC):
     @abstractmethod
     def get_traction_fn(self) -> Callable:
         """Get a function that returns traction values through time.
-        
+
         Returns:
         ========
 
@@ -110,7 +111,7 @@ class Geometry(ABC):
     @abstractmethod
     def get_fixed_locs_fn(self, ref_l_position) -> Tuple[Callable, Callable]:
         """Get a function that returns Dirichlet conditions through time.
-        
+
         Returns:
         ========
 
@@ -300,29 +301,47 @@ class SingleElementGeometry(Geometry):
         def local_to_global(local_coords):
             kZeros = jnp.zeros((self.n_components, self.element.n_d))
 
+            # Transform from local form to component form.
             global_coords = jax.ops.index_update(kZeros, self.index_array, local_coords)
+            global_coords = global_coords.flatten()
+
+            # Get rid of fixed labels to transform to global form.
             global_coords = jnp.take(global_coords, self.nonfixed_labels, axis=0)
 
-            return global_coords.flatten()
+            return global_coords
+
+            # Easy: We should flatten everything from the beginning, and 
+            # nonfixed_labels should be from n_components * n_d. 
 
         def global_to_local(global_coords, fixed_coords):
+            # Component dimensions.
             kZeros = jnp.zeros((self.n_components, self.element.n_d))
 
+            # Find fixed locations array in component form.
             fixed_locs = jax.ops.index_update(
                 kZeros, self.index_array, fixed_coords)
+            fixed_locs = fixed_locs.flatten()
             fixed_locs = jnp.take(fixed_locs, self.fixed_labels, axis=0)
 
-            local_pos = kZeros
+            local_pos = jnp.zeros(self.n_components * self.element.n_d)
 
-            global_pos = global_coords.reshape((-1, self.element.n_d))
-
+            # Fill in the non-fixed locations
             local_pos = jax.ops.index_update(
-                local_pos, self.nonfixed_labels, global_pos)
+                local_pos, self.nonfixed_labels, global_coords)
 
+            # Fill in the fixed locations
             fixed_pos = jax.ops.index_update(local_pos, self.fixed_labels,
                                              fixed_locs)
+            
+            # Unflattened component form
+            fixed_pos = fixed_pos.reshape((-1, self.element.n_d))
 
+            # Convert from component form to local form.
             return jnp.take(fixed_pos, self.index_array, axis=0)
+
+            # Component form should be flattened by default.
+            # index_array, fixed_labels, and nonfixed_labels should refer to
+            # indices in flattened component form.
 
         return local_to_global, global_to_local
 
@@ -469,7 +488,16 @@ class SingleElementGeometry(Geometry):
         self.dirichlet_labels = {}
         self.all_dirichlet_indices = onp.zeros(init_ctrl.shape[:-1])
         for group in dirichlet_labels:
-            indices = local_indices[dirichlet_labels[group] > 0]
+
+            # If dirichlet entry is a tuple, then one is the 
+            # index array and the other is the dimensions that are fixed.
+            if isinstance(dirichlet_labels[group], tuple):
+                label, fixed_dims = dirichlet_labels[group]
+            else:
+                label = dirichlet_labels[group]
+                fixed_dims = onp.array([1, 1])
+
+            indices = local_indices[label > 0]
             group_all_dists = dijkstra(spmat, directed=False, indices=indices,
                                        unweighted=True, min_only=True)
             group_all_dists = onp.reshape(group_all_dists, init_ctrl.shape[:-1])
@@ -480,10 +508,50 @@ class SingleElementGeometry(Geometry):
             self.all_dirichlet_indices = \
                 self.all_dirichlet_indices + self.dirichlet_labels[group]
 
-        self.fixed_labels = \
+        # np.unique will make sure this is sorted
+        fixed_labels = \
             onp.unique(self.index_array[self.all_dirichlet_indices > 0])
-        self.nonfixed_labels = \
+
+        # For each of the fixed labels, keep track of which dimensions are fixed.
+        fixed_labels_dimension_index = \
+            onp.zeros((fixed_labels.shape[0], self.element.n_d))
+        for group in dirichlet_labels:
+            if isinstance(dirichlet_labels[group], tuple):
+                label, fixed_dims = dirichlet_labels[group]
+            else:
+                label = dirichlet_labels[group]
+                fixed_dims = onp.array([1, 1])
+
+            group_indices = onp.unique(self.index_array[label > 0])
+            inds_into_fixedlabels = onp.searchsorted(fixed_labels, group_indices)
+            fixed_labels_dimension_index[inds_into_fixedlabels, :] = fixed_labels_dimension_index[inds_into_fixedlabels, :] + fixed_dims
+
+        # np.unique will make sure this is sorted
+        nonfixed_labels = \
             onp.unique(self.index_array[self.all_dirichlet_indices == 0])
+
+        # When component form is flattened, component i becomes indices 
+        # n_d * i + (0, 1, ..., n_d-1)
+        # From the fixed_labels array generated above, modify it to refer to
+        # indices in the flattened component form.
+
+        fixed_labels = self.element.n_d * fixed_labels
+        fixed_labels = onp.stack((fixed_labels,) * self.element.n_d, axis=-1)
+        fixed_labels = fixed_labels + onp.arange(self.element.n_d)
+
+        # When adding boundary conditions over a single dimension,
+        # instead of flattening here make an index array. 
+        # Make sure to add whatever was not picked in the index array to nonfixed_labels.
+        self.fixed_labels = fixed_labels[fixed_labels_dimension_index > 0]
+
+        nonfixed_labels = self.element.n_d * nonfixed_labels
+        nonfixed_labels = onp.stack((nonfixed_labels,) * self.element.n_d, axis=-1)
+        nonfixed_labels = nonfixed_labels + onp.arange(self.element.n_d)
+        nonfixed_labels = nonfixed_labels.flatten()
+        self.nonfixed_labels = \
+            onp.concatenate((nonfixed_labels, fixed_labels[fixed_labels_dimension_index == 0]))
+
+
 
         ###################################################################
         # Using the local sparsity pattern for the Element, construct the #
@@ -507,13 +575,13 @@ class SingleElementGeometry(Geometry):
             csc_matrix((jac_entries, (jac_rows, jac_cols)),
                        (n_components, n_components), dtype=onp.int8)
 
-        # Remove the fixed labels from the Jacobian, and use kron to duplicate
-        # for each dimension.
-        jac_sparsity_graph = jac_sparsity_graph[:, self.nonfixed_labels]
-        jac_sparsity_graph = jac_sparsity_graph[self.nonfixed_labels, :]
-        self._jac_sparsity_graph = scipy.sparse.kron(
+        # Use kron to duplicate per dimension, and then use nonfixed_labels
+        # to get the nonfixed indices.
+        jac_sparsity_graph = scipy.sparse.kron(
             jac_sparsity_graph, onp.ones((element.n_d, element.n_d)), format='csc'
         )
+        jac_sparsity_graph = jac_sparsity_graph[:, self.nonfixed_labels]
+        self._jac_sparsity_graph = jac_sparsity_graph[self.nonfixed_labels, :]
 
         self._jac_reconstruction_tangents, self._jac_reconstruction_fn = \
             sparsity.pattern_to_reconstruction(self._jac_sparsity_graph)

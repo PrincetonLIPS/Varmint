@@ -138,7 +138,7 @@ def generate_total_energy_fn(element: Element, material: PhysicsModel):
           The control points corresponding to the positions of the body in the
           deformed configuration. Shape: element.ctrl_shape
         def_vels: array_like
-          The control points corresponding to the momenta of the body in the
+          The control points corresponding to the velocity of the body in the
           deformed configuration. Shape: element.ctrl_shape
         ref_ctrl: array_like
           The control points corresponding to the positions of the body in the
