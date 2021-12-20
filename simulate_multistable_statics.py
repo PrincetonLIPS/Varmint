@@ -82,8 +82,8 @@ def main():
     multiplier = 1.0
     cell, ref_ctrl = \
         construct_multistable2D(patch_ncp=args.ncp, quad_degree=args.quaddeg,
-                               spline_degree=args.splinedeg, material=mat,
-                               multiplier=multiplier)
+                                spline_degree=args.splinedeg, material=mat,
+                                multiplier=multiplier)
 
     potential_energy_fn = cell.get_potential_energy_fn(ref_ctrl)
     strain_energy_fn = jax.jit(cell.get_strain_energy_fn(ref_ctrl))
@@ -99,10 +99,12 @@ def main():
 
     sim_time = time.time()
     curr_g_pos = l2g(ref_ctrl)
+    print(f'Optimizing with {curr_g_pos.shape[0]} degrees of freedom.')
 
     n_increments = 20
     strain_energies = []
     increments = []
+    optimizer = NewtonSolver(cell, potential_energy_fn, max_iter=20)
     for i in range(n_increments + 1):
         # Increment displacement a little bit.
         fixed_displacements = {
@@ -118,21 +120,10 @@ def main():
         # Solve for new state
         print(f'Starting optimization at iteration {i}.')
         opt_start = time.time()
-        results = scipy.optimize.minimize(potential_energy_fn, curr_g_pos,
-                                          args=(fixed_locs, tractions),
-                                          method='trust-ncg',
-                                          jac=grad_potential_energy_fn,
-                                          hess=hess_potential_energy_fn,
-                                          #options={'maxiter': 10000}
-                                          )
-        print(f'Optimization succeeded: {results.success}.')
+        new_x, success = optimizer.optimize(curr_g_pos, (fixed_locs, tractions))
         print(f'Took {time.time() - opt_start} seconds.')
-        if not results.success:
-            print(f'Optimization failed with status {results.status}.')
-            print(results.message)
-            break
 
-        curr_g_pos = results.x
+        curr_g_pos = new_x
         strain_energy = strain_energy_fn(curr_g_pos, fixed_locs, tractions)
         strain_energies.append(strain_energy)
         increments.append(0.4 / n_increments * i)
