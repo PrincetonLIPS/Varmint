@@ -191,6 +191,55 @@ class MutableFunction:
         return self.func(q, p, ref_ctrl)
 
 
+def hvp(f, primals, tangents, args):
+    def f_with_args(x):
+        return f(x, *args)
+    return jax.jvp(jax.grad(f_with_args), (primals,), (tangents,))[1]
+
+
+class NewtonSolver:
+    def __init__(self, geometry: Geometry, loss_fun, max_iter=20):
+        self.max_iter = max_iter
+        self.iter_num = 0
+        self.geometry = geometry
+
+        self.sparse_reconstruct = geometry.get_jac_reconstruction_fn()
+        self.sparsity_tangents = geometry.jac_reconstruction_tangents
+        
+        def loss_hvp(x, tangents, args):
+            return hvp(loss_fun, x, tangents, args)
+
+        vmap_loss_hvp = jax.vmap(loss_hvp, in_axes=(None, 0, None))
+        @jax.jit
+        def sparse_entries(x, args):
+            return vmap_loss_hvp(x, self.sparsity_tangents, args)
+
+        self.loss_fun = loss_fun
+        self.sparse_entries_fun = sparse_entries
+        self.grad_fun = jax.jit(jax.grad(loss_fun))
+
+
+    def optimize(self, x0, args=()):
+        xk = x0
+
+        tol = 1e-8
+        
+        for i in range(self.max_iter):
+            g = onp.array(self.grad_fun(xk, *args))
+
+            if np.linalg.norm(g) < tol:
+                return xk, True
+
+            hvp_res = self.sparse_entries_fun(xk, args)
+            sparse_hess = self.sparse_reconstruct(hvp_res)
+            lu = scipy.sparse.linalg.splu(sparse_hess)
+
+            dx = lu.solve(-g)
+            xk = xk + dx
+
+        return xk, False
+        
+
 def get_statics_optfun(loss_fun, grad_fun, hessp_gen_fun=None, kind='newton', optargs={}):
     if kind == 'newton':
         niters = optargs.get('niters', 10)

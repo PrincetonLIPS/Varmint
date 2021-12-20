@@ -15,6 +15,8 @@ from varmintv2.utils.movie_utils import create_movie, create_static_image
 import varmintv2.utils.analysis_utils as autils
 import varmintv2.utils.experiment_utils as eutils
 
+from varmintv2.solver.optimization import NewtonSolver
+
 import scipy.optimize
 from scipy.spatial import KDTree
 
@@ -87,7 +89,7 @@ def main():
             - Rectangle(dolfin.Point(2., 1.25), dolfin.Point(3., 1.75)) \
             - Circle(dolfin.Point(1, 4), .25) \
             - Circle(dolfin.Point(4, 4), .25)
-    mesh2d = generate_mesh(domain, 15)
+    mesh2d = generate_mesh(domain, 45)
     points = mesh2d.coordinates()
     cells = mesh2d.cells()
 
@@ -140,7 +142,7 @@ def main():
     curr_g_pos = l2g(ref_ctrl)
     print(f'Optimizing with {curr_g_pos.shape[0]} degrees of freedom.')
 
-    n_increments = 10
+    n_increments = 30
     strain_energies = []
     increments = []
     all_displacements = []
@@ -148,6 +150,8 @@ def main():
 
     all_fixed_locs = []
     all_fixed_vels = []
+
+    optimizer = NewtonSolver(cell, potential_energy_fn, max_iter=20)
     for i in range(n_increments):
         # Increment displacement a little bit.
         fixed_displacements = {
@@ -166,6 +170,7 @@ def main():
         # Solve for new state
         print(f'Starting optimization at iteration {i}.')
         opt_start = time.time()
+        """
         results = scipy.optimize.minimize(potential_energy_fn, curr_g_pos,
                                           args=(fixed_locs, tractions),
                                           method='trust-ncg',
@@ -173,14 +178,20 @@ def main():
                                           hess=hess_potential_energy_fn,
                                           #options={'maxiter': 10000}
                                           )
+        
         print(f'Optimization succeeded: {results.success}.')
         print(f'Took {time.time() - opt_start} seconds.')
         if not results.success:
             print(f'Optimization failed with status {results.status}.')
             print(results.message)
             break
+        """
+        new_x, success = optimizer.optimize(curr_g_pos, (fixed_locs, tractions))
+        if not success:
+            print(f'Optimization reached max iters.')
+            break
 
-        curr_g_pos = results.x
+        curr_g_pos = new_x
         all_displacements.append(curr_g_pos)
         all_velocities.append(np.zeros_like(curr_g_pos))
         strain_energy = strain_energy_fn(curr_g_pos, fixed_locs, tractions)

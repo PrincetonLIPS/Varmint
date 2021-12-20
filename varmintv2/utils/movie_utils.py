@@ -148,3 +148,28 @@ def create_static_image(
     plt.close(fig)
     t1 = time.time()
     print(f'Generated image with {len(ctrl_sol)} patches in {t1-t0} seconds.')
+
+
+def plot_ctrl(
+    ax,
+    element: Element,
+    ctrl,
+    just_cp=False,
+):
+    if just_cp:
+        flat_cp = ctrl.reshape(-1, 2)
+        ax.scatter(flat_cp[:, 0], flat_cp[:, 1], s=10)
+    else:
+        # Things we need to both initialize and update.
+        objects = {}
+        path = element.get_boundary_path()
+        jit_map_fn = jax.jit(element.get_map_fn(path))
+
+        # Render the first time step.
+        for patch_ctrl in ctrl:
+            locs = jit_map_fn(patch_ctrl)
+            # line, = ax.plot(locs[:,0], locs[:,1], 'b-')
+            poly, = ax.fill(locs[:, 0], locs[:, 1],
+                            facecolor='lightsalmon',
+                            edgecolor='orangered',
+                            linewidth=1)
