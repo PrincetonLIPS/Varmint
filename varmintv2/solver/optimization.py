@@ -197,11 +197,14 @@ def hvp(f, primals, tangents, args):
     return jax.jvp(jax.grad(f_with_args), (primals,), (tangents,))[1]
 
 
-class NewtonSolver:
-    def __init__(self, geometry: Geometry, loss_fun, max_iter=20):
+class SparseNewtonSolver:
+    def __init__(self, geometry: Geometry, loss_fun,
+                 max_iter=20, step_size=1.0, tol=1e-8):
         self.max_iter = max_iter
         self.iter_num = 0
         self.geometry = geometry
+        self.step_size = step_size
+        self.tol = tol
 
         self.sparse_reconstruct = geometry.get_jac_reconstruction_fn()
         self.sparsity_tangents = geometry.jac_reconstruction_tangents
@@ -222,7 +225,7 @@ class NewtonSolver:
     def optimize(self, x0, args=()):
         xk = x0
 
-        tol = 1e-8
+        tol = self.tol
         
         for i in range(self.max_iter):
             g = onp.array(self.grad_fun(xk, *args))
@@ -235,7 +238,58 @@ class NewtonSolver:
             lu = scipy.sparse.linalg.splu(sparse_hess)
 
             dx = lu.solve(-g)
-            xk = xk + dx
+            xk = xk + dx * self.step_size
+
+        g = onp.array(self.grad_fun(xk, *args))
+
+        print(f'Reached max iters. Ended up with norm {np.linalg.norm(g)}')
+        return xk, False
+
+
+class DenseNewtonSolver:
+    def __init__(self, geometry: Geometry, loss_fun,
+                 max_iter=20, step_size=1.0, tol=1e-8):
+        self.max_iter = max_iter
+        self.iter_num = 0
+        self.geometry = geometry
+        self.step_size = step_size
+        self.tol = tol
+
+        def loss_hess(x, args):
+            return jax.hessian(loss_fun)(x, *args)
+
+        self.loss_fun = jax.jit(loss_fun)
+        self.loss_hess = jax.jit(loss_hess)
+        self.grad_fun = jax.jit(jax.grad(loss_fun))
+
+
+    def optimize(self, x0, args=()):
+        xk = x0
+
+        tol = 1e-8
+        
+        for i in range(self.max_iter):
+            g = onp.array(self.grad_fun(xk, *args))
+
+            if np.linalg.norm(g) < tol:
+                return xk, True
+
+            #sparse_hess = scipy.sparse.csc_matrix(self.loss_hess(xk, args))
+            dense_hess = self.loss_hess(xk, args)
+            print('Checking for NaN:')
+            print(onp.any(onp.isnan(dense_hess)))
+            print(f'Loss value is: {self.loss_fun(xk, *args)}')
+
+            try:
+                lu = scipy.linalg.lu_factor(dense_hess)
+                #lu = scipy.sparse.linalg.splu(sparse_hess)
+
+                dx = scipy.linalg.lu_solve(lu, -g)
+                #dx = lu.solve(-g)
+                xk = xk + dx * self.step_size
+            except ValueError:
+                print("ValueError")
+                return xk, False
 
         return xk, False
         
