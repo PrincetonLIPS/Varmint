@@ -25,7 +25,7 @@ from jax.config import config
 config.update("jax_enable_x64", True)
 
 
-def solve_slab_with_hole():
+def solve_slab_with_hole(mesh_resolution):
     class Steel(Material):
         _E = 200.0  # GPa
         _nu = 0.3
@@ -41,7 +41,7 @@ def solve_slab_with_hole():
     # --------------------
     domain = Rectangle(dolfin.Point(0., 0.), dolfin.Point(l_x, l_y)) \
             - Circle(dolfin.Point(l_x / 2.0, l_y / 2.0), l_y / 5.0)
-    mesh = generate_mesh(domain, 30)
+    mesh = generate_mesh(domain, mesh_resolution)
 
     points = mesh.coordinates()
     cells = mesh.cells()
@@ -93,7 +93,8 @@ def solve_slab_with_hole():
 
     l2g, g2l = cell.get_global_local_maps()
     curr_g_pos = l2g(ref_ctrl)
-    print(f"{curr_g_pos.size} global degrees of freedom.")
+    ndof = curr_g_pos.size
+    print(f"{ndof} global degrees of freedom.")
 
     fixed_displacements = {
         '1': np.array([0.0, 0.0]),
@@ -135,4 +136,4 @@ def solve_slab_with_hole():
         ind = np.argmin(np.linalg.norm(ref_ctrl.reshape((-1, 2)) - point, axis=-1))
         return ref_ctrl.reshape((-1, 2))[ind]
 
-    return (ref_ctrl, g2l(new_x, fixed_locs), element, cell), stress_at, deformation_at, ref_at
+    return (ref_ctrl, g2l(new_x, fixed_locs), element, cell, ndof), stress_at, deformation_at, ref_at

@@ -3,7 +3,7 @@ from mshr import *
 import numpy as np
 
 
-def solve_slab_with_hole():
+def solve_slab_with_hole(mesh_resolution):
     # Density
     rho = fe.Constant(7850.0)  # kg /m^3
 
@@ -55,7 +55,7 @@ def solve_slab_with_hole():
     # --------------------
     domain = Rectangle(dolfin.Point(0., 0.), dolfin.Point(l_x, l_y)) \
             - Circle(dolfin.Point(l_x / 2.0, l_y / 2.0), l_y / 5.0)
-    mesh = generate_mesh(domain, 30)
+    mesh = generate_mesh(domain, mesh_resolution)
 
     # --------------------
     # Function spaces
@@ -114,4 +114,4 @@ def solve_slab_with_hole():
         ind = np.argmin(np.linalg.norm(X - point, axis=-1))
         return X[ind]
 
-    return (u, A, L), stress_at, deformation_at, ref_at
+    return (u, A, L, nv), stress_at, deformation_at, ref_at

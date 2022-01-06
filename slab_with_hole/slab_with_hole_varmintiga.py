@@ -71,10 +71,7 @@ def gen_cell(corners, num_ctrl, radius):
     return np.stack(ctrl, axis=0)
 
 
-def solve_slab_with_hole():
-    spline_degree = 3
-    patch_ncp = 10
-
+def solve_slab_with_hole(spline_degree, patch_ncp):
     l_x = 10.0
     l_y = 5.0
     radius = 1.0
@@ -144,7 +141,8 @@ def solve_slab_with_hole():
 
     l2g, g2l = cell.get_global_local_maps()
     curr_g_pos = l2g(ref_ctrl)
-    print(f"{curr_g_pos.size} global degrees of freedom.")
+    ndof = curr_g_pos.size
+    print(f"{ndof} global degrees of freedom.")
 
     d_x = 1.0
 
@@ -187,4 +185,4 @@ def solve_slab_with_hole():
         ind = np.argmin(np.linalg.norm(ref_ctrl.reshape((-1, 2)) - point, axis=-1))
         return ref_ctrl.reshape((-1, 2))[ind]
 
-    return (ref_ctrl, g2l(new_x, fixed_locs), element, cell), stress_at, deformation_at, ref_at
+    return (ref_ctrl, g2l(new_x, fixed_locs), element, cell, ndof), stress_at, deformation_at, ref_at
