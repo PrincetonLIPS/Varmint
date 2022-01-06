@@ -14,7 +14,7 @@ from scipy.sparse.csgraph import connected_components, dijkstra
 import scipy.sparse
 
 from varmintv2.physics.constitutive import PhysicsModel
-from varmintv2.physics.energy import generate_total_energy_fn
+from varmintv2.physics.energy import generate_stress_fn, generate_total_energy_fn
 from varmintv2.utils import geometry_utils
 from varmintv2.utils import sparsity
 
@@ -150,6 +150,7 @@ class Geometry(ABC):
         deformed and reference control points and outputs the Cauchy stress
         tensor at each point.
         """
+        pass
 
 class SingleElementGeometry(Geometry):
     """Geometry composed of a single type of Element."""
@@ -400,7 +401,14 @@ class SingleElementGeometry(Geometry):
         # get quad points for element object.
         # compute map of quad points for each element in the geometry.
         # compute generate_stress_fn for each
-        pass
+        points = self.element.quad_points
+        stress_fn = generate_stress_fn(self.element, self.material, points)
+        map_fn = self.element.get_map_fn(points)
+
+        vmap_map_fn = jax.vmap(map_fn, in_axes=0)
+        vmap_stress_fn = jax.vmap(stress_fn, in_axes=(0, 0))
+
+        return vmap_map_fn, vmap_stress_fn
 
     @property
     def jac_sparsity_graph(self):
@@ -461,6 +469,7 @@ class SingleElementGeometry(Geometry):
         self.traction_fns = {}
 
         self.element = element
+        self.material = material
         self.element_energy_fn = generate_total_energy_fn(element, material)
 
         # Construct adjacency matrix of the nodes.
