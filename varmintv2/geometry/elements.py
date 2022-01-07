@@ -62,6 +62,17 @@ class Element(ABC):
         pass
 
     @abstractmethod
+    def get_map_fn_fixed_ctrl(self, ctrl):
+        """Get function to compute the parent -> physical map for given
+        control points.
+
+        Usually you would want to use get_map_fn, but this is also
+        sometimes necessary.
+
+        """
+        pass
+
+    @abstractmethod
     def get_quad_map_fn(self) -> Callable[[CtrlArray], Array2D]:
         """Get function to compute the parent -> physical map at
         each interior quad point, given control points.
@@ -320,6 +331,12 @@ class IsoparametricQuad2D(Element):
                             in_axes=(0, None), out_axes=0)
         def deformation_fn(ctrl):
             return vmap_map(points, ctrl)
+        return deformation_fn
+    
+    def get_map_fn_fixed_ctrl(self, ctrl):
+        def deformation_fn(point):
+            return IsoparametricQuad2D.__single_point_map(point, ctrl)
+
         return deformation_fn
 
     def get_quad_map_fn(self):
@@ -581,6 +598,18 @@ class Patch2D(Element):
                 self.yknots,
                 self.spline_deg
             )
+        return deformation_fn
+    
+    def get_map_fn_fixed_ctrl(self, ctrl):
+        def deformation_fn(point):
+            return bspline2d(
+                point[onp.newaxis, :],
+                ctrl,
+                self.xknots,
+                self.yknots,
+                self.spline_deg
+            ).squeeze()
+
         return deformation_fn
 
     def get_quad_map_fn(self):

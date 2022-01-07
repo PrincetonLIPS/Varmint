@@ -178,11 +178,11 @@ def solve_slab_with_hole(spline_degree, patch_ncp):
         return von_Mises[ind]
 
     def deformation_at(point):
-        ind = np.argmin(np.linalg.norm(ref_ctrl.reshape((-1, 2)) - point, axis=-1))
-        return g2l(new_x, fixed_locs).reshape((-1, 2))[ind] - ref_ctrl.reshape((-1, 2))[ind]
+        pind, qd = cell.point_to_patch_and_parent(point, ref_ctrl)
+        return cell.patch_and_parent_to_point(pind, qd, g2l(new_x, fixed_locs)) - cell.patch_and_parent_to_point(pind, qd, ref_ctrl)
 
     def ref_at(point):
-        ind = np.argmin(np.linalg.norm(ref_ctrl.reshape((-1, 2)) - point, axis=-1))
-        return ref_ctrl.reshape((-1, 2))[ind]
+        pind, qd = cell.point_to_patch_and_parent(point, ref_ctrl)
+        return cell.patch_and_parent_to_point(pind, qd, ref_ctrl)
 
     return (ref_ctrl, g2l(new_x, fixed_locs), element, cell, ndof), stress_at, deformation_at, ref_at

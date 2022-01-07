@@ -11,6 +11,8 @@ from scipy.sparse.csc import csc_matrix
 from scipy.sparse.csr import csr_matrix
 from scipy.sparse.csgraph import connected_components, dijkstra
 
+import scipy.optimize
+
 import scipy.sparse
 
 from varmintv2.physics.constitutive import PhysicsModel
@@ -311,9 +313,6 @@ class SingleElementGeometry(Geometry):
 
             return global_coords
 
-            # Easy: We should flatten everything from the beginning, and 
-            # nonfixed_labels should be from n_components * n_d. 
-
         def global_to_local(global_coords, fixed_coords):
             # Component dimensions.
             kZeros = jnp.zeros((self.n_components, self.element.n_d))
@@ -339,10 +338,6 @@ class SingleElementGeometry(Geometry):
 
             # Convert from component form to local form.
             return jnp.take(fixed_pos, self.index_array, axis=0)
-
-            # Component form should be flattened by default.
-            # index_array, fixed_labels, and nonfixed_labels should refer to
-            # indices in flattened component form.
 
         return local_to_global, global_to_local
 
@@ -420,6 +415,40 @@ class SingleElementGeometry(Geometry):
 
     def get_jac_reconstruction_fn(self) -> Callable:
         return self._jac_reconstruction_fn
+    
+    def point_to_patch_and_parent(self, point, l_ref_ctrl):
+        """Given a point in the domain and reference configuration,
+        find the patch that contains the point, as well as the 
+        coordinates in parent space for that point.
+        
+        Uses a root-finding algorithm initialized by closest quad point.
+        """
+
+        all_patches_map_fn = jax.vmap(self.element.get_quad_map_fn())
+        all_quad_maps = all_patches_map_fn(l_ref_ctrl)
+
+        # Find closest amongst quad points
+        dists = onp.linalg.norm(all_quad_maps - point, axis=-1)
+        ind = onp.unravel_index(onp.argmin(dists), all_quad_maps.shape[:-1])
+        
+        patch_ind = ind[0]
+        quad_pt = self.element.quad_points[ind[1:]]
+
+        # Root finding to fix
+        map_fn = self.element.get_map_fn_fixed_ctrl(l_ref_ctrl[patch_ind])
+
+        @jax.jit
+        def fn_to_optimize(p):
+            return jnp.linalg.norm(map_fn(p) - point)
+        res = scipy.optimize.minimize(fn_to_optimize, quad_pt)
+
+        return patch_ind, res.x
+    
+    def patch_and_parent_to_point(self, patch_ind, parent_pt, l_ctrl):
+        """Given patch index and parent coordinate, return deformation."""
+
+        map_fn = self.element.get_map_fn(parent_pt[onp.newaxis, :])
+        return map_fn(l_ctrl[patch_ind]).squeeze()
 
     def __init__(self, element: Element, material: PhysicsModel,
                  init_ctrl: ArrayND, constraints: Tuple[Array1D, Array1D],
@@ -559,8 +588,6 @@ class SingleElementGeometry(Geometry):
         nonfixed_labels = nonfixed_labels.flatten()
         self.nonfixed_labels = \
             onp.concatenate((nonfixed_labels, fixed_labels[fixed_labels_dimension_index == 0]))
-
-
 
         ###################################################################
         # Using the local sparsity pattern for the Element, construct the #
