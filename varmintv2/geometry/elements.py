@@ -807,15 +807,47 @@ class Patch2D(Element):
             raise ValueError(f"Invalid boundary index {index} for Patch2D.")
     
     def get_sparsity_pattern(self) -> Array2D:
-        local_patch_indices = onp.arange(self.num_xctrl * self.num_yctrl)
+        p = self.spline_deg
         
-        # TODO(doktay): This is an overestimate of the sparsity pattern.
-        # In reality it should depend on the spline degree, but here for
-        # simplicity we just say all points are connected to all points.
-        mgrid_indices = onp.stack(onp.meshgrid(
-            local_patch_indices, local_patch_indices), axis=-1)
+        # Bandwidth of order p basis functions is 2p+1
+        bw = onp.arange(-p, p+1)
 
-        return mgrid_indices
+        # Create 2d bandwidth offset matrix
+        # (2p+1) x (2p+1) x 2
+        twod_bw = onp.stack(onp.meshgrid(bw, bw), axis=-1)
+
+        xs = onp.arange(self.num_xctrl)
+        ys = onp.arange(self.num_yctrl)
+
+        # n_x x n_y x 2
+        all_indices = onp.stack(onp.meshgrid(xs, ys), axis=-1)
+
+        # Create dummy indices for broadcasting
+        # n_x x n_y x 1 x 1 x 2 
+        all_indices = onp.expand_dims(all_indices, axis=(-2, -3))
+
+        # Broadcasting magic
+        # n_x x n_y x (2p+1) x (2p+1) x 2
+        pairs = twod_bw + all_indices
+
+        # We want to concatenate all_indices with pairs:
+        all_indices = onp.broadcast_to(all_indices, pairs.shape)
+        concat = onp.concatenate((all_indices, pairs), axis=-1)
+        
+        # all_pairs contains all candidates, but many of them will be
+        # out of bounds. Filter those out.
+        all_pairs = concat.reshape((-1, 4))
+        valid_indices = onp.all(
+            (all_pairs[..., 2:] >= onp.array([0, 0])) & \
+            (all_pairs[..., 2:] <  onp.array([self.num_xctrl, self.num_yctrl])), axis=-1)
+
+        valid_pairs = all_pairs[valid_indices]
+
+        # Compute raveled indices
+        p1 = onp.ravel_multi_index((valid_pairs[:, 0], valid_pairs[:, 1]), (self.num_xctrl, self.num_yctrl))
+        p2 = onp.ravel_multi_index((valid_pairs[:, 2], valid_pairs[:, 3]), (self.num_xctrl, self.num_yctrl))
+
+        return onp.stack((p1, p2), axis=-1)
 
     @property
     def n_d(self):
