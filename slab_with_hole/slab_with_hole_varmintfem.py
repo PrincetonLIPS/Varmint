@@ -2,6 +2,10 @@ import time
 import os
 import sys
 
+# Let's do 64-bit. Does not seem to degrade performance much.
+from jax.config import config
+config.update("jax_enable_x64", True)
+
 sys.path.insert(1, os.path.join(sys.path[0], '..'))
 
 from varmintv2.geometry.elements import IsoparametricQuad2D
@@ -19,10 +23,6 @@ import jax
 from mshr import *
 
 import matplotlib.pyplot as plt
-
-# Let's do 64-bit. Does not seem to degrade performance much.
-from jax.config import config
-config.update("jax_enable_x64", True)
 
 
 def solve_slab_with_hole(mesh_resolution):
@@ -108,7 +108,7 @@ def solve_slab_with_hole(mesh_resolution):
 
     print(f'Starting optimization.')
     opt_start = time.time()
-    optimizer = SparseNewtonSolver(cell, potential_energy_fn, max_iter=100, step_size=1.0)
+    optimizer = SparseNewtonSolver(cell, potential_energy_fn, max_iter=10, step_size=1.0)
     new_x, success = optimizer.optimize(curr_g_pos, (fixed_locs, tractions))
     if not success:
         print(f'Optimization reached max iters.')

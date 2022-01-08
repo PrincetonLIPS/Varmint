@@ -2,6 +2,10 @@ import time
 import os
 import sys
 
+# Let's do 64-bit. Does not seem to degrade performance much.
+from jax.config import config
+config.update("jax_enable_x64", True)
+
 sys.path.insert(1, os.path.join(sys.path[0], '..'))
 
 from varmintv2.geometry.elements import Patch2D
@@ -16,10 +20,6 @@ from scipy.spatial import KDTree
 
 import numpy as np
 import jax
-
-# Let's do 64-bit. Does not seem to degrade performance much.
-from jax.config import config
-config.update("jax_enable_x64", True)
 
 
 def gen_cell(corners, num_ctrl, radius):
