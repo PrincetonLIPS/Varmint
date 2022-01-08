@@ -108,7 +108,7 @@ def solve_slab_with_hole(mesh_resolution):
 
     print(f'Starting optimization.')
     opt_start = time.time()
-    optimizer = SparseNewtonSolver(cell, potential_energy_fn, max_iter=10, step_size=1.0)
+    optimizer = SparseNewtonSolver(cell, potential_energy_fn, max_iter=1, step_size=1.0)
     new_x, success = optimizer.optimize(curr_g_pos, (fixed_locs, tractions))
     if not success:
         print(f'Optimization reached max iters.')
