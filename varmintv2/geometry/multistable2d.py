@@ -40,10 +40,10 @@ def su_corners(h1, h2, h3, l, t, t1):
     
     # top row
     all_ctrls.append(np.array([[0.5*l-t,h3-t],[0.5*l-t,h3],[0.5*l+t,h3],[0.5*l+t,h3-t]]))  # middle
-    all_ctrls.append(np.array([[t,h3-t],[t,h3],[0.5*l-t,h3],[0.5*l-t,h3-t]]))  # left middle
-    all_ctrls.append(np.array([[0,h3-t],[0,h3],[t,h3],[t,h3-t]]))  # left
-    all_ctrls.append(np.array([[0.5*l+t,h3-t],[0.5*l+t,h3],[l-t,h3],[l-t,h3-t]]))  # right middle
-    all_ctrls.append(np.array([[l-t,h3-t],[l-t,h3],[l,h3],[l,h3-t]]))  # right
+    #all_ctrls.append(np.array([[t,h3-t],[t,h3],[0.5*l-t,h3],[0.5*l-t,h3-t]]))  # left middle
+    #all_ctrls.append(np.array([[0,h3-t],[0,h3],[t,h3],[t,h3-t]]))  # left
+    #all_ctrls.append(np.array([[0.5*l+t,h3-t],[0.5*l+t,h3],[l-t,h3],[l-t,h3-t]]))  # right middle
+    #all_ctrls.append(np.array([[l-t,h3-t],[l-t,h3],[l,h3],[l,h3-t]]))  # right
         
     return np.stack(all_ctrls, axis=0)
 
@@ -75,47 +75,48 @@ def construct_multistable2D(patch_ncp, quad_degree, spline_degree,
 
     element = elements.Patch2D(xknots, yknots, spline_degree, quad_degree)
 
-    h1 = 0.5 * multiplier
-    h2 = 0.7 * multiplier
-    h3 = 1.0 * multiplier
-    l = 2.0 * multiplier
-    t = 0.1 * multiplier
-    t1 = 0.05 * multiplier
-
-    sq_patches_corners = su_corners(h1, h2, h3, l, t, t1)
-    patch_cl, patch_cr = su_cosine_patches(h1, h2, l, t, t1, patch_ncp)
-
-    ctrls = []
-
-    for i in range(sq_patches_corners.shape[0]):
-        l1 = np.linspace(sq_patches_corners[i, 1],
-                        sq_patches_corners[i, 2], patch_ncp)
-        l2 = np.linspace(sq_patches_corners[i, 0],
-                        sq_patches_corners[i, 3], patch_ncp)
-        l3 = np.linspace(l1, l2, patch_ncp)
-
-        ctrls.append(l3)
-
-    l3_r = np.linspace(patch_cr[patch_ncp:], patch_cr[0:patch_ncp], patch_ncp)
-    ctrls.append(l3_r)
-
-    l3_l = np.linspace(patch_cl[patch_ncp:], patch_cl[0:patch_ncp], patch_ncp)
-    ctrls.append(l3_l)
-
-    # Construct a single template for the material.
-    template_ctrls = np.stack(ctrls, axis=0)
-    template_ctrls = np.transpose(template_ctrls, (0, 2, 1, 3))
-    template_ctrls = template_ctrls[:, :, ::-1, :]
-
+    h1 = 5.0 * multiplier
+    h2 = 7.0 * multiplier
+    h3 = 10.0 * multiplier
+    l = 12.0 * multiplier
+    t = 1.0 * multiplier
+    t1 = [0.20, 0.23]
+    
     all_ctrls = []
     num_x = 1
-    num_y = 1
+    num_y = len(t1)
+    
+    for j in range(num_y):
 
-    # Use the template to construct a a cellular structure with offsets.
-    for i in range(num_x):
-        for j in range(num_y):
-            xy_offset = np.array([i*l, j*h3])
-            all_ctrls.append(template_ctrls.copy() + xy_offset)
+        sq_patches_corners = su_corners(h1, h2, h3, l, t, t1[j])
+        patch_cl, patch_cr = su_cosine_patches(h1, h2, l, t, t1[j], patch_ncp)
+
+        ctrls = []
+
+        for k in range(sq_patches_corners.shape[0]):
+            l1 = np.linspace(sq_patches_corners[k, 1],
+                        sq_patches_corners[k, 2], patch_ncp)
+            l2 = np.linspace(sq_patches_corners[k, 0],
+                        sq_patches_corners[k, 3], patch_ncp)
+            l3 = np.linspace(l1, l2, patch_ncp)
+
+            ctrls.append(l3)
+
+        l3_r = np.linspace(patch_cr[patch_ncp:], patch_cr[0:patch_ncp], patch_ncp)
+        ctrls.append(l3_r)
+
+        l3_l = np.linspace(patch_cl[patch_ncp:], patch_cl[0:patch_ncp], patch_ncp)
+        ctrls.append(l3_l)
+
+        # Construct a single template for the material.
+        template_ctrls = np.stack(ctrls, axis=0)
+        template_ctrls = np.transpose(template_ctrls, (0, 2, 1, 3))
+        template_ctrls = template_ctrls[:, :, ::-1, :]
+
+        # Use the template to construct a a cellular structure with offsets.
+        for i in range(num_x):
+             xy_offset = np.array([i*l, j*h3])
+             all_ctrls.append(template_ctrls.copy() + xy_offset)
 
     print('Constructing control points for Metastable2D.')
     all_ctrls = np.concatenate(all_ctrls, axis=0)
@@ -133,8 +134,8 @@ def construct_multistable2D(patch_ncp, quad_degree, spline_degree,
     # Dirichlet labels
     group_1 = np.abs(all_ctrls[..., 1] - 0.0) < 1e-14
     group_2 = np.abs(all_ctrls[..., 1] - num_y * h3) < 1e-14
-    group_3 = np.abs(all_ctrls[..., 0] - 1.0) < 1e-14
-    group_4 = np.abs(all_ctrls[..., 0] - 19.0) < 1e-14
+    group_3 = np.abs(all_ctrls[..., 0] - 0.0) < 1e-14
+    group_4 = np.abs(all_ctrls[..., 0] - num_x * l) < 1e-14
 
     dirichlet_groups = {
         '1': group_1,
@@ -147,6 +148,9 @@ def construct_multistable2D(patch_ncp, quad_degree, spline_degree,
         # empty
     }
 
+    rigid_patches = (np.ones(12), np.zeros(2)) * num_x * num_y
+    rigid_patches = np.concatenate(rigid_patches).astype(np.bool)
+
     return SingleElementGeometry(
         element=element,
         material=material,
@@ -154,4 +158,5 @@ def construct_multistable2D(patch_ncp, quad_degree, spline_degree,
         constraints=(constraints[:, 0], constraints[:, 1]),
         dirichlet_labels=dirichlet_groups,
         traction_labels=traction_groups,
+        rigid_patches_boolean=None,
     ), all_ctrls

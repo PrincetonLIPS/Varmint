@@ -276,9 +276,9 @@ class DenseNewtonSolver:
 
             #sparse_hess = scipy.sparse.csc_matrix(self.loss_hess(xk, args))
             dense_hess = self.loss_hess(xk, args)
-            print('Checking for NaN:')
-            print(onp.any(onp.isnan(dense_hess)))
-            print(f'Loss value is: {self.loss_fun(xk, *args)}')
+            #print('Checking for NaN:')
+            #print(onp.any(onp.isnan(dense_hess)))
+            #print(f'Loss value is: {self.loss_fun(xk, *args)}')
 
             try:
                 lu = scipy.linalg.lu_factor(dense_hess)

@@ -308,14 +308,25 @@ class SingleElementGeometry(Geometry):
             global_coords = jax.ops.index_update(kZeros, self.index_array, local_coords)
             global_coords = global_coords.flatten()
 
-            # Get rid of fixed labels to transform to global form.
-            global_coords = jnp.take(global_coords, self.nonfixed_labels, axis=0)
+            # Get nonfixed components.
+            global_coords_without_nonfixed = jnp.take(global_coords, self.nonfixed_labels, axis=0)
 
-            return global_coords
+            # Now get rigid components.
+            rigid_centers = []
+            for indices in self.rigidity_nonfixed_labels:
+                # Use as a dof the difference of mean value from reference config.
+                mean_value = jnp.mean(jnp.take(global_coords, indices, axis=0))
+                ref_mean_value = jnp.mean(jnp.take(self.ref_ctrl_component, indices, axis=0))
+                rigid_centers.append(jnp.array([mean_value - ref_mean_value]))
+
+            return jnp.concatenate([global_coords_without_nonfixed] + rigid_centers)
 
         def global_to_local(global_coords, fixed_coords):
             # Component dimensions.
             kZeros = jnp.zeros((self.n_components, self.element.n_d))
+
+            nonrigid_global_coords = global_coords[:self.nonfixed_labels.size]
+            rigid_global_coords = global_coords[self.nonfixed_labels.size:]
 
             # Find fixed locations array in component form.
             fixed_locs = jax.ops.index_update(
@@ -327,11 +338,19 @@ class SingleElementGeometry(Geometry):
 
             # Fill in the non-fixed locations
             local_pos = jax.ops.index_update(
-                local_pos, self.nonfixed_labels, global_coords)
+                local_pos, self.nonfixed_labels, nonrigid_global_coords)
 
             # Fill in the fixed locations
             fixed_pos = jax.ops.index_update(local_pos, self.fixed_labels,
                                              fixed_locs)
+
+            # Fill in the rigid patch locations
+            for i, indices in enumerate(self.rigidity_nonfixed_labels):
+                values = jnp.take(self.ref_ctrl_component, indices, axis=0)
+                offset_values = values + rigid_global_coords[i]
+
+                fixed_pos = jax.ops.index_update(fixed_pos, indices,
+                                                 offset_values)
             
             # Unflattened component form
             fixed_pos = fixed_pos.reshape((-1, self.element.n_d))
@@ -453,7 +472,8 @@ class SingleElementGeometry(Geometry):
     def __init__(self, element: Element, material: PhysicsModel,
                  init_ctrl: ArrayND, constraints: Tuple[Array1D, Array1D],
                  dirichlet_labels: Dict[str, ArrayND],
-                 traction_labels: Dict[str, ArrayND]):
+                 traction_labels: Dict[str, ArrayND],
+                 rigid_patches_boolean: Array1D = None):
         """Initialize a SingleElementGeometry.
 
         The node numbers of the local coordinate system will be in flatten
@@ -489,10 +509,15 @@ class SingleElementGeometry(Geometry):
                            array that selects out boundaries in the group. Each
                            item is of size (n_elements, element.num_boundaries).
 
+        - rigid_patches_boolean: A 1D boolean array specifying which patches are rigid.
+
         """
         if not geometry_utils.verify_constraints(init_ctrl, constraints):
             print('WARNING: Constraints are not satisfied by init_ctrl.')
         
+        if rigid_patches_boolean is None:
+            rigid_patches_boolean = onp.zeros(init_ctrl.shape[0], dtype=onp.bool)
+
         self.constraints = constraints
         self.dirichlet_fns = {}
         self.traction_fns = {}
@@ -522,9 +547,72 @@ class SingleElementGeometry(Geometry):
 
         self.traction_labels = traction_labels
 
+        # Compute reference configuration in component form. Needed for 
+        # rigid patches.
+        self.ref_ctrl_component = onp.zeros((self.n_components, self.element.n_d))
+        self.ref_ctrl_component[self.index_array] = init_ctrl
+        self.ref_ctrl_component = self.ref_ctrl_component.flatten()
+
+        # Create a graph between rigid patches that are incident, and find
+        # connected components in that graph to determine rigidity groups.
+        # Incidence is defined as having control points in common. This is
+        # a stronger condition than physically possible. Two patches could be
+        # connected via a single control point leading two patches to have
+        # separate rotation dofs, but we will not consider this for now.
+
+        # Extract patch numbers from constraints using first element of index.
+        patch_nums_rows = onp.unravel_index(all_rows, init_ctrl.shape[:-1])[0]
+        patch_nums_cols = onp.unravel_index(all_cols, init_ctrl.shape[:-1])[0]
+    
+        # Convert to array of patch numbers.
+        # TODO(doktay): Would it be better to just pass in array of patch
+        # numbers directly to the initializer?
+        rigid_patches = onp.nonzero(rigid_patches_boolean)[0]  # Should be sorted
+        row_constraints_rigid = onp.isin(patch_nums_rows, rigid_patches)
+        col_constraints_rigid = onp.isin(patch_nums_cols, rigid_patches)
+
+        rigidity_group_constraint = row_constraints_rigid & col_constraints_rigid
+        rigid_patch_rows = patch_nums_rows[rigidity_group_constraint]
+        rigid_patch_cols = patch_nums_cols[rigidity_group_constraint]
+
+        rigid_patch_incidence_graph = csr_matrix(
+            (onp.ones_like(rigid_patch_rows), (rigid_patch_rows, rigid_patch_cols)),
+            shape=(init_ctrl.shape[0], init_ctrl.shape[0]), dtype=onp.int8)
+        n_rigid_groups, all_patches_rigid_group_labels = connected_components(
+            csgraph=rigid_patch_incidence_graph,
+            directed=False,
+            return_labels=True,
+        )
+
+        rigid_group_labels = all_patches_rigid_group_labels[rigid_patches_boolean]
+        all_rigid_groups = onp.unique(rigid_group_labels)
+
+        rigid_labels_incomplete = {}
+        for group in all_rigid_groups:
+            group_indices = onp.zeros_like(self.index_array, dtype=onp.int8)
+            group_indices[all_patches_rigid_group_labels == group] = 1
+
+            rigid_labels_incomplete[group] = group_indices
+
+        # Complete the rigidity groups according to the sparsity pattern
+        self.rigid_labels = {}
+        self.all_rigid_indices = onp.zeros(init_ctrl.shape[:-1], dtype=onp.bool)
+        for group in all_rigid_groups:
+            label = rigid_labels_incomplete[group]
+            indices = local_indices[label > 0]
+            group_all_dists = dijkstra(spmat, directed=False, indices=indices,
+                                       unweighted=True, min_only=True)
+            group_all_dists = onp.reshape(group_all_dists, init_ctrl.shape[:-1])
+            self.rigid_labels[group] = group_all_dists < onp.inf
+
+            # Aggregate all rigid points
+            self.all_rigid_indices = \
+                self.all_rigid_indices | self.rigid_labels[group]
+
         # Complete the dirichlet_labels according to the sparsity graph.
         self.dirichlet_labels = {}
-        self.all_dirichlet_indices = onp.zeros(init_ctrl.shape[:-1])
+        self.dirichlet_label_fixeddims = {}
+        self.all_dirichlet_indices = onp.zeros(init_ctrl.shape[:-1], dtype=onp.bool)
         for group in dirichlet_labels:
 
             # If dirichlet entry is a tuple, then one is the 
@@ -540,54 +628,111 @@ class SingleElementGeometry(Geometry):
                                        unweighted=True, min_only=True)
             group_all_dists = onp.reshape(group_all_dists, init_ctrl.shape[:-1])
             self.dirichlet_labels[group] = group_all_dists < onp.inf
+            self.dirichlet_label_fixeddims[group] = fixed_dims
+
+            # If any dirichlet CP is in a rigidity group, then all CPs in that
+            # group must also be a dirichlet CP.
+            if onp.any(self.all_rigid_indices & self.dirichlet_labels[group]):
+                for rgroup in self.rigid_labels:
+                    if onp.any(self.rigid_labels[rgroup] & self.dirichlet_labels[group]):
+                        self.dirichlet_labels[group] = self.dirichlet_labels[group] | self.rigid_labels[rgroup]
 
             # Aggregate all fixed indices to create fixed_labels needed for
             # global <-> local conversion.
             self.all_dirichlet_indices = \
-                self.all_dirichlet_indices + self.dirichlet_labels[group]
+                self.all_dirichlet_indices | self.dirichlet_labels[group]
 
         # np.unique will make sure this is sorted
         fixed_labels = \
-            onp.unique(self.index_array[self.all_dirichlet_indices > 0])
+            onp.unique(self.index_array[self.all_dirichlet_indices])
 
         # For each of the fixed labels, keep track of which dimensions are fixed.
         fixed_labels_dimension_index = \
             onp.zeros((fixed_labels.shape[0], self.element.n_d))
-        for group in dirichlet_labels:
-            if isinstance(dirichlet_labels[group], tuple):
-                label, fixed_dims = dirichlet_labels[group]
-            else:
-                label = dirichlet_labels[group]
-                fixed_dims = onp.array([1, 1])
+        for group in self.dirichlet_labels:
+            label = self.dirichlet_labels[group]
+            fixed_dims = self.dirichlet_label_fixeddims[group]
 
-            group_indices = onp.unique(self.index_array[label > 0])
+            group_indices = onp.unique(self.index_array[label])
             inds_into_fixedlabels = onp.searchsorted(fixed_labels, group_indices)
             fixed_labels_dimension_index[inds_into_fixedlabels, :] = fixed_labels_dimension_index[inds_into_fixedlabels, :] + fixed_dims
-
-        # np.unique will make sure this is sorted
-        nonfixed_labels = \
-            onp.unique(self.index_array[self.all_dirichlet_indices == 0])
 
         # When component form is flattened, component i becomes indices 
         # n_d * i + (0, 1, ..., n_d-1)
         # From the fixed_labels array generated above, modify it to refer to
         # indices in the flattened component form.
 
-        fixed_labels = self.element.n_d * fixed_labels
-        fixed_labels = onp.stack((fixed_labels,) * self.element.n_d, axis=-1)
-        fixed_labels = fixed_labels + onp.arange(self.element.n_d)
+        fixed_labels_withdims = self.element.n_d * fixed_labels
+        fixed_labels_withdims = onp.stack((fixed_labels_withdims,) * self.element.n_d, axis=-1)
+        fixed_labels_withdims = fixed_labels_withdims + onp.arange(self.element.n_d)
 
         # When adding boundary conditions over a single dimension,
         # instead of flattening here make an index array. 
         # Make sure to add whatever was not picked in the index array to nonfixed_labels.
-        self.fixed_labels = fixed_labels[fixed_labels_dimension_index > 0]
+        self.fixed_labels = fixed_labels_withdims[fixed_labels_dimension_index > 0]
+
+        # Now figure out rigidity.
+        # Rigid CPs that have not been labeled as fixed will be translated to 
+        # a translation and rotation. If a single dimension of the rigid group
+        # is fixed, the other dimension is just a single scalar (no rotation).
+        # TODO(doktay): For simplicity, ignore rotations in rigid objects for now.
+        # We don't need it for our current applications.
+
+        # We will operate on the component form as above. Figure out which indices
+        # in control form belong to which group. Treat different dimensions as
+        # different ridigity groups, which we can do because we assume translation
+        # only.
+
+        # Need to redeclare this
+        fixed_labels = \
+            onp.unique(self.index_array[self.all_dirichlet_indices])
+
+        self.rigidity_nonfixed_labels = []
+        all_inds_into_fixedlabels = [onp.array([], dtype=onp.int64)]
+        for group in self.rigid_labels:
+            group_nonfixed_labels = \
+                onp.unique(self.index_array[(~self.all_dirichlet_indices) & self.rigid_labels[group]])
+            group_nonfixed_labels = self.element.n_d * group_nonfixed_labels
+            group_nonfixed_labels = onp.stack((group_nonfixed_labels,) * self.element.n_d, axis=-1)
+            group_nonfixed_labels = group_nonfixed_labels + onp.arange(self.element.n_d)
+
+            # Treat different dimensions as separate rigidity groups.
+            if group_nonfixed_labels.size > 0:
+                for d in range(self.element.n_d):
+                    self.rigidity_nonfixed_labels.append(group_nonfixed_labels[..., d])
+            
+            # Search to see if this rigidity group is in fixed labels
+            group_fixed_labels = \
+                onp.unique(self.index_array[self.all_dirichlet_indices & self.rigid_labels[group]])
+            if group_fixed_labels.size > 0:
+                # Guaranteed that fixedlabels contains entire rigidity group.
+                inds_into_fixedlabels = onp.searchsorted(fixed_labels, group_fixed_labels)
+                all_inds_into_fixedlabels.append(inds_into_fixedlabels)
+                group_fixed_labels = self.element.n_d * group_fixed_labels
+                group_fixed_labels = onp.stack((group_fixed_labels,) * self.element.n_d, axis=-1)
+                group_fixed_labels = group_fixed_labels + onp.arange(self.element.n_d)
+                
+                rigid_but_partially_fixed = group_fixed_labels[fixed_labels_dimension_index[inds_into_fixedlabels, :] == 0]
+                if rigid_but_partially_fixed.size > 0:
+                    self.rigidity_nonfixed_labels.append(rigid_but_partially_fixed)
+
+        all_inds_into_fixedlabels = onp.concatenate(all_inds_into_fixedlabels)
+        all_rigid_fixed_labels = onp.zeros(fixed_labels_withdims.shape[0], dtype=onp.bool)
+        all_rigid_fixed_labels[all_inds_into_fixedlabels] = True
+
+        # np.unique will make sure this is sorted
+        nonfixed_labels = \
+            onp.unique(self.index_array[~self.all_dirichlet_indices & ~self.all_rigid_indices])
 
         nonfixed_labels = self.element.n_d * nonfixed_labels
         nonfixed_labels = onp.stack((nonfixed_labels,) * self.element.n_d, axis=-1)
         nonfixed_labels = nonfixed_labels + onp.arange(self.element.n_d)
         nonfixed_labels = nonfixed_labels.flatten()
+
+        fixed_labels_without_rigid = fixed_labels_withdims[~all_rigid_fixed_labels]
+        dimension_index_without_rigid = fixed_labels_dimension_index[~all_rigid_fixed_labels]
         self.nonfixed_labels = \
-            onp.concatenate((nonfixed_labels, fixed_labels[fixed_labels_dimension_index == 0]))
+            onp.concatenate((nonfixed_labels, fixed_labels_without_rigid[dimension_index_without_rigid == 0]))
 
         ###################################################################
         # Using the local sparsity pattern for the Element, construct the #
