@@ -267,7 +267,7 @@ class DenseNewtonSolver:
     def optimize(self, x0, args=()):
         xk = x0
 
-        tol = 1e-8
+        tol = self.tol
         
         for i in range(self.max_iter):
             g = onp.array(self.grad_fun(xk, *args))
@@ -316,7 +316,7 @@ class DenseNewtonSolverJittable:
         self.grad_fun = jax.grad(loss_fun)
 
     def optimize(self, x0, args=()):
-        tol = 1e-6
+        tol = self.tol
 
         def cond_fun(state):
             return np.logical_and(np.linalg.norm(state.g) > tol, state.inum < self.max_iter)
