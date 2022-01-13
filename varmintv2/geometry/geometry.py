@@ -383,28 +383,50 @@ class SingleElementGeometry(Geometry):
 
     def get_potential_energy_fn(self, ref_l_position):
         l2g, g2l = self.get_global_local_maps()
+        active_traction_boundaries_nr = self.active_traction_boundaries[~self.rigid_patches_boolean]
+        active_traction_boundaries_r = self.active_traction_boundaries[self.rigid_patches_boolean]
 
         def potential_energy(cur_g_position, fix_l_position, traction):
             def_ctrl = g2l(cur_g_position, fix_l_position)
-            
-            _, G, S, T = jax.vmap(self.element_energy_fn)(
-                def_ctrl, jnp.zeros_like(def_ctrl), ref_l_position,
-                self.active_traction_boundaries, traction
+
+            def_ctrl_nr = def_ctrl[~self.rigid_patches_boolean]
+            ref_l_position_nr = ref_l_position[~self.rigid_patches_boolean]
+            traction_nr = traction[~self.rigid_patches_boolean]
+
+            # Non-rigid patches
+            _, G_nr, S_nr, T_nr = jax.vmap(self.element_energy_fn)(
+                def_ctrl_nr, jnp.zeros_like(def_ctrl_nr), ref_l_position_nr,
+                active_traction_boundaries_nr, traction_nr
             )
 
-            return jnp.sum(G + S + T)
+            def_ctrl_r = def_ctrl[self.rigid_patches_boolean]
+            ref_l_position_r = ref_l_position[self.rigid_patches_boolean]
+            traction_r = traction[self.rigid_patches_boolean]
+
+            # Rigid patches
+            _, G_r, _, T_r = jax.vmap(self.element_energy_fn)(
+                def_ctrl_r, jnp.zeros_like(def_ctrl_r), ref_l_position_r,
+                active_traction_boundaries_r, traction_r
+            )
+
+            return jnp.sum(G_nr + S_nr + T_nr) + jnp.sum(G_r + T_r)
 
         return potential_energy
 
     def get_strain_energy_fn(self, ref_l_position):
         l2g, g2l = self.get_global_local_maps()
+        active_traction_boundaries_nr = self.active_traction_boundaries[~self.rigid_patches_boolean]
 
         def strain_energy(cur_g_position, fix_l_position, traction):
             def_ctrl = g2l(cur_g_position, fix_l_position)
-            
+
+            def_ctrl_nr = def_ctrl[~self.rigid_patches_boolean]
+            ref_l_position_nr = ref_l_position[~self.rigid_patches_boolean]
+            traction_nr = traction[~self.rigid_patches_boolean]
+
             _, G, S, T = jax.vmap(self.element_energy_fn)(
-                def_ctrl, jnp.zeros_like(def_ctrl), ref_l_position,
-                self.active_traction_boundaries, traction
+                def_ctrl_nr, jnp.zeros_like(def_ctrl_nr), ref_l_position_nr,
+                active_traction_boundaries_nr, traction_nr
             )
 
             return jnp.sum(S)
@@ -517,6 +539,7 @@ class SingleElementGeometry(Geometry):
         
         if rigid_patches_boolean is None:
             rigid_patches_boolean = onp.zeros(init_ctrl.shape[0], dtype=onp.bool)
+        self.rigid_patches_boolean = rigid_patches_boolean
 
         self.constraints = constraints
         self.dirichlet_fns = {}

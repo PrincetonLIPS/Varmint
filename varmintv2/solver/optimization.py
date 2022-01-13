@@ -1,3 +1,4 @@
+from collections import namedtuple
 import os
 
 import jax
@@ -292,7 +293,56 @@ class DenseNewtonSolver:
                 return xk, False
 
         return xk, False
+
+
+NewtonState = namedtuple('NewtonState', [
+    'xk', 'g', 'hess', 'inum'
+])
+
+class DenseNewtonSolverJittable:
+    def __init__(self, geometry: Geometry, loss_fun,
+                 max_iter=20, step_size=1.0, tol=1e-8):
+        self.max_iter = max_iter
+        self.iter_num = 0
+        self.geometry = geometry
+        self.step_size = step_size
+        self.tol = tol
+
+        def loss_hess(x, args):
+            return jax.hessian(loss_fun)(x, *args)
+
+        self.loss_fun = loss_fun
+        self.loss_hess = loss_hess
+        self.grad_fun = jax.grad(loss_fun)
+
+    def optimize(self, x0, args=()):
+        tol = 1e-6
+
+        def cond_fun(state):
+            return np.logical_and(np.linalg.norm(state.g) > tol, state.inum < self.max_iter)
         
+        def body_fun(state):
+            dx = jax.numpy.linalg.solve(state.hess, -state.g)
+
+            xk = state.xk + dx * self.step_size
+
+            return NewtonState(
+                xk=xk,
+                g=self.grad_fun(xk, *args),
+                hess=self.loss_hess(xk, args),
+                inum=state.inum+1,
+            )
+        
+        init_val = NewtonState(
+            xk=x0,
+            g=self.grad_fun(x0, *args),
+            hess=self.loss_hess(x0, args),
+            inum=0,
+        )
+
+        final_state = jax.lax.while_loop(cond_fun, body_fun, init_val)
+        return final_state.xk, final_state.inum < self.max_iter
+
 
 def get_statics_optfun(loss_fun, grad_fun, hessp_gen_fun=None, kind='newton', optargs={}):
     if kind == 'newton':

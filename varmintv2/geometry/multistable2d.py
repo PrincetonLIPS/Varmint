@@ -158,5 +158,5 @@ def construct_multistable2D(patch_ncp, quad_degree, spline_degree,
         constraints=(constraints[:, 0], constraints[:, 1]),
         dirichlet_labels=dirichlet_groups,
         traction_labels=traction_groups,
-        rigid_patches_boolean=None,
+        rigid_patches_boolean=rigid_patches,
     ), all_ctrls
