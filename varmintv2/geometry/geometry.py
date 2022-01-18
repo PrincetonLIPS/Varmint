@@ -786,17 +786,6 @@ class SingleElementGeometry(Geometry):
         presliced_jac_sparsity_graph = scipy.sparse.kron(
             jac_sparsity_graph, onp.ones((element.n_d, element.n_d)), format='csr'
         )
-
-        #post_kron_rows = presliced_jac_sparsity_graph.row
-        #post_kron_cols = presliced_jac_sparsity_graph.col
-
-        #rows_nonfixed = onp.isin(post_kron_rows, self.nonfixed_labels)
-        #cols_nonfixed = onp.isin(post_kron_cols, self.nonfixed_labels)
-
-        #nonfixed_rows = post_kron_rows[rows_nonfixed & cols_nonfixed]
-        #nonfixed_cols = post_kron_cols[rows_nonfixed & cols_nonfixed]
-
-        #presliced_jac_sparsity_graph_csr = presliced_jac_sparsity_graph.tocsr()
         
         jac_sparsity_graph = presliced_jac_sparsity_graph[:, self.nonfixed_labels]
         jac_sparsity_graph = jac_sparsity_graph[self.nonfixed_labels, :]
