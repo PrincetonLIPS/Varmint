@@ -7,8 +7,8 @@ from typing import Callable, Dict, List, Tuple
 import jax
 import jax.numpy as jnp
 import numpy as onp
-from scipy.sparse.csc import csc_matrix
 from scipy.sparse.csr import csr_matrix
+from scipy.sparse.coo import coo_matrix
 from scipy.sparse.csgraph import connected_components, dijkstra
 
 import scipy.optimize
@@ -757,6 +757,8 @@ class SingleElementGeometry(Geometry):
         self.nonfixed_labels = \
             onp.concatenate((nonfixed_labels, fixed_labels_without_rigid[dimension_index_without_rigid == 0]))
 
+        self.nonfixed_labels = onp.sort(self.nonfixed_labels)
+
         ###################################################################
         # Using the local sparsity pattern for the Element, construct the #
         # sparsity pattern of the full geometry.                          #
@@ -776,16 +778,69 @@ class SingleElementGeometry(Geometry):
         jac_rows = jac_spy_edges[:, 0]
         jac_cols = jac_spy_edges[:, 1]
         jac_sparsity_graph = \
-            csc_matrix((jac_entries, (jac_rows, jac_cols)),
+            csr_matrix((jac_entries, (jac_rows, jac_cols)),
                        (n_components, n_components), dtype=onp.int8)
 
         # Use kron to duplicate per dimension, and then use nonfixed_labels
         # to get the nonfixed indices.
-        jac_sparsity_graph = scipy.sparse.kron(
-            jac_sparsity_graph, onp.ones((element.n_d, element.n_d)), format='csc'
+        presliced_jac_sparsity_graph = scipy.sparse.kron(
+            jac_sparsity_graph, onp.ones((element.n_d, element.n_d)), format='csr'
         )
-        jac_sparsity_graph = jac_sparsity_graph[:, self.nonfixed_labels]
-        self._jac_sparsity_graph = jac_sparsity_graph[self.nonfixed_labels, :]
+
+        #post_kron_rows = presliced_jac_sparsity_graph.row
+        #post_kron_cols = presliced_jac_sparsity_graph.col
+
+        #rows_nonfixed = onp.isin(post_kron_rows, self.nonfixed_labels)
+        #cols_nonfixed = onp.isin(post_kron_cols, self.nonfixed_labels)
+
+        #nonfixed_rows = post_kron_rows[rows_nonfixed & cols_nonfixed]
+        #nonfixed_cols = post_kron_cols[rows_nonfixed & cols_nonfixed]
+
+        #presliced_jac_sparsity_graph_csr = presliced_jac_sparsity_graph.tocsr()
+        
+        jac_sparsity_graph = presliced_jac_sparsity_graph[:, self.nonfixed_labels]
+        jac_sparsity_graph = jac_sparsity_graph[self.nonfixed_labels, :]
+        
+        jac_sparsity_graph_coo = jac_sparsity_graph.tocoo()
+        nonfixed_rows = jac_sparsity_graph_coo.row
+        nonfixed_cols = jac_sparsity_graph_coo.col
+
+        # Now the rigidity groups will add extra rows/columns to the sparsity
+        # matrix.
+        # For each rigidity group, find all indices each of the CPs would have
+        # been adjacent to.
+        rigid_adjacencies = []
+        for indices in self.rigidity_nonfixed_labels:
+            adjacencies = presliced_jac_sparsity_graph[:, indices].sum(axis=1)
+            adjacencies = onp.where(adjacencies[self.nonfixed_labels, :])[0]
+            rigid_adjacencies.append(adjacencies)
+
+        rows_with_rigid = [nonfixed_rows]
+        cols_with_rigid = [nonfixed_cols]
+        n_rigid = len(self.rigidity_nonfixed_labels)
+        n_nonfixed = self.nonfixed_labels.size
+        for i in range(n_rigid):
+            ind = i + n_nonfixed
+            rows_with_rigid.append(ind * onp.ones_like(rigid_adjacencies[i]))
+            cols_with_rigid.append(rigid_adjacencies[i])
+
+            cols_with_rigid.append(ind * onp.ones_like(rigid_adjacencies[i]))
+            rows_with_rigid.append(rigid_adjacencies[i])
+        
+        # Add a dependence between all rigidity groups for simplicity.
+        # Should be pretty few entries, but should save us from special cases
+        # where rigid groups could share a hessian entry.
+        a = onp.arange(n_rigid)
+        stacked = onp.stack(onp.meshgrid(a, a), axis=-1).reshape((-1, 2)) + n_nonfixed
+        rows_with_rigid.append(stacked[:, 0])
+        cols_with_rigid.append(stacked[:, 1])
+
+        all_rows = onp.concatenate(rows_with_rigid)
+        all_cols = onp.concatenate(cols_with_rigid)
+        all_entries = onp.ones_like(all_rows)
+        self._jac_sparsity_graph = \
+            csr_matrix((all_entries, (all_rows, all_cols)),
+                       (n_nonfixed + n_rigid, n_nonfixed + n_rigid), dtype=onp.int8)
 
         self._jac_reconstruction_tangents, self._jac_reconstruction_fn = \
             sparsity.pattern_to_reconstruction(self._jac_sparsity_graph)
