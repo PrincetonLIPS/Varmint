@@ -16,6 +16,8 @@ import scipy.sparse.linalg
 
 import scipy.stats
 
+import ilupp
+
 import time
 from functools import partial
 
@@ -207,6 +209,14 @@ class SparseNewtonSolver:
         self.step_size = step_size
         self.tol = tol
 
+        self.stats = {
+            'factorization_time': 0.0,
+            'num_hess_calls': 0,
+            'jvps_time': 0.0,
+            'jac_reconstruction_time': 0.0,
+            'solve_time': 0.0,
+        }
+
         self.sparse_reconstruct = geometry.get_jac_reconstruction_fn()
         self.sparsity_tangents = geometry.jac_reconstruction_tangents
         
@@ -219,6 +229,7 @@ class SparseNewtonSolver:
             return vmap_loss_hvp(x, self.sparsity_tangents, args)
 
         self.loss_fun = loss_fun
+        self.loss_hvp = jax.jit(loss_hvp)
         self.sparse_entries_fun = sparse_entries
         self.grad_fun = jax.jit(jax.grad(loss_fun))
 
@@ -234,11 +245,49 @@ class SparseNewtonSolver:
             if np.linalg.norm(g) < tol:
                 return xk, True
 
-            hvp_res = self.sparse_entries_fun(xk, args)
-            sparse_hess = self.sparse_reconstruct(hvp_res)
-            lu = scipy.sparse.linalg.splu(sparse_hess)
+            t1 = time.time()
+            hvp_res = self.sparse_entries_fun(xk, args).block_until_ready()
+            self.stats['jvps_time'] += time.time() - t1
+            self.stats['num_hess_calls'] += 1
 
+            t1 = time.time()
+            sparse_hess = self.sparse_reconstruct(hvp_res)
+            self.stats['jac_reconstruction_time'] += time.time() - t1
+
+            t1 = time.time()
+            lu = scipy.sparse.linalg.splu(sparse_hess)
+            #sparse_hess2 = sparse_hess @ sparse_hess
+            #ichol = ilupp.ICholTPreconditioner(sparse_hess2, add_fill_in=20004)
+            """
+            ilu_factor = scipy.sparse.linalg.spilu(sparse_hess)
+            """
+            self.stats['factorization_time'] += time.time() - t1
+
+            t1 = time.time()
             dx = lu.solve(-g)
+            """
+            def M_x(x): return ilu_factor.solve(x)
+            #def M_x(x): return ichol @ x
+            self.M_lin_op = scipy.sparse.linalg.LinearOperator(
+                (x0.shape[0], x0.shape[0]), M_x)
+
+            def Jk(v): return self.loss_hvp(xk, v, args)
+            def JJk(v): return Jk(Jk(v))
+            jac_lin_op = scipy.sparse.linalg.LinearOperator(
+                (x0.shape[0], x0.shape[0]), Jk)
+            dx, info = scipy.sparse.linalg.gmres(
+                jac_lin_op, -g, tol=tol, M=self.M_lin_op, maxiter=200)
+
+            if info != 0:
+                print(
+                    f'GMRES returned info: {info}. Falling back to direct method.')
+                # return np.nan * np.ones_like(x0), None
+                lu_factor = scipy.sparse.linalg.splu(sparse_hess)
+
+                dx = lu_factor.solve(-g)
+            """
+            self.stats['solve_time'] += time.time() - t1
+
             xk = xk + dx * self.step_size
 
         g = onp.array(self.grad_fun(xk, *args))

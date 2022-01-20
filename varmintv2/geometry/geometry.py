@@ -618,6 +618,7 @@ class SingleElementGeometry(Geometry):
             rigid_labels_incomplete[group] = group_indices
 
         # Complete the rigidity groups according to the sparsity pattern
+        print('Computing rigidity groups.')
         self.rigid_labels = {}
         self.all_rigid_indices = onp.zeros(init_ctrl.shape[:-1], dtype=onp.bool)
         for group in all_rigid_groups:
@@ -631,6 +632,7 @@ class SingleElementGeometry(Geometry):
             # Aggregate all rigid points
             self.all_rigid_indices = \
                 self.all_rigid_indices | self.rigid_labels[group]
+        print('\tDone.')
 
         # Complete the dirichlet_labels according to the sparsity graph.
         self.dirichlet_labels = {}
@@ -831,5 +833,9 @@ class SingleElementGeometry(Geometry):
             csr_matrix((all_entries, (all_rows, all_cols)),
                        (n_nonfixed + n_rigid, n_nonfixed + n_rigid), dtype=onp.int8)
 
+        print(f'Number of dof: {n_nonfixed + n_rigid}.')
+        print('Sparsity precomputation.')
         self._jac_reconstruction_tangents, self._jac_reconstruction_fn = \
             sparsity.pattern_to_reconstruction(self._jac_sparsity_graph)
+        print('\tDone.')
+        print(f'\t# JVPs: {self._jac_reconstruction_tangents.shape[0]}')

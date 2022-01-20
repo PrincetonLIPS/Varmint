@@ -1,7 +1,9 @@
+import time
 import numpy as np
 import jax.numpy as jnp
+import jax
 
-from scipy.sparse import csc_matrix, diags
+from scipy.sparse import coo_matrix, csc_matrix, diags
 
 
 def row_inds(spm, i):
@@ -125,21 +127,32 @@ def pattern_to_reconstruction(sparsemat_csc):
     jvp_mat = jnp.array(construct_jvp_mat(sparsemat_csc, groups, rows))
     all_rows, all_cols, jvp_indexer = jvps_to_spmat(
         sparsemat_csc, groups, rows)
+    nnz = len(all_rows)
+    all_rows = np.array(all_rows)
+    all_cols = np.array(all_cols)
 
-    def reconstruct(jvp_result):
-        """Takes as input (njvps, ndof) matrix."""
-        nnz = len(all_rows)
+    @jax.jit
+    def reconstruct_jittable(jvp_result):
         result = jvp_result.flatten()
 
-        data = np.zeros(nnz)
-        data[:nnz//2] = result[jvp_indexer]
-        data[nnz//2:] = result[jvp_indexer]
+        data = jnp.zeros(nnz)
+        data = jax.ops.index_update(data, jax.ops.index[:nnz//2], result[jvp_indexer])
+        data = jax.ops.index_update(data, jax.ops.index[nnz//2:], result[jvp_indexer])
 
+        return data
+
+    def to_csc(data):
         reconstructed = csc_matrix((data, (all_rows, all_cols)))
 
         # Diagonals will be duplicated, so de-duplicate.
         reconstructed = reconstructed - diags(reconstructed.diagonal()) / 2
 
         return reconstructed
+
+    def reconstruct(jvp_result):
+        data = reconstruct_jittable(jvp_result).block_until_ready()
+        csc = to_csc(data)
+
+        return csc
 
     return jvp_mat, reconstruct
