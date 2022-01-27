@@ -7,7 +7,7 @@ import argparse
 from varmintv2.geometry.multistable2d import construct_multistable2D
 from varmintv2.geometry.elements import Patch2D
 from varmintv2.geometry.geometry import Geometry, SingleElementGeometry
-from varmintv2.physics.constitutive import NeoHookean2D
+from varmintv2.physics.constitutive import LinearElastic2D, NeoHookean2D
 from varmintv2.physics.materials import Material
 from varmintv2.solver.discretize import HamiltonianStepper
 from varmintv2.utils.movie_utils import create_movie, create_static_image
@@ -37,7 +37,7 @@ eutils.prepare_experiment_args(
 
 
 # Geometry parameters.
-parser.add_argument('-c', '--ncp', type=int, default=5)
+parser.add_argument('-c', '--ncp', type=int, default=8)
 parser.add_argument('-q', '--quaddeg', type=int, default=10)
 parser.add_argument('-s', '--splinedeg', type=int, default=3)
 
@@ -84,6 +84,7 @@ def main():
         experiment = None
 
     mat = NeoHookean2D(TPUMat)
+    #mat = LinearElastic2D(SteelMat)
 
     multiplier = 1.0
     cell, ref_ctrl = \
@@ -91,8 +92,8 @@ def main():
                                spline_degree=args.splinedeg, material=mat,
                                multiplier=multiplier)
 
-    potential_energy_fn = cell.get_potential_energy_fn(ref_ctrl)
-    strain_energy_fn = jax.jit(cell.get_strain_energy_fn(ref_ctrl))
+    potential_energy_fn = cell.get_potential_energy_fn()
+    strain_energy_fn = jax.jit(cell.get_strain_energy_fn())
 
     grad_potential_energy_fn = jax.grad(potential_energy_fn)
     hess_potential_energy_fn = jax.hessian(potential_energy_fn)
@@ -117,8 +118,9 @@ def main():
     all_fixed_locs = []
     all_fixed_vels = []
 
-    optimizer = DenseNewtonSolverJittable(cell, potential_energy_fn, max_iter=100, step_size=0.5)
-    optimize = jax.jit(optimizer.optimize)
+    optimizer = SparseNewtonSolver(cell, potential_energy_fn, max_iter=100,
+                                   step_size=0.5, tol=1e-3)
+    #optimize = jax.jit(optimizer.optimize)
     for i in range(n_increments + 1):
         # Increment displacement a little bit.
         fixed_displacements = {
@@ -140,7 +142,7 @@ def main():
         # Solve for new state
         print(f'Starting optimization at iteration {i}.')
         opt_start = time.time()
-        new_x, success = optimize(curr_g_pos, (fixed_locs, tractions))
+        new_x, success = optimizer.optimize(curr_g_pos, (fixed_locs, tractions, ref_ctrl))
         if not success:
             print(f'Optimization reached max iters.')
             break
@@ -149,7 +151,7 @@ def main():
         curr_g_pos = new_x
         all_displacements.append(curr_g_pos)
         all_velocities.append(np.zeros_like(curr_g_pos))
-        strain_energy = strain_energy_fn(curr_g_pos, fixed_locs, tractions)
+        strain_energy = strain_energy_fn(curr_g_pos, fixed_locs, tractions, ref_ctrl)
         strain_energies.append(strain_energy)
         increments.append(8.0 / n_increments * i)
         print(f'Total strain energy is: {strain_energy} J')

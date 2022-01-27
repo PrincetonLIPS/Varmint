@@ -381,12 +381,12 @@ class SingleElementGeometry(Geometry):
 
         return lagrangian
 
-    def get_potential_energy_fn(self, ref_l_position):
+    def get_potential_energy_fn(self):
         l2g, g2l = self.get_global_local_maps()
         active_traction_boundaries_nr = self.active_traction_boundaries[~self.rigid_patches_boolean]
         active_traction_boundaries_r = self.active_traction_boundaries[self.rigid_patches_boolean]
 
-        def potential_energy(cur_g_position, fix_l_position, traction):
+        def potential_energy(cur_g_position, fix_l_position, traction, ref_l_position):
             def_ctrl = g2l(cur_g_position, fix_l_position)
 
             def_ctrl_nr = def_ctrl[~self.rigid_patches_boolean]
@@ -413,11 +413,11 @@ class SingleElementGeometry(Geometry):
 
         return potential_energy
 
-    def get_strain_energy_fn(self, ref_l_position):
+    def get_strain_energy_fn(self):
         l2g, g2l = self.get_global_local_maps()
         active_traction_boundaries_nr = self.active_traction_boundaries[~self.rigid_patches_boolean]
 
-        def strain_energy(cur_g_position, fix_l_position, traction):
+        def strain_energy(cur_g_position, fix_l_position, traction, ref_l_position):
             def_ctrl = g2l(cur_g_position, fix_l_position)
 
             def_ctrl_nr = def_ctrl[~self.rigid_patches_boolean]

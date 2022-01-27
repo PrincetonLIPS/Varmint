@@ -80,7 +80,7 @@ def construct_multistable2D(patch_ncp, quad_degree, spline_degree,
     h3 = 10.0 * multiplier
     l = 12.0 * multiplier
     t = 1.0 * multiplier
-    t1 = [0.20, 0.23]
+    t1 = [0.15, 0.23]
     
     all_ctrls = []
     num_x = 1
@@ -148,7 +148,9 @@ def construct_multistable2D(patch_ncp, quad_degree, spline_degree,
         # empty
     }
 
-    rigid_patches = (np.ones(12), np.zeros(2)) * num_x * num_y
+    #rigid_patches = (np.ones(12), np.zeros(2)) * num_x * num_y
+    rigid_patches = (np.ones(5),np.ones(1),np.zeros(1),np.ones(1),np.zeros(3),np.ones(1),np.zeros(2)) * num_x * num_y
+
     rigid_patches = np.concatenate(rigid_patches).astype(np.bool)
 
     return SingleElementGeometry(
