@@ -6,6 +6,8 @@ from jax.core import InconclusiveDimensionOperation
 import jax.numpy as np
 import jax.scipy.linalg
 
+import jax.experimental.host_callback as hcb
+
 import numpy as onp
 
 import numpy.linalg as onpla
@@ -297,6 +299,27 @@ class SparseNewtonSolver:
         return xk, False
 
 
+# This function runs on the host.
+def host_sparse_lu(inputs):
+    data, row_indices, col_indptr, g = inputs
+
+    sparse_hess = scipy.sparse.csc_matrix((data, row_indices, col_indptr))
+    lu = scipy.sparse.linalg.splu(sparse_hess)
+    return lu.solve(-g)
+
+
+# This function runs on the device.
+def device_sparse_lu(data, row_indices, col_indptr, g):
+    inputs = (data, row_indices, col_indptr, g)
+    return hcb.call(host_sparse_lu, inputs,
+                    result_shape=g)
+
+
+SparseNewtonSolverHCBState = namedtuple('NewtonState', [
+    'xk', 'g', 'inum'
+])
+
+
 class SparseNewtonSolverHCB:
     def __init__(self, geometry: Geometry, loss_fun,
                  max_iter=20, step_size=1.0, tol=1e-8):
@@ -321,77 +344,43 @@ class SparseNewtonSolverHCB:
             return hvp(loss_fun, x, tangents, args)
 
         vmap_loss_hvp = jax.vmap(loss_hvp, in_axes=(None, 0, None))
-        @jax.jit
         def sparse_entries(x, args):
             return vmap_loss_hvp(x, self.sparsity_tangents, args)
 
         self.loss_fun = loss_fun
-        self.loss_hvp = jax.jit(loss_hvp)
+        self.loss_hvp = loss_hvp
         self.sparse_entries_fun = sparse_entries
-        self.grad_fun = jax.jit(jax.grad(loss_fun))
-
+        self.grad_fun = jax.grad(loss_fun)
 
     def optimize(self, x0, args=()):
-        xk = x0
-
         tol = self.tol
+
+        def cond_fun(state):
+            return np.logical_and(np.linalg.norm(state.g) > tol, state.inum < self.max_iter)
+
+        def body_fun(state):
+            hvp_res = self.sparse_entries_fun(state.xk, args)
+
+            # Sparse reconstruct gives a csc matrix format.
+            data, row_indices, col_indptr = self.sparse_reconstruct(hvp_res)
+            dx = device_sparse_lu(data, row_indices, col_indptr, state.g)
+
+            xk = state.xk + dx * self.step_size
+
+            return SparseNewtonSolverHCBState(
+                xk=xk,
+                g=self.grad_fun(xk, *args),
+                inum=state.inum+1,
+            )
         
-        for i in range(self.max_iter):
-            g = onp.array(self.grad_fun(xk, *args))
-            print(f'Gradient norm: {np.linalg.norm(g)}')
+        init_val = SparseNewtonSolverHCBState(
+            xk=x0,
+            g=self.grad_fun(x0, *args),
+            inum=0,
+        )
 
-            if np.linalg.norm(g) < tol:
-                return xk, True
-
-            t1 = time.time()
-            hvp_res = self.sparse_entries_fun(xk, args).block_until_ready()
-            self.stats['jvps_time'] += time.time() - t1
-            self.stats['num_hess_calls'] += 1
-
-            t1 = time.time()
-            sparse_hess = self.sparse_reconstruct(hvp_res)
-            self.stats['jac_reconstruction_time'] += time.time() - t1
-
-            t1 = time.time()
-            lu = scipy.sparse.linalg.splu(sparse_hess)
-            #sparse_hess2 = sparse_hess @ sparse_hess
-            #ichol = ilupp.ICholTPreconditioner(sparse_hess2, add_fill_in=20004)
-            """
-            ilu_factor = scipy.sparse.linalg.spilu(sparse_hess)
-            """
-            self.stats['factorization_time'] += time.time() - t1
-
-            t1 = time.time()
-            dx = lu.solve(-g)
-            """
-            def M_x(x): return ilu_factor.solve(x)
-            #def M_x(x): return ichol @ x
-            self.M_lin_op = scipy.sparse.linalg.LinearOperator(
-                (x0.shape[0], x0.shape[0]), M_x)
-
-            def Jk(v): return self.loss_hvp(xk, v, args)
-            def JJk(v): return Jk(Jk(v))
-            jac_lin_op = scipy.sparse.linalg.LinearOperator(
-                (x0.shape[0], x0.shape[0]), Jk)
-            dx, info = scipy.sparse.linalg.gmres(
-                jac_lin_op, -g, tol=tol, M=self.M_lin_op, maxiter=200)
-
-            if info != 0:
-                print(
-                    f'GMRES returned info: {info}. Falling back to direct method.')
-                # return np.nan * np.ones_like(x0), None
-                lu_factor = scipy.sparse.linalg.splu(sparse_hess)
-
-                dx = lu_factor.solve(-g)
-            """
-            self.stats['solve_time'] += time.time() - t1
-
-            xk = xk + dx * self.step_size
-
-        g = onp.array(self.grad_fun(xk, *args))
-
-        print(f'Reached max iters. Ended up with norm {np.linalg.norm(g)}')
-        return xk, False
+        final_state = jax.lax.while_loop(cond_fun, body_fun, init_val)
+        return final_state.xk, final_state.inum < self.max_iter
 
 
 class DenseNewtonSolver:

@@ -131,28 +131,24 @@ def pattern_to_reconstruction(sparsemat_csc):
     all_rows = np.array(all_rows)
     all_cols = np.array(all_cols)
 
-    @jax.jit
-    def reconstruct_jittable(jvp_result):
+    # Convert to a CSC row indices and col indptr
+    indices = np.stack((all_cols, all_rows), axis=1)
+    unique, unique_col_sorted_indices = np.unique(indices, axis=0, return_index=True)
+    col_indptr = np.where(np.diff(unique[:, 0]) > 0)[0] + 1
+
+    col_indptr = np.concatenate((np.array([0]), col_indptr, np.array([unique.shape[0]])))
+    row_indices = unique[:, 1]
+
+    if col_indptr.size != np.max(all_rows) + 2:
+        print('ERROR: indptr is not the correct size. Are matrix entries missing?')
+
+    def reconstruct_csc(jvp_result):
         result = jvp_result.flatten()
 
         data = jnp.zeros(nnz)
         data = jax.ops.index_update(data, jax.ops.index[:nnz//2], result[jvp_indexer])
         data = jax.ops.index_update(data, jax.ops.index[nnz//2:], result[jvp_indexer])
 
-        return data
+        return data[unique_col_sorted_indices], row_indices, col_indptr
 
-    def to_csc(data):
-        reconstructed = csc_matrix((data, (all_rows, all_cols)))
-
-        # Diagonals will be duplicated, so de-duplicate.
-        reconstructed = reconstructed - diags(reconstructed.diagonal()) / 2
-
-        return reconstructed
-
-    def reconstruct(jvp_result):
-        data = reconstruct_jittable(jvp_result).block_until_ready()
-        csc = to_csc(data)
-
-        return csc
-
-    return jvp_mat, reconstruct
+    return jvp_mat, reconstruct_csc

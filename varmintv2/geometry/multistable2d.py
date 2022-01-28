@@ -80,10 +80,10 @@ def construct_multistable2D(patch_ncp, quad_degree, spline_degree,
     h3 = 10.0 * multiplier
     l = 12.0 * multiplier
     t = 1.0 * multiplier
-    t1 = [0.15, 0.23]
+    t1 = [0.15, 0.23, 0.14, 0.18, 0.20]
     
     all_ctrls = []
-    num_x = 1
+    num_x = 5
     num_y = len(t1)
     
     for j in range(num_y):

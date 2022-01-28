@@ -15,7 +15,7 @@ from varmintv2.utils.movie_utils import create_movie, create_static_image
 import varmintv2.utils.analysis_utils as autils
 import varmintv2.utils.experiment_utils as eutils
 
-from varmintv2.solver.optimization import SparseNewtonSolver, DenseNewtonSolver, DenseNewtonSolverJittable
+from varmintv2.solver.optimization import SparseNewtonSolverHCB, DenseNewtonSolver, DenseNewtonSolverJittable
 
 import scipy.optimize
 
@@ -108,7 +108,7 @@ def main():
     curr_g_pos = l2g(ref_ctrl)
     print(f'Optimizing {curr_g_pos.size} degrees of freedom.')
 
-    n_increments = 100
+    n_increments = 50
     strain_energies = []
     increments = []
 
@@ -118,9 +118,10 @@ def main():
     all_fixed_locs = []
     all_fixed_vels = []
 
-    optimizer = SparseNewtonSolver(cell, potential_energy_fn, max_iter=100,
-                                   step_size=0.5, tol=1e-3)
-    #optimize = jax.jit(optimizer.optimize)
+    optimizer = SparseNewtonSolverHCB(cell, potential_energy_fn, max_iter=100,
+                                      step_size=0.8, tol=1e-1)
+    optimize = jax.jit(optimizer.optimize)
+    total_sim_time = time.time()
     for i in range(n_increments + 1):
         # Increment displacement a little bit.
         fixed_displacements = {
@@ -142,7 +143,7 @@ def main():
         # Solve for new state
         print(f'Starting optimization at iteration {i}.')
         opt_start = time.time()
-        new_x, success = optimizer.optimize(curr_g_pos, (fixed_locs, tractions, ref_ctrl))
+        new_x, success = optimize(curr_g_pos, (fixed_locs, tractions, ref_ctrl))
         if not success:
             print(f'Optimization reached max iters.')
             break
@@ -155,6 +156,7 @@ def main():
         strain_energies.append(strain_energy)
         increments.append(8.0 / n_increments * i)
         print(f'Total strain energy is: {strain_energy} J')
+    print(f'Finished simulation in {time.time() - total_sim_time} seconds.')
 
     print('Saving result in image.')
     image_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}.png')
