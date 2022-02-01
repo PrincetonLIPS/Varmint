@@ -352,35 +352,64 @@ class SparseNewtonSolverHCB:
         self.sparse_entries_fun = sparse_entries
         self.grad_fun = jax.grad(loss_fun)
 
-    def optimize(self, x0, args=()):
-        tol = self.tol
+    def get_optimize_fn(self):
+        @jax.custom_vjp
+        def optimize(x0, args=()):
+            tol = self.tol
 
-        def cond_fun(state):
-            return np.logical_and(np.linalg.norm(state.g) > tol, state.inum < self.max_iter)
+            def cond_fun(state):
+                return np.logical_and(np.linalg.norm(state.g) > tol, state.inum < self.max_iter)
 
-        def body_fun(state):
-            hvp_res = self.sparse_entries_fun(state.xk, args)
+            def body_fun(state):
+                hvp_res = self.sparse_entries_fun(state.xk, args)
 
-            # Sparse reconstruct gives a csc matrix format.
-            data, row_indices, col_indptr = self.sparse_reconstruct(hvp_res)
-            dx = device_sparse_lu(data, row_indices, col_indptr, state.g)
+                # Sparse reconstruct gives a csc matrix format.
+                data, row_indices, col_indptr = self.sparse_reconstruct(hvp_res)
+                dx = device_sparse_lu(data, row_indices, col_indptr, state.g)
 
-            xk = state.xk + dx * self.step_size
+                xk = state.xk + dx * self.step_size
 
-            return SparseNewtonSolverHCBState(
-                xk=xk,
-                g=self.grad_fun(xk, *args),
-                inum=state.inum+1,
+                return SparseNewtonSolverHCBState(
+                    xk=xk,
+                    g=self.grad_fun(xk, *args),
+                    inum=state.inum+1,
+                )
+            
+            init_val = SparseNewtonSolverHCBState(
+                xk=x0,
+                g=self.grad_fun(x0, *args),
+                inum=0,
             )
-        
-        init_val = SparseNewtonSolverHCBState(
-            xk=x0,
-            g=self.grad_fun(x0, *args),
-            inum=0,
-        )
 
-        final_state = jax.lax.while_loop(cond_fun, body_fun, init_val)
-        return final_state.xk, final_state.inum < self.max_iter
+            final_state = jax.lax.while_loop(cond_fun, body_fun, init_val)
+            return final_state.xk #, final_state.inum < self.max_iter
+
+        def optimize_fwd(x0, args=()):
+            xk = optimize(x0, args)
+            #return (xk, success), (xk, args)
+            return xk, (xk, args)
+        
+        def optimize_bwd(res, g):
+            (xk, args) = res
+            # TODO compute adjoint
+            hvp_res = self.sparse_entries_fun(xk, args)
+            data, row_indices, col_indptr = self.sparse_reconstruct(hvp_res)
+
+            # Compute adjoint wrt upstream adjoints.
+            adjoint = device_sparse_lu(data, row_indices, col_indptr, g)
+
+            # Take vjp wrt args
+            def partial_grad(args):
+                return self.grad_fun(xk, *args)
+            
+            _, f_pgrad = jax.vjp(partial_grad, args)
+            args_bar = f_pgrad(-adjoint)[0]
+
+            return None, args_bar
+        
+        optimize.defvjp(optimize_fwd, optimize_bwd)
+
+        return optimize
 
 
 class DenseNewtonSolver:
