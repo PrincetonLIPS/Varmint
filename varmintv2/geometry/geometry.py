@@ -14,6 +14,7 @@ from scipy.sparse.csgraph import connected_components, dijkstra
 import scipy.optimize
 
 import scipy.sparse
+import scipy.sparse.linalg
 
 from varmintv2.physics.constitutive import PhysicsModel
 from varmintv2.physics.energy import generate_stress_fn, generate_total_energy_fn
@@ -35,8 +36,8 @@ class Geometry(ABC):
 
     @abstractmethod
     def get_global_local_maps(self) \
-        -> Tuple[Callable[[ArrayND], ArrayND],
-                 Callable[[ArrayND, ArrayND], ArrayND]]:
+        -> Tuple[Callable[[ArrayND, ArrayND], ArrayND],
+                 Callable[[ArrayND, ArrayND, ArrayND], ArrayND]]:
         """Get the mapping functions between global and local coordinates.
         
         Returns:
@@ -61,19 +62,19 @@ class Geometry(ABC):
         """
         pass
 
-    def unflatten_sequence(self, value, fixed_value):
+    def unflatten_sequence(self, value, fixed_value, ref_ctrl):
         _, g2l_map = self.get_global_local_maps()
 
-        local_value = [g2l_map(q, f) for q, f in \
+        local_value = [g2l_map(q, f, ref_ctrl) for q, f in \
                 zip(value, fixed_value)]
         
         return local_value
 
     def unflatten_dynamics_sequence(self, positions, velocities,
-                                    fixed_positions, fixed_velocities):
+                                    fixed_positions, fixed_velocities, ref_ctrl):
         """Helper function to convert a sequence of global coordinates to local."""
-        return self.unflatten_sequence(positions, fixed_positions), \
-               self.unflatten_sequence(velocities, fixed_velocities)
+        return self.unflatten_sequence(positions, fixed_positions, ref_ctrl), \
+               self.unflatten_sequence(velocities, fixed_velocities, ref_ctrl)
     
     @abstractmethod
     def get_lagrangian_fn(self) -> Callable:
@@ -301,7 +302,11 @@ class SingleElementGeometry(Geometry):
     n_components: int
 
     def get_global_local_maps(self) -> Tuple[Callable, Callable]:
-        def local_to_global(local_coords):
+        def local_to_global(local_coords, ref_ctrl):
+            ref_ctrl_component = jnp.zeros((self.n_components, self.element.n_d))
+            ref_ctrl_component = ref_ctrl_component.at[self.index_array].set(ref_ctrl)
+            ref_ctrl_component = ref_ctrl_component.flatten()
+
             kZeros = jnp.zeros((self.n_components, self.element.n_d))
 
             # Transform from local form to component form.
@@ -316,12 +321,16 @@ class SingleElementGeometry(Geometry):
             for indices in self.rigidity_nonfixed_labels:
                 # Use as a dof the difference of mean value from reference config.
                 mean_value = jnp.mean(jnp.take(global_coords, indices, axis=0))
-                ref_mean_value = jnp.mean(jnp.take(self.ref_ctrl_component, indices, axis=0))
+                ref_mean_value = jnp.mean(jnp.take(ref_ctrl_component, indices, axis=0))
                 rigid_centers.append(jnp.array([mean_value - ref_mean_value]))
 
             return jnp.concatenate([global_coords_without_nonfixed] + rigid_centers)
 
-        def global_to_local(global_coords, fixed_coords):
+        def global_to_local(global_coords, fixed_coords, ref_ctrl):
+            ref_ctrl_component = jnp.zeros((self.n_components, self.element.n_d))
+            ref_ctrl_component = ref_ctrl_component.at[self.index_array].set(ref_ctrl)
+            ref_ctrl_component = ref_ctrl_component.flatten()
+
             # Component dimensions.
             kZeros = jnp.zeros((self.n_components, self.element.n_d))
 
@@ -346,7 +355,7 @@ class SingleElementGeometry(Geometry):
 
             # Fill in the rigid patch locations
             for i, indices in enumerate(self.rigidity_nonfixed_labels):
-                values = jnp.take(self.ref_ctrl_component, indices, axis=0)
+                values = jnp.take(ref_ctrl_component, indices, axis=0)
                 offset_values = values + rigid_global_coords[i]
 
                 fixed_pos = jax.ops.index_update(fixed_pos, indices,
@@ -369,8 +378,8 @@ class SingleElementGeometry(Geometry):
 
         def lagrangian(cur_g_position, cur_g_velocity, ref_l_position,
                        fix_l_position, fix_l_velocity, traction):
-            def_ctrl = g2l(cur_g_position, fix_l_position)
-            def_vels = g2l(cur_g_velocity, fix_l_velocity)
+            def_ctrl = g2l(cur_g_position, fix_l_position, ref_l_position)
+            def_vels = g2l(cur_g_velocity, fix_l_velocity, ref_l_position)
             
             K, G, S, T = jax.vmap(self.element_energy_fn)(
                 def_ctrl, def_vels, ref_l_position,
@@ -387,7 +396,7 @@ class SingleElementGeometry(Geometry):
         active_traction_boundaries_r = self.active_traction_boundaries[self.rigid_patches_boolean]
 
         def potential_energy(cur_g_position, fix_l_position, traction, ref_l_position):
-            def_ctrl = g2l(cur_g_position, fix_l_position)
+            def_ctrl = g2l(cur_g_position, fix_l_position, ref_l_position)
 
             def_ctrl_nr = def_ctrl[~self.rigid_patches_boolean]
             ref_l_position_nr = ref_l_position[~self.rigid_patches_boolean]
@@ -418,7 +427,7 @@ class SingleElementGeometry(Geometry):
         active_traction_boundaries_nr = self.active_traction_boundaries[~self.rigid_patches_boolean]
 
         def strain_energy(cur_g_position, fix_l_position, traction, ref_l_position):
-            def_ctrl = g2l(cur_g_position, fix_l_position)
+            def_ctrl = g2l(cur_g_position, fix_l_position, ref_l_position)
 
             def_ctrl_nr = def_ctrl[~self.rigid_patches_boolean]
             ref_l_position_nr = ref_l_position[~self.rigid_patches_boolean]
@@ -432,6 +441,23 @@ class SingleElementGeometry(Geometry):
             return jnp.sum(S)
 
         return strain_energy
+    
+    def kinetic_energy_fn(self):
+        l2g, g2l = self.get_global_local_maps()
+
+        def kinetic_energy(cur_g_position, cur_g_velocity, ref_l_position,
+                           fix_l_position, fix_l_velocity, traction):
+            def_ctrl = g2l(cur_g_position, fix_l_position, ref_l_position)
+            def_vels = g2l(cur_g_velocity, fix_l_velocity, ref_l_position)
+            
+            K, _, _, _ = jax.vmap(self.element_energy_fn)(
+                def_ctrl, def_vels, ref_l_position,
+                self.active_traction_boundaries, traction
+            )
+
+            return jnp.sum(K)
+        
+        return kinetic_energy
 
     def get_stress_field_fn(self):
         # get quad points for element object.
@@ -839,3 +865,33 @@ class SingleElementGeometry(Geometry):
             sparsity.pattern_to_reconstruction(self._jac_sparsity_graph)
         print('\tDone.')
         print(f'\t# JVPs: {self._jac_reconstruction_tangents.shape[0]}')
+
+        """
+        print(f"Precomputing mass matrix.")
+        # Even though mass matrix should be independent of all the following,
+        # we still create dummy versions to get the mass matrix via hvps.
+        l2g, g2l = self.get_global_local_maps()
+
+        init_pos_g = l2g(init_ctrl)
+
+        init_vel_g = onp.zeros_like(init_pos_g)
+
+        tractions = {}
+        tractions = self.tractions_from_dict(tractions)
+
+        def kinetic_energy_partial(v):
+            return self.kinetic_energy_fn()(init_pos_g, v, init_ctrl, init_ctrl,
+                                            onp.zeros_like(init_ctrl), tractions)
+
+        def mvp(p):
+            return jax.jvp(jax.grad(kinetic_energy_partial), (init_vel_g,), (p,))[1]
+
+        vmap_mvp = jax.vmap(mvp)
+        mm_entries = vmap_mvp(self.jac_reconstruction_tangents)
+        self.sp_mass_matrix = scipy.sparse.csc_matrix(self._jac_reconstruction_fn(mm_entries))
+        print('\tDone.')
+
+        print(f'Factoring mass matrix.')
+        self.mass_matrix_lu = scipy.sparse.linalg.splu(self.sp_mass_matrix)
+        print(f'\tDone.')
+        """

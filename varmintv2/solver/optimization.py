@@ -307,20 +307,27 @@ def host_sparse_lu(inputs):
     lu = scipy.sparse.linalg.splu(sparse_hess)
     return lu.solve(-g)
 
+def host_sparse_lu_savemat(inputs):
+    data, row_indices, col_indptr, g, inum = inputs
+
+    sparse_hess = scipy.sparse.csc_matrix((data, row_indices, col_indptr))
+    scipy.sparse.save_npz(f'sparse_mats_small/spmat_{inum}.npz', sparse_hess)
+    lu = scipy.sparse.linalg.splu(sparse_hess)
+    return lu.solve(-g)
 
 # This function runs on the device.
-def device_sparse_lu(data, row_indices, col_indptr, g):
+def device_sparse_lu(data, row_indices, col_indptr, g, inum):
     inputs = (data, row_indices, col_indptr, g)
     return hcb.call(host_sparse_lu, inputs,
                     result_shape=g)
 
 
 SparseNewtonSolverHCBState = namedtuple('NewtonState', [
-    'xk', 'g', 'inum'
+    'xk', 'g', 'inum', 'total_inum'
 ])
 
 
-class SparseNewtonSolverHCB:
+class SparseNewtonSolverHCBPrint:
     def __init__(self, geometry: Geometry, loss_fun,
                  max_iter=20, step_size=1.0, tol=1e-8):
         self.max_iter = max_iter
@@ -358,6 +365,143 @@ class SparseNewtonSolverHCB:
             tol = self.tol
 
             def cond_fun(state):
+                hcb.id_print(np.array([1010101]))
+                hcb.id_print(self.loss_fun(state.xk, *args))
+                hcb.id_print(np.linalg.norm(state.g))
+                hcb.id_print(np.array([2020202]))
+                return np.logical_and(np.linalg.norm(state.g) > tol, state.inum < self.max_iter)
+
+            def body_fun(state):
+                hcb.id_print(np.array([-2, -2, -2, -2, -2]))
+                hcb.id_print(np.array([10000]))
+                hcb.id_print(np.sum(state.xk))
+                hcb.id_print(np.sum(args[0]))
+                hcb.id_print(np.sum(args[2]))
+                hcb.id_print(np.max(args[2] - args[0]))
+                hcb.id_print(np.array([state.inum, self.max_iter]))
+                hcb.id_print(np.array([20000]))
+
+                hvp_res = self.sparse_entries_fun(state.xk, args)
+                hcb.id_print(np.sum(hvp_res))
+                hcb.id_print(np.array([30000]))
+
+                # Sparse reconstruct gives a csc matrix format.
+                data, row_indices, col_indptr = self.sparse_reconstruct(hvp_res)
+                dx = device_sparse_lu(data, row_indices, col_indptr, state.g)
+                hcb.id_print(np.array([-1, -1, -1, -1, -1]))
+
+                xk = state.xk + dx * self.step_size
+                hcb.id_print(np.sum(xk))
+                hcb.id_print(np.array([-10, -10, -10, -10, -10]))
+
+                return SparseNewtonSolverHCBState(
+                    xk=xk,
+                    g=self.grad_fun(xk, *args),
+                    inum=state.inum+1,
+                    total_inum=0,
+                )
+            
+            init_val = SparseNewtonSolverHCBState(
+                xk=x0,
+                g=self.grad_fun(x0, *args),
+                inum=0,
+                total_inum=0
+            )
+
+            final_state = jax.lax.while_loop(cond_fun, body_fun, init_val)
+            return final_state.xk #, final_state.inum < self.max_iter
+
+        def optimize_fwd(x0, args=()):
+            xk = optimize(x0, args)
+            #return (xk, success), (xk, args)
+
+
+            hcb.id_print(np.array([-3, -3, -3, -3, -3]))
+            hcb.id_print(np.array([10000]))
+            hcb.id_print(np.sum(xk))
+            hcb.id_print(np.sum(args[0]))
+            hcb.id_print(np.sum(args[2]))
+            hcb.id_print(np.max(args[2] - args[0]))
+            hcb.id_print(np.array([20000]))
+            hcb.id_print(np.array([-4, -4, -4, -4, -4]))
+
+            return xk, (xk, args)
+        
+        def optimize_bwd(res, g):
+            #hcb.id_print(np.array([0, 1, 2, 3, 4]))
+            (xk, args) = res
+            # TODO compute adjoint
+            hcb.id_print(np.array([40000]))
+            hcb.id_print(np.sum(xk))
+            hcb.id_print(np.sum(args[0]))
+            hcb.id_print(np.sum(args[2]))
+            hcb.id_print(np.max(args[2] - args[0]))
+            hcb.id_print(np.array([50000]))
+
+            hvp_res = self.sparse_entries_fun(xk, args)
+            hcb.id_print(np.sum(hvp_res))
+            hcb.id_print(np.array([60000]))
+
+            data, row_indices, col_indptr = self.sparse_reconstruct(hvp_res)
+
+            # Compute adjoint wrt upstream adjoints.
+            adjoint = device_sparse_lu(data, row_indices, col_indptr, g)
+
+            #hcb.id_print(np.array([5, 6, 7, 8, 9]))
+
+            # Take vjp wrt args
+            def partial_grad(args):
+                return self.grad_fun(xk, *args)
+            
+            _, f_pgrad = jax.vjp(partial_grad, args)
+            args_bar = f_pgrad(-adjoint)[0]
+
+            return None, args_bar
+        
+        optimize.defvjp(optimize_fwd, optimize_bwd)
+
+        return optimize
+
+
+class SparseNewtonSolverHCB:
+    def __init__(self, geometry: Geometry, loss_fun,
+                 max_iter=20, step_size=1.0, tol=1e-8):
+        self.max_iter = max_iter
+        self.iter_num = 0
+        self.geometry = geometry
+        self.step_size = step_size
+        self.tol = tol
+        self.save=False
+
+        self.stats = {
+            'factorization_time': 0.0,
+            'num_hess_calls': 0,
+            'jvps_time': 0.0,
+            'jac_reconstruction_time': 0.0,
+            'solve_time': 0.0,
+        }
+
+        self.sparse_reconstruct = geometry.get_jac_reconstruction_fn()
+        self.sparsity_tangents = geometry.jac_reconstruction_tangents
+        
+        def loss_hvp(x, tangents, args):
+            return hvp(loss_fun, x, tangents, args)
+
+        vmap_loss_hvp = jax.vmap(loss_hvp, in_axes=(None, 0, None))
+        def sparse_entries(x, args):
+            return vmap_loss_hvp(x, self.sparsity_tangents, args)
+
+        self.loss_fun = loss_fun
+        self.loss_hvp = loss_hvp
+        self.sparse_entries_fun = sparse_entries
+        self.grad_fun = jax.grad(loss_fun)
+
+    def get_optimize_fn(self):
+        @jax.custom_vjp
+        def optimize(x0, args=()):
+            tol = self.tol
+
+            def cond_fun(state):
                 return np.logical_and(np.linalg.norm(state.g) > tol, state.inum < self.max_iter)
 
             def body_fun(state):
@@ -365,9 +509,353 @@ class SparseNewtonSolverHCB:
 
                 # Sparse reconstruct gives a csc matrix format.
                 data, row_indices, col_indptr = self.sparse_reconstruct(hvp_res)
-                dx = device_sparse_lu(data, row_indices, col_indptr, state.g)
+                dx = device_sparse_lu(data, row_indices, col_indptr, state.g, state.inum)
 
                 xk = state.xk + dx * self.step_size
+
+                return SparseNewtonSolverHCBState(
+                    xk=xk,
+                    g=self.grad_fun(xk, *args),
+                    inum=state.inum+1,
+                    total_inum=0,
+                )
+            
+            init_val = SparseNewtonSolverHCBState(
+                xk=x0,
+                g=self.grad_fun(x0, *args),
+                inum=0,
+                total_inum=0,
+            )
+
+            final_state = jax.lax.while_loop(cond_fun, body_fun, init_val)
+            return final_state.xk #, final_state.inum < self.max_iter
+
+        def optimize_fwd(x0, args=()):
+            xk = optimize(x0, args)
+            #return (xk, success), (xk, args)
+
+            return xk, (xk, args)
+        
+        def optimize_bwd(res, g):
+            #hcb.id_print(np.array([0, 1, 2, 3, 4]))
+            (xk, args) = res
+            # TODO compute adjoint
+
+            hvp_res = self.sparse_entries_fun(xk, args)
+
+            data, row_indices, col_indptr = self.sparse_reconstruct(hvp_res)
+
+            # Compute adjoint wrt upstream adjoints.
+            adjoint = device_sparse_lu(data, row_indices, col_indptr, g, -1)
+
+            #hcb.id_print(np.array([5, 6, 7, 8, 9]))
+
+            # Take vjp wrt args
+            def partial_grad(args):
+                return self.grad_fun(xk, *args)
+            
+            _, f_pgrad = jax.vjp(partial_grad, args)
+            args_bar = f_pgrad(-adjoint)[0]
+
+            return None, args_bar
+        
+        optimize.defvjp(optimize_fwd, optimize_bwd)
+
+        return optimize
+
+
+class SparseNewtonSolverHCBLineSearch:
+    def __init__(self, geometry: Geometry, loss_fun,
+                 max_iter=20, step_size=1.0, tol=1e-8, ls_backtrack=0.95):
+        print('Using Newton with backtracking line search.')
+        self.max_iter = max_iter
+        self.iter_num = 0
+        self.geometry = geometry
+        self.step_size = step_size
+        self.tol = tol
+        self.save=False
+        self.ls_backtrack = ls_backtrack
+
+        self.stats = {
+            'factorization_time': 0.0,
+            'num_hess_calls': 0,
+            'jvps_time': 0.0,
+            'jac_reconstruction_time': 0.0,
+            'solve_time': 0.0,
+        }
+
+        self.sparse_reconstruct = geometry.get_jac_reconstruction_fn()
+        self.sparsity_tangents = geometry.jac_reconstruction_tangents
+        
+        def loss_hvp(x, tangents, args):
+            return hvp(loss_fun, x, tangents, args)
+
+        vmap_loss_hvp = jax.vmap(loss_hvp, in_axes=(None, 0, None))
+        def sparse_entries(x, args):
+            return vmap_loss_hvp(x, self.sparsity_tangents, args)
+
+        self.loss_fun = loss_fun
+        self.loss_hvp = loss_hvp
+        self.sparse_entries_fun = sparse_entries
+        self.grad_fun = jax.grad(loss_fun)
+
+    def get_optimize_fn(self):
+        @jax.custom_vjp
+        def optimize(x0, args=()):
+            tol = self.tol
+
+            def cond_fun(state):
+                return np.logical_and(np.linalg.norm(state.g) > tol, state.inum < self.max_iter)
+
+            def body_fun(state):
+
+                hvp_res = self.sparse_entries_fun(state.xk, args)
+
+                # Sparse reconstruct gives a csc matrix format.
+                data, row_indices, col_indptr = self.sparse_reconstruct(hvp_res)
+                dx = device_sparse_lu(data, row_indices, col_indptr, state.g, state.inum)
+
+
+                # Do simple backtracking line search here.
+                # Find furthest away point that does not give NaN
+
+                def ls_cond_fun(step_size):
+                    xk_try = state.xk + dx * step_size
+                    #hcb.id_print(step_size)
+                    return np.logical_and(np.isnan(self.loss_fun(xk_try, *args)), step_size > 0.0001)
+                def ls_body_fun(step_size):
+                    return step_size * self.ls_backtrack
+                step_size = jax.lax.while_loop(ls_cond_fun, ls_body_fun, self.step_size)
+                xk = state.xk + dx * step_size * 0.8  # Go at 0.95 the step size for some slack.
+
+                #hcb.id_print(np.array([111]))
+                #hcb.id_print(np.sum(xk))
+                #hcb.id_print(np.array([222]))
+
+                return SparseNewtonSolverHCBState(
+                    xk=xk,
+                    g=self.grad_fun(xk, *args),
+                    inum=state.inum+1,
+                    total_inum=0,
+                )
+            
+            init_val = SparseNewtonSolverHCBState(
+                xk=x0,
+                g=self.grad_fun(x0, *args),
+                inum=0,
+                total_inum=0,
+            )
+
+            final_state = jax.lax.while_loop(cond_fun, body_fun, init_val)
+            return final_state.xk #, final_state.inum < self.max_iter
+
+        def optimize_fwd(x0, args=()):
+            xk = optimize(x0, args)
+            #return (xk, success), (xk, args)
+
+            return xk, (xk, args)
+        
+        def optimize_bwd(res, g):
+            #hcb.id_print(np.array([0, 1, 2, 3, 4]))
+            (xk, args) = res
+            # TODO compute adjoint
+
+            hvp_res = self.sparse_entries_fun(xk, args)
+
+            data, row_indices, col_indptr = self.sparse_reconstruct(hvp_res)
+
+            # Compute adjoint wrt upstream adjoints.
+            adjoint = device_sparse_lu(data, row_indices, col_indptr, g, -1)
+
+            #hcb.id_print(np.array([5, 6, 7, 8, 9]))
+
+            # Take vjp wrt args
+            def partial_grad(args):
+                return self.grad_fun(xk, *args)
+            
+            _, f_pgrad = jax.vjp(partial_grad, args)
+            args_bar = f_pgrad(-adjoint)[0]
+
+            return None, args_bar
+        
+        optimize.defvjp(optimize_fwd, optimize_bwd)
+
+        return optimize
+
+SparseNewtonSolverHCBRestartState = namedtuple('SparseNewtonSolverHCBRestartState', [
+    'x0', 'xk', 'g', 'inum', 'total_inum', 'step_size'
+])
+
+
+class SparseNewtonSolverHCBRestart:
+    def __init__(self, geometry: Geometry, loss_fun,
+                 max_iter=20, step_size=1.0, tol=1e-8, ls_backtrack=0.95):
+        print('Using Newton with backtracking line search.')
+        self.max_iter = max_iter
+        self.iter_num = 0
+        self.geometry = geometry
+        self.step_size = step_size
+        self.tol = tol
+        self.save=False
+        self.ls_backtrack = ls_backtrack
+
+        self.stats = {
+            'factorization_time': 0.0,
+            'num_hess_calls': 0,
+            'jvps_time': 0.0,
+            'jac_reconstruction_time': 0.0,
+            'solve_time': 0.0,
+        }
+
+        self.sparse_reconstruct = geometry.get_jac_reconstruction_fn()
+        self.sparsity_tangents = geometry.jac_reconstruction_tangents
+        
+        def loss_hvp(x, tangents, args):
+            return hvp(loss_fun, x, tangents, args)
+
+        vmap_loss_hvp = jax.vmap(loss_hvp, in_axes=(None, 0, None))
+        def sparse_entries(x, args):
+            return vmap_loss_hvp(x, self.sparsity_tangents, args)
+
+        self.loss_fun = loss_fun
+        self.loss_hvp = loss_hvp
+        self.sparse_entries_fun = sparse_entries
+        self.grad_fun = jax.grad(loss_fun)
+
+    def get_optimize_fn(self):
+        @jax.custom_vjp
+        def optimize(x0, args=()):
+            tol = self.tol
+
+            def cond_fun(state):
+                #hcb.id_print(np.array([111]))
+                #hcb.id_print(np.sum(state.xk))
+                #hcb.id_print(np.sum(self.loss_fun(state.xk, *args)))
+                #hcb.id_print(np.array([222]))
+
+                return np.logical_and(np.linalg.norm(state.g) > tol, state.inum < self.max_iter)
+
+            def body_fun(state):
+
+                hvp_res = self.sparse_entries_fun(state.xk, args)
+
+                # Sparse reconstruct gives a csc matrix format.
+                data, row_indices, col_indptr = self.sparse_reconstruct(hvp_res)
+                dx = device_sparse_lu(data, row_indices, col_indptr, state.g, state.inum)
+
+                # Construct the step. If the step gives NaN (true case), restart the optimization.
+                xk = state.xk + dx * state.step_size
+                return jax.lax.cond(
+                    np.logical_and(np.isnan(self.loss_fun(xk, *args)), state.step_size > 0.001),
+                    lambda _: SparseNewtonSolverHCBRestartState(
+                        x0=state.x0,
+                        xk=state.x0,
+                        g=self.grad_fun(state.x0, *args),
+                        inum=state.inum+1,
+                        total_inum=0,
+                        step_size=state.step_size * 0.8,
+                    ),
+                    lambda _: SparseNewtonSolverHCBRestartState(
+                        x0=state.x0,
+                        xk=xk,
+                        g=self.grad_fun(xk, *args),
+                        inum=state.inum+1,
+                        total_inum=0,
+                        step_size=state.step_size,
+                    ),
+                    operand=None,
+                )
+            
+            init_val = SparseNewtonSolverHCBRestartState(
+                x0=x0,
+                xk=x0,
+                g=self.grad_fun(x0, *args),
+                inum=0,
+                total_inum=0,
+                step_size=self.step_size,
+            )
+
+            final_state = jax.lax.while_loop(cond_fun, body_fun, init_val)
+            return final_state.xk #, final_state.inum < self.max_iter
+
+        def optimize_fwd(x0, args=()):
+            xk = optimize(x0, args)
+            #return (xk, success), (xk, args)
+
+            return xk, (xk, args)
+        
+        def optimize_bwd(res, g):
+            #hcb.id_print(np.array([0, 1, 2, 3, 4]))
+            (xk, args) = res
+            # TODO compute adjoint
+
+            hvp_res = self.sparse_entries_fun(xk, args)
+
+            data, row_indices, col_indptr = self.sparse_reconstruct(hvp_res)
+
+            # Compute adjoint wrt upstream adjoints.
+            adjoint = device_sparse_lu(data, row_indices, col_indptr, g, -1)
+
+            #hcb.id_print(np.array([5, 6, 7, 8, 9]))
+
+            # Take vjp wrt args
+            def partial_grad(args):
+                return self.grad_fun(xk, *args)
+            
+            _, f_pgrad = jax.vjp(partial_grad, args)
+            args_bar = f_pgrad(-adjoint)[0]
+
+            return None, args_bar
+        
+        optimize.defvjp(optimize_fwd, optimize_bwd)
+
+        return optimize
+
+
+class ExplicitSolver:
+    def __init__(self, geometry: Geometry, loss_fun,
+                 max_iter=200000, step_size=1.0, tol=1e-8):
+        self.max_iter = max_iter
+        self.iter_num = 0
+        self.geometry = geometry
+        self.step_size = step_size
+        self.tol = tol
+
+        self.stats = {
+            'factorization_time': 0.0,
+            'num_hess_calls': 0,
+            'jvps_time': 0.0,
+            'jac_reconstruction_time': 0.0,
+            'solve_time': 0.0,
+        }
+
+        self.sparse_reconstruct = geometry.get_jac_reconstruction_fn()
+        self.sparsity_tangents = geometry.jac_reconstruction_tangents
+        
+        def loss_hvp(x, tangents, args):
+            return hvp(loss_fun, x, tangents, args)
+
+        vmap_loss_hvp = jax.vmap(loss_hvp, in_axes=(None, 0, None))
+        def sparse_entries(x, args):
+            return vmap_loss_hvp(x, self.sparsity_tangents, args)
+
+        self.diag_mass_matrix = np.squeeze(geometry.sp_mass_matrix.sum(axis=0))
+
+        self.loss_fun = loss_fun
+        self.loss_hvp = loss_hvp
+        self.sparse_entries_fun = sparse_entries
+        self.grad_fun = jax.grad(loss_fun)
+
+    def get_optimize_fn(self):
+        #@jax.custom_vjp
+        def optimize(x0, args=()):
+            tol = self.tol
+
+            def cond_fun(state):
+                return np.logical_and(np.linalg.norm(state.g) > tol, state.inum < self.max_iter)
+
+            def body_fun(state):
+                xk = state.xk - 1./self.diag_mass_matrix * self.step_size * state.g
 
                 return SparseNewtonSolverHCBState(
                     xk=xk,
@@ -382,8 +870,10 @@ class SparseNewtonSolverHCB:
             )
 
             final_state = jax.lax.while_loop(cond_fun, body_fun, init_val)
-            return final_state.xk #, final_state.inum < self.max_iter
+            return final_state.xk, final_state.inum < self.max_iter, final_state.inum
+        return optimize
 
+"""
         def optimize_fwd(x0, args=()):
             xk = optimize(x0, args)
             #return (xk, success), (xk, args)
@@ -408,8 +898,7 @@ class SparseNewtonSolverHCB:
             return None, args_bar
         
         optimize.defvjp(optimize_fwd, optimize_bwd)
-
-        return optimize
+"""
 
 
 class DenseNewtonSolver:
@@ -461,7 +950,7 @@ class DenseNewtonSolver:
 
 
 NewtonState = namedtuple('NewtonState', [
-    'xk', 'g', 'hess', 'inum'
+    'xk', 'g', 'hess', 'inum', 'total_num',
 ])
 
 class DenseNewtonSolverJittable:
