@@ -85,11 +85,10 @@ def construct_multistable2D(geo_params, numx, numy, patch_ncp, quad_degree, spli
         h2 = geo_params[2] * multiplier
         h3 = geo_params[3] * multiplier
         t = geo_params[4] * multiplier
-        t1 = [geo_params[5]]
+        t1 = [geo_params[5:]][0]
         h12 = h2 - h1
-
         all_ctrls = []
-        
+
         for j in range(num_y):
 
             sq_patches_corners = su_corners(h1, h2, h3, l, t, t1[j])
