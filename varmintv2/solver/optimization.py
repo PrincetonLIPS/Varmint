@@ -23,6 +23,8 @@ import ilupp
 import time
 from functools import partial
 
+from sympy import solve
+
 from varmintv2.geometry.geometry import Geometry
 
 
@@ -300,7 +302,7 @@ class SparseNewtonSolver:
 
 
 # This function runs on the host.
-def host_sparse_lu(inputs):
+def host_sparse_lu_solve(inputs):
     data, row_indices, col_indptr, g = inputs
 
     sparse_hess = scipy.sparse.csc_matrix((data, row_indices, col_indptr))
@@ -318,7 +320,7 @@ def host_sparse_lu_savemat(inputs):
 # This function runs on the device.
 def device_sparse_lu(data, row_indices, col_indptr, g, inum):
     inputs = (data, row_indices, col_indptr, g)
-    return hcb.call(host_sparse_lu, inputs,
+    return hcb.call(host_sparse_lu_solve, inputs,
                     result_shape=g)
 
 
@@ -753,7 +755,7 @@ class SparseNewtonSolverHCBRestart:
                         g=self.grad_fun(state.x0, *args),
                         inum=state.inum+1,
                         total_inum=0,
-                        step_size=state.step_size * 0.8,
+                        step_size=state.step_size * 0.95,
                     ),
                     lambda _: SparseNewtonSolverHCBRestartState(
                         x0=state.x0,
@@ -773,6 +775,264 @@ class SparseNewtonSolverHCBRestart:
                 inum=0,
                 total_inum=0,
                 step_size=self.step_size,
+            )
+
+            final_state = jax.lax.while_loop(cond_fun, body_fun, init_val)
+            return final_state.xk #, final_state.inum < self.max_iter
+
+        def optimize_fwd(x0, args=()):
+            xk = optimize(x0, args)
+            #return (xk, success), (xk, args)
+
+            return xk, (xk, args)
+        
+        def optimize_bwd(res, g):
+            #hcb.id_print(np.array([0, 1, 2, 3, 4]))
+            (xk, args) = res
+            # TODO compute adjoint
+
+            hvp_res = self.sparse_entries_fun(xk, args)
+
+            data, row_indices, col_indptr = self.sparse_reconstruct(hvp_res)
+
+            # Compute adjoint wrt upstream adjoints.
+            adjoint = device_sparse_lu(data, row_indices, col_indptr, g, -1)
+
+            #hcb.id_print(np.array([5, 6, 7, 8, 9]))
+
+            # Take vjp wrt args
+            def partial_grad(args):
+                return self.grad_fun(xk, *args)
+            
+            _, f_pgrad = jax.vjp(partial_grad, args)
+            args_bar = f_pgrad(-adjoint)[0]
+
+            return None, args_bar
+        
+        optimize.defvjp(optimize_fwd, optimize_bwd)
+
+        return optimize
+
+SparseNewtonSolverHCBRestartPreconditionState = namedtuple('SparseNewtonSolverHCBRestartPreconditionState', [
+    'x0', 'xk', 'g', 'inum', 'total_inum', 'step_size', 'lu_precond', 'lu_precond0'
+])
+
+def host_sparse_lu_factor(inputs):
+    t = time.time()
+    data, row_indices, col_indptr, L_data_shape, U_data_shape = inputs
+
+    sparse_hess = scipy.sparse.csc_matrix((data, row_indices, col_indptr))
+    lu = scipy.sparse.linalg.spilu(sparse_hess)
+
+    global solve_fn
+    solve_fn = lu.solve
+    return 0.0
+"""
+    # Annoyingly, we have to invert the permutations
+    inv_r = np.arange(lu.perm_r.shape[0], dtype=np.int32)
+    inv_r = inv_r.at[lu.perm_r].set(inv_r)
+
+    inv_c = np.arange(lu.perm_c.shape[0], dtype=np.int32)
+    inv_c = inv_c.at[lu.perm_c].set(inv_c)
+
+    # We also have to convert from csc to csr.
+    csr_L = lu.L.tocsr()
+    csr_U = lu.U.tocsr()
+
+    # Pad to splu_shape
+    L_data_padded = np.pad(csr_L.data, (0, L_data_shape - csr_L.data.size), constant_values=0)
+    L_indices_padded = np.pad(csr_L.indices, (0, L_data_shape - csr_L.data.size), constant_values=0)
+
+    U_data_padded = np.pad(csr_U.data, (0, U_data_shape - csr_U.data.size), constant_values=0)
+    U_indices_padded = np.pad(csr_U.indices, (0, U_data_shape - csr_U.data.size), constant_values=0)
+
+    print(f'factored {time.time() - t}')
+    return ((L_data_padded, L_indices_padded, csr_L.indptr),
+            (U_data_padded, U_indices_padded, csr_U.indptr),
+            inv_r, lu.perm_c)
+"""
+
+# This function runs on the device.
+def device_sparse_lu_factor(data, row_indices, col_indptr, splu_shape):
+    inputs = (data, row_indices, col_indptr, splu_shape[0][0].shape[0], splu_shape[1][0].shape[0])
+    return hcb.call(host_sparse_lu_factor, inputs,
+                    result_shape=jax.ShapeDtypeStruct((), np.float64))
+
+def host_preconditioned_gmres(inputs):
+    lu_precond, data, row_indices, col_indptr, g = inputs
+    sparse_hess = scipy.sparse.csc_matrix((data, row_indices, col_indptr))
+
+    #L = scipy.sparse.csr_matrix(lu_precond[0], shape=(g.size, g.size))
+    #U = scipy.sparse.csr_matrix(lu_precond[1], shape=(g.size, g.size))
+    #inv_r = lu_precond[2]
+    #perm_c = lu_precond[3]
+
+    #def M_x(x):
+    #    x = x[inv_r]
+    #    x = scipy.sparse.linalg.spsolve_triangular(L, x, lower=True, unit_diagonal=True)
+    #    x = scipy.sparse.linalg.spsolve_triangular(U, x, lower=False)
+    #    return x[perm_c]
+
+    global solve_fn
+    def M_x_global(x):
+        return solve_fn(x)
+
+    M = scipy.sparse.linalg.LinearOperator(
+        (g.size, g.size), M_x_global)
+
+    global icount
+    icount = 0
+
+    def update_icount(x):
+        global icount
+        icount += 1
+
+    t = time.time()
+    res, info = scipy.sparse.linalg.gmres(sparse_hess, -g, tol=1e-8, M=M, maxiter=100, callback=update_icount)
+    print(info, icount, f'{time.time() - t}')
+    if info > 0:
+        # Fall back to LU decomposition
+        print('Falling back to LU.')
+        lu = scipy.sparse.linalg.splu(sparse_hess)
+        return lu.solve(-g)
+
+    return res
+
+# This function runs on the device.
+def device_preconditioned_gmres(lu_precond, data, row_indices, col_indptr, g):
+    inputs = (lu_precond, data, row_indices, col_indptr, g)
+    return hcb.call(host_preconditioned_gmres, inputs,
+                    result_shape=g)
+
+
+
+class SparseNewtonSolverHCBRestartPrecondition:
+    def __init__(self, geometry: Geometry, loss_fun,
+                 max_iter=20, step_size=1.0, tol=1e-8, ls_backtrack=0.95, update_every=10):
+        print(f'Using Newton with backtracking line search. Using GMRES and updating preconditioner every {update_every} steps.')
+        self.max_iter = max_iter
+        self.iter_num = 0
+        self.geometry = geometry
+        self.step_size = step_size
+        self.tol = tol
+        self.save=False
+        self.ls_backtrack = ls_backtrack
+        self.update_every = update_every
+
+        self.stats = {
+            'factorization_time': 0.0,
+            'num_hess_calls': 0,
+            'jvps_time': 0.0,
+            'jac_reconstruction_time': 0.0,
+            'solve_time': 0.0,
+        }
+
+        self.sparse_reconstruct = geometry.get_jac_reconstruction_fn()
+        self.sparsity_tangents = geometry.jac_reconstruction_tangents
+        
+        def loss_hvp(x, tangents, args):
+            return hvp(loss_fun, x, tangents, args)
+
+        vmap_loss_hvp = jax.vmap(loss_hvp, in_axes=(None, 0, None))
+        def sparse_entries(x, args):
+            return vmap_loss_hvp(x, self.sparsity_tangents, args)
+
+        self.loss_fun = loss_fun
+        self.loss_hvp = loss_hvp
+        self.sparse_entries_fun = sparse_entries
+        self.grad_fun = jax.grad(loss_fun)
+
+    def get_optimize_fn(self, x_test, args_test):
+        # Need the shape of the two lu factors. Since they are represented
+        # as sparse matrices, we do a test factorization to see what the shape
+        # would be.
+        hvp_res = self.sparse_entries_fun(x_test, args_test)
+        data, row_indices, col_indptr = self.sparse_reconstruct(hvp_res)
+        sparse_hess = scipy.sparse.csc_matrix((data, row_indices, col_indptr))
+        lu = scipy.sparse.linalg.spilu(sparse_hess)
+        
+        self.splu_shape = ((jax.ShapeDtypeStruct((lu.L.data.size + 10000,), lu.L.data.dtype), jax.ShapeDtypeStruct((lu.L.indices.size + 10000,), lu.L.indices.dtype), jax.ShapeDtypeStruct(lu.L.indptr.shape, lu.L.indptr.dtype)),
+                           (jax.ShapeDtypeStruct((lu.U.data.size + 10000,), lu.U.data.dtype), jax.ShapeDtypeStruct((lu.U.indices.size + 10000,), lu.U.indices.dtype), jax.ShapeDtypeStruct(lu.U.indptr.shape, lu.U.indptr.dtype)),
+                           jax.ShapeDtypeStruct(lu.perm_r.shape, lu.perm_r.dtype),
+                           jax.ShapeDtypeStruct(lu.perm_c.shape, lu.perm_c.dtype))
+
+        @jax.custom_vjp
+        def optimize(x0, args=()):
+            tol = self.tol
+
+            def cond_fun(state):
+                #hcb.id_print(np.array([111]))
+                #hcb.id_print(np.sum(state.xk))
+                #hcb.id_print(np.sum(self.loss_fun(state.xk, *args)))
+                #hcb.id_print(np.array([222]))
+
+                return np.logical_and(np.linalg.norm(state.g) > tol, state.inum < self.max_iter)
+
+            def body_fun(state):
+                hvp_res = self.sparse_entries_fun(state.xk, args)
+
+                # Sparse reconstruct gives a csc matrix format.
+                data, row_indices, col_indptr = self.sparse_reconstruct(hvp_res)
+
+                #hcb.id_print(np.array([20000]))
+                def f1(_):
+                    #hcb.id_print(np.array([30000]))
+                    return device_sparse_lu_factor(data, row_indices, col_indptr, self.splu_shape)
+                def f2(_):
+                    #hcb.id_print(np.array([40000]))
+                    return state.lu_precond
+                lu_precond = jax.lax.cond(
+                    #np.logical_and(state.inum > 0, state.inum % self.update_every == 0),
+                    state.inum % self.update_every == 0,
+                    lambda _: f1(_),
+                    lambda _: f2(_),
+                    operand=None,
+                )
+
+                dx = device_preconditioned_gmres(lu_precond, data, row_indices, col_indptr, state.g)
+                # Construct the step. If the step gives NaN (true case), restart the optimization.
+                xk = state.xk + dx * state.step_size
+
+                return jax.lax.cond(
+                    np.logical_and(np.isnan(self.loss_fun(xk, *args)), state.step_size > 0.001),
+                    lambda _: SparseNewtonSolverHCBRestartPreconditionState(
+                        x0=state.x0,
+                        xk=state.x0,
+                        g=self.grad_fun(state.x0, *args),
+                        inum=0,
+                        total_inum=state.total_inum+1,
+                        step_size=state.step_size * 0.95,
+                        lu_precond=state.lu_precond0,
+                        lu_precond0=state.lu_precond0,
+                    ),
+                    lambda _: SparseNewtonSolverHCBRestartPreconditionState(
+                        x0=state.x0,
+                        xk=xk,
+                        g=self.grad_fun(xk, *args),
+                        inum=state.inum+1,
+                        total_inum=state.total_inum+1,
+                        step_size=state.step_size,
+                        lu_precond=lu_precond,
+                        lu_precond0=state.lu_precond0,
+                    ),
+                    operand=None,
+                )
+
+            #hvp_res = self.sparse_entries_fun(x0, args)
+            # Sparse reconstruct gives a csc matrix format.
+            #data, row_indices, col_indptr = self.sparse_reconstruct(hvp_res)
+            #hcb.id_print(np.array([10000]))
+            #lu_precond = device_sparse_lu_factor(data, row_indices, col_indptr, self.splu_shape)
+            lu_precond = 0.0
+            init_val = SparseNewtonSolverHCBRestartPreconditionState(
+                x0=x0,
+                xk=x0,
+                g=self.grad_fun(x0, *args),
+                inum=0,
+                total_inum=0,
+                step_size=self.step_size,
+                lu_precond=lu_precond,
+                lu_precond0=lu_precond,
             )
 
             final_state = jax.lax.while_loop(cond_fun, body_fun, init_val)
