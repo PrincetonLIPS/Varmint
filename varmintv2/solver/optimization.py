@@ -888,13 +888,22 @@ def host_preconditioned_gmres(inputs):
         icount += 1
 
     t = time.time()
-    res, info = scipy.sparse.linalg.gmres(sparse_hess, -g, tol=1e-8, M=M, maxiter=100, callback=update_icount)
-    print(info, icount, f'{time.time() - t}')
+    res, info = scipy.sparse.linalg.gmres(sparse_hess, -g, tol=1e-8, M=M, maxiter=20, callback=update_icount)
+    #print(info, icount, f'{time.time() - t}')
     if info > 0:
         # Fall back to LU decomposition
-        print('Falling back to LU.')
-        lu = scipy.sparse.linalg.splu(sparse_hess)
-        return lu.solve(-g)
+        #print('Falling back to LU.')
+        lu = scipy.sparse.linalg.spilu(sparse_hess)
+        solve_fn = lu.solve
+        def M_x_global(x):
+            return solve_fn(x)
+
+        M = scipy.sparse.linalg.LinearOperator(
+            (g.size, g.size), M_x_global)
+        icount = 0
+        res, info = scipy.sparse.linalg.gmres(sparse_hess, -g, tol=1e-8, M=M, maxiter=100, callback=update_icount)
+        if info > 0:
+            print('Falling back to standard LU.')
 
     return res
 
@@ -942,6 +951,10 @@ class SparseNewtonSolverHCBRestartPrecondition:
         self.sparse_entries_fun = sparse_entries
         self.grad_fun = jax.grad(loss_fun)
 
+        # Initialize the global solve function
+        global solve_fn
+        solve_fn = lambda x: x
+
     def get_optimize_fn(self, x_test, args_test):
         # Need the shape of the two lu factors. Since they are represented
         # as sparse matrices, we do a test factorization to see what the shape
@@ -977,7 +990,8 @@ class SparseNewtonSolverHCBRestartPrecondition:
                 #hcb.id_print(np.array([20000]))
                 def f1(_):
                     #hcb.id_print(np.array([30000]))
-                    return device_sparse_lu_factor(data, row_indices, col_indptr, self.splu_shape)
+                    #return device_sparse_lu_factor(data, row_indices, col_indptr, self.splu_shape)
+                    return state.lu_precond
                 def f2(_):
                     #hcb.id_print(np.array([40000]))
                     return state.lu_precond
@@ -1054,7 +1068,7 @@ class SparseNewtonSolverHCBRestartPrecondition:
             data, row_indices, col_indptr = self.sparse_reconstruct(hvp_res)
 
             # Compute adjoint wrt upstream adjoints.
-            adjoint = device_sparse_lu(data, row_indices, col_indptr, g, -1)
+            adjoint = device_preconditioned_gmres(0.0, data, row_indices, col_indptr, -g)
 
             #hcb.id_print(np.array([5, 6, 7, 8, 9]))
 

@@ -31,6 +31,8 @@ import numpy as onp
 import jax.numpy as np
 import jax
 
+import optax
+
 import matplotlib.pyplot as plt
 
 # Let's do 64-bit. Does not seem to degrade performance much.
@@ -97,7 +99,7 @@ if __name__ == '__main__':
 
     mat = NeoHookean2D(TPUMat)
 
-    grid_str = "C1000 C0200 C0000 C0300 C0000 C0400 C0000 C0110\n"\
+    grid_str = "C1000 C0200 C0000 C0300 C0000 C0400 C0000 C0100\n"\
                "C1000 C0000 C0000 C0000 C0000 C0000 C0000 C0000\n"\
                "C1000 C0000 C0000 C0000 C0000 C0000 C0000 C0000\n"\
                "C1000 C0000 C0000 C0000 C0000 C0000 C0000 C0000\n"\
@@ -161,7 +163,7 @@ if __name__ == '__main__':
             fixed_locs = cell.fixed_locs_from_dict(ref_ctrl, fixed_displacements)
             new_x = optimize(x_prev, (fixed_locs, tractions, ref_ctrl))
             strain_energy = strain_energy_fn(new_x, fixed_locs, tractions, ref_ctrl)
-            hcb.id_print(np.array([12345]))
+            #hcb.id_print(np.array([12345]))
             return new_x, (new_x, fixed_locs, strain_energy)
         
         final_x, (all_xs, all_fixed_locs, all_strain_energies) = jax.lax.scan(sim_increment, init_x, increments)
@@ -185,6 +187,41 @@ if __name__ == '__main__':
                np.sum(np.abs(final_x_local[p2] - target_pts[1])) + \
                np.sum(np.abs(final_x_local[p3] - target_pts[2]))
 
+    print('Starting adjoint optimization')
+    loss_val_and_grad = jax.jit(jax.value_and_grad(loss_fn))
+    curr_radii = init_radii
+    lr = 0.01
+
+    optimizer = optax.adam(lr)
+    opt_state = optimizer.init(curr_radii)
+    for i in range(1, 1001):
+        iter_time = time.time()
+        loss, grad_loss = loss_val_and_grad(curr_radii)
+        print(f'Iteration {i} Loss: {loss} Grad Norm: {np.linalg.norm(grad_loss)} Time: {time.time() - iter_time}')
+
+        updates, opt_state = optimizer.update(grad_loss, opt_state)
+        curr_radii = optax.apply_updates(curr_radii, updates)
+        curr_radii = np.clip(curr_radii, 0.1, 0.9)
+
+        if i % 5 == 0:
+            print(f'Generating image and video with optimization so far.')
+            optimized_curr_g_pos, (all_displacements, all_fixed_locs, _) = simulate(init_disps, curr_radii)
+
+            all_velocities = np.zeros_like(all_displacements)
+            all_fixed_vels = np.zeros_like(all_fixed_locs)
+
+            image_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-optimized-{i}.png')
+            vid_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-optimized-{i}.mp4')
+            create_static_image_nma(cell.element, g2l(optimized_curr_g_pos, all_fixed_locs[-1], radii_to_ctrl_fn(curr_radii)), image_path, target_pts)
+            ctrl_seq, _ = cell.unflatten_dynamics_sequence(
+                all_displacements, all_velocities, all_fixed_locs, all_fixed_vels, radii_to_ctrl_fn(curr_radii))
+            create_movie_nma(cell.element, ctrl_seq, vid_path, target_pts, comet_exp=None)
+    
+    final_loss = loss_fn(curr_radii)
+    print(f'Final loss: {final_loss}')
+    print(f'Finished simulation {args.exp_name}')
+
+"""
     print('Simulating initial radii')
     sim_time = time.time()
     curr_g_pos, (all_displacements, all_fixed_locs, all_strain_energies) = simulate(init_disps, init_radii)
@@ -209,28 +246,4 @@ if __name__ == '__main__':
 
     #plt.plot(increments, all_strain_energies)
     #plt.savefig(os.path.join(args.exp_dir, f'strain_energy_graph-{args.exp_name}.png'))
-
-    print('Starting adjoint optimization')
-    loss_val_and_grad = jax.jit(jax.value_and_grad(loss_fn))
-    curr_radii = init_radii
-    lr = 0.1
-    for i in range(1, 1001):
-        iter_time = time.time()
-        loss, grad_loss = loss_val_and_grad(curr_radii)
-        print(f'Iteration {i} Loss: {loss} Grad Norm: {np.linalg.norm(grad_loss)} Time: {time.time() - iter_time}')
-
-        curr_radii = np.clip(curr_radii + lr * grad_loss, 0.1, 0.9)
-
-        if i > 0 and i % 5 == 0:
-            print(f'Generating image and video with optimization so far.')
-            optimized_curr_g_pos, (all_displacements, all_fixed_locs, _) = simulate(init_disps, curr_radii)
-            image_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-optimized-{i}.png')
-            vid_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-optimized-{i}.mp4')
-            create_static_image_nma(cell.element, g2l(optimized_curr_g_pos, all_fixed_locs[-1], radii_to_ctrl_fn(curr_radii)), image_path, target_pts)
-            ctrl_seq, _ = cell.unflatten_dynamics_sequence(
-                all_displacements, all_velocities, all_fixed_locs, all_fixed_vels, radii_to_ctrl_fn(curr_radii))
-            create_movie_nma(cell.element, ctrl_seq, vid_path, target_pts, comet_exp=None)
-    
-    final_loss = loss_fn(curr_radii)
-    print(f'Final loss: {final_loss}')
-    print(f'Finished simulation {args.exp_name}')
+"""
