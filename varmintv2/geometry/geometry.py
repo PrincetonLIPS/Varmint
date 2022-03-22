@@ -310,7 +310,8 @@ class SingleElementGeometry(Geometry):
             kZeros = jnp.zeros((self.n_components, self.element.n_d))
 
             # Transform from local form to component form.
-            global_coords = jax.ops.index_update(kZeros, self.index_array, local_coords)
+            global_coords = kZeros.at[self.index_array].set(local_coords)
+            #global_coords = jax.ops.index_update(kZeros, self.index_array, local_coords)
             global_coords = global_coords.flatten()
 
             # Get nonfixed components.
@@ -338,28 +339,32 @@ class SingleElementGeometry(Geometry):
             rigid_global_coords = global_coords[self.nonfixed_labels.size:]
 
             # Find fixed locations array in component form.
-            fixed_locs = jax.ops.index_update(
-                kZeros, self.index_array, fixed_coords)
+            fixed_locs = kZeros.at[self.index_array].set(fixed_coords)
+            #fixed_locs = jax.ops.index_update(
+            #    kZeros, self.index_array, fixed_coords)
             fixed_locs = fixed_locs.flatten()
             fixed_locs = jnp.take(fixed_locs, self.fixed_labels, axis=0)
 
             local_pos = jnp.zeros(self.n_components * self.element.n_d)
 
             # Fill in the non-fixed locations
-            local_pos = jax.ops.index_update(
-                local_pos, self.nonfixed_labels, nonrigid_global_coords)
+            local_pos = local_pos.at[self.nonfixed_labels].set(nonrigid_global_coords)
+            #local_pos = jax.ops.index_update(
+            #    local_pos, self.nonfixed_labels, nonrigid_global_coords)
 
             # Fill in the fixed locations
-            fixed_pos = jax.ops.index_update(local_pos, self.fixed_labels,
-                                             fixed_locs)
+            fixed_pos = local_pos.at[self.fixed_labels].set(fixed_locs)
+            #fixed_pos = jax.ops.index_update(local_pos, self.fixed_labels,
+            #                                 fixed_locs)
 
             # Fill in the rigid patch locations
             for i, indices in enumerate(self.rigidity_nonfixed_labels):
                 values = jnp.take(ref_ctrl_component, indices, axis=0)
                 offset_values = values + rigid_global_coords[i]
 
-                fixed_pos = jax.ops.index_update(fixed_pos, indices,
-                                                 offset_values)
+                fixed_pos = fixed_pos.at[indices].set(offset_values)
+                #fixed_pos = jax.ops.index_update(fixed_pos, indices,
+                #                                 offset_values)
             
             # Unflattened component form
             fixed_pos = fixed_pos.reshape((-1, self.element.n_d))
@@ -860,6 +865,7 @@ class SingleElementGeometry(Geometry):
                        (n_nonfixed + n_rigid, n_nonfixed + n_rigid), dtype=onp.int8)
 
         print(f'Number of dof: {n_nonfixed + n_rigid}.')
+        self.n_dof = n_nonfixed + n_rigid
         print('Sparsity precomputation.')
         self._jac_reconstruction_tangents, self._jac_reconstruction_fn = \
             sparsity.pattern_to_reconstruction(self._jac_sparsity_graph)

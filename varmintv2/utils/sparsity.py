@@ -146,8 +146,11 @@ def pattern_to_reconstruction(sparsemat_csc):
         result = jvp_result.flatten()
 
         data = jnp.zeros(nnz)
-        data = jax.ops.index_update(data, jax.ops.index[:nnz//2], result[jvp_indexer])
-        data = jax.ops.index_update(data, jax.ops.index[nnz//2:], result[jvp_indexer])
+        data = data.at[:nnz//2].set(result[jvp_indexer])
+        #data = jax.ops.index_update(data, jax.ops.index[:nnz//2], result[jvp_indexer])
+
+        data = data.at[nnz//2:].set(result[jvp_indexer])
+        #data = jax.ops.index_update(data, jax.ops.index[nnz//2:], result[jvp_indexer])
 
         return data[unique_col_sorted_indices], row_indices, col_indptr
 

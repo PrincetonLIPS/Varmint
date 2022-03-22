@@ -8,7 +8,7 @@ import pickle
 
 import pandas as pd
 
-import surrogate_sim.surrogate_nns
+#import surrogate_sim.surrogate_nns
 import jax.numpy as np
 
 from collections import namedtuple

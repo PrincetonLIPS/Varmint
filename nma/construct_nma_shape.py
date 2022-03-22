@@ -407,7 +407,7 @@ def construct_cell2D(input_str, patch_ncp, quad_degree, spline_degree,
                         traction_groups[group].append(
                             (len(units)-1, 'bottom'))
 
-    ctrls = np.concatenate(ctrls, axis=0)
+    ctrls = jnp.concatenate(ctrls, axis=0)
     #flat_ctrls = ctrls.reshape((-1, 2))
     #kdtree = KDTree(flat_ctrls)
     #constraints = kdtree.query_pairs(1e-10)
@@ -474,8 +474,9 @@ def construct_cell2D(input_str, patch_ncp, quad_degree, spline_degree,
     def radii_to_ctrl(radii):
         cell_ctrls = vmap_gencell(radii).reshape(
             (-1, patch_ncp, patch_ncp, 2))
-        return jax.ops.index_update(ctrls, all_indices, cell_ctrls,
-                                    indices_are_sorted=True)
+        return ctrls.at[all_indices].set(cell_ctrls, indices_are_sorted=True)
+        #return jax.ops.index_update(ctrls, all_indices, cell_ctrls,
+        #                            indices_are_sorted=True)
 
     return SingleElementGeometry(
         element=element,

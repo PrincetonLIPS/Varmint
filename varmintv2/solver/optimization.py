@@ -1,5 +1,6 @@
 from collections import namedtuple
 import os
+import gc
 
 import jax
 from jax.core import InconclusiveDimensionOperation
@@ -817,6 +818,30 @@ SparseNewtonSolverHCBRestartPreconditionState = namedtuple('SparseNewtonSolverHC
     'x0', 'xk', 'g', 'inum', 'total_inum', 'step_size', 'lu_precond', 'lu_precond0'
 ])
 
+class SolveFnContainer:
+    lu = None
+    def __init__(self, size):
+        self.lu = None
+        self.size = size
+
+        def M_x_global(x):
+            return x
+        self.M = scipy.sparse.linalg.LinearOperator(
+            (self.size, self.size), lambda x: x)
+
+    def update_linear_op(self, lu):
+        print('Updating linear op')
+
+        if self.lu is not None:
+            del self.lu
+        self.lu = lu
+
+        del self.M.__dict__
+        self.M = scipy.sparse.linalg.LinearOperator(
+            (self.size, self.size), self.lu.solve)
+
+
+
 def host_sparse_lu_factor(inputs):
     t = time.time()
     data, row_indices, col_indptr, L_data_shape, U_data_shape = inputs
@@ -824,8 +849,8 @@ def host_sparse_lu_factor(inputs):
     sparse_hess = scipy.sparse.csc_matrix((data, row_indices, col_indptr))
     lu = scipy.sparse.linalg.spilu(sparse_hess)
 
-    global solve_fn
-    solve_fn = lu.solve
+    global solver_container
+    solver_container.update_linear_op(lu)
     return 0.0
 """
     # Annoyingly, we have to invert the permutations
@@ -873,12 +898,7 @@ def host_preconditioned_gmres(inputs):
     #    x = scipy.sparse.linalg.spsolve_triangular(U, x, lower=False)
     #    return x[perm_c]
 
-    global solve_fn
-    def M_x_global(x):
-        return solve_fn(x)
-
-    M = scipy.sparse.linalg.LinearOperator(
-        (g.size, g.size), M_x_global)
+    #global solver_container
 
     global icount
     icount = 0
@@ -888,20 +908,34 @@ def host_preconditioned_gmres(inputs):
         icount += 1
 
     t = time.time()
+
+    #SolveFnContainer.lu = scipy.sparse.linalg.spilu(sparse_hess)
+    lu = scipy.sparse.linalg.spilu(sparse_hess)
+    M = scipy.sparse.linalg.LinearOperator(
+        (g.size, g.size), lu.solve)
+    #res, info = scipy.sparse.linalg.gmres(sparse_hess, -g, tol=1e-8, M=solver_container.M, maxiter=20, callback=update_icount)
+    #print('solving')
     res, info = scipy.sparse.linalg.gmres(sparse_hess, -g, tol=1e-8, M=M, maxiter=20, callback=update_icount)
     #print(info, icount, f'{time.time() - t}')
     if info > 0:
         # Fall back to LU decomposition
         #print('Falling back to LU.')
-        lu = scipy.sparse.linalg.spilu(sparse_hess)
-        solve_fn = lu.solve
-        def M_x_global(x):
-            return solve_fn(x)
+        SolveFnContainer.lu = scipy.sparse.linalg.spilu(sparse_hess)
 
+        # Clean super lu object to prevent memory leak.
+        #if super_lu is not None:
+        #    del super_lu.L
+        #    del super_lu.U
+        #    del super_lu.perm_c
+        #    del super_lu.perm_r
+        #print(globals())
         M = scipy.sparse.linalg.LinearOperator(
-            (g.size, g.size), M_x_global)
+            (g.size, g.size), SolveFnContainer.lu.solve)
         icount = 0
+        t = time.time()
         res, info = scipy.sparse.linalg.gmres(sparse_hess, -g, tol=1e-8, M=M, maxiter=100, callback=update_icount)
+        #print(info, icount, f'{time.time() - t}')
+
         if info > 0:
             print('Falling back to standard LU.')
 
@@ -952,8 +986,8 @@ class SparseNewtonSolverHCBRestartPrecondition:
         self.grad_fun = jax.grad(loss_fun)
 
         # Initialize the global solve function
-        global solve_fn
-        solve_fn = lambda x: x
+        #global solver_container
+        #solver_container = SolveFnContainer(geometry.n_dof)
 
     def get_optimize_fn(self, x_test, args_test):
         # Need the shape of the two lu factors. Since they are represented
