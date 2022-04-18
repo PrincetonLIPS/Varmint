@@ -820,6 +820,8 @@ SparseNewtonSolverHCBRestartPreconditionState = namedtuple('SparseNewtonSolverHC
 
 class SolveFnContainer:
     lu = None
+    t = None
+    i = 0
     def __init__(self, size):
         self.lu = None
         self.size = size
@@ -884,7 +886,24 @@ def device_sparse_lu_factor(data, row_indices, col_indptr, splu_shape):
                     result_shape=jax.ShapeDtypeStruct((), np.float64))
 
 def host_preconditioned_gmres(inputs):
-    lu_precond, data, row_indices, col_indptr, g = inputs
+    out_call_time = 0.0
+    if SolveFnContainer.t is not None:
+        #print(f'Out call: {time.time() - SolveFnContainer.t}')
+        out_call_time = time.time() - SolveFnContainer.t
+    
+    t0 = time.time()
+    xk, args, is_forward, data, row_indices, col_indptr, g = inputs
+    #if is_forward > 0.0:
+    #    onp.savez(f'solve_trajectory/iter_{SolveFnContainer.i}.npz',
+    #            xk=xk,
+    #            fixed_locs=args[0],
+    #            tractions=args[1],
+    #            ref_ctrl=args[2],
+    #            data=data,
+    #            row_indices=row_indices,
+    #            col_indptr=col_indptr,
+    #    )
+    SolveFnContainer.i += 1
     sparse_hess = scipy.sparse.csc_matrix((data, row_indices, col_indptr))
 
     #L = scipy.sparse.csr_matrix(lu_precond[0], shape=(g.size, g.size))
@@ -907,20 +926,43 @@ def host_preconditioned_gmres(inputs):
         global icount
         icount += 1
 
-    t = time.time()
+    #t = time.time()
 
     #SolveFnContainer.lu = scipy.sparse.linalg.spilu(sparse_hess)
-    lu = scipy.sparse.linalg.spilu(sparse_hess)
+    #lu = scipy.sparse.linalg.splu(sparse_hess)
+    if SolveFnContainer.lu is None:
+        solve = lambda x: x
+    else:
+        solve = SolveFnContainer.lu.solve
     M = scipy.sparse.linalg.LinearOperator(
-        (g.size, g.size), lu.solve)
+        (g.size, g.size), solve)
     #res, info = scipy.sparse.linalg.gmres(sparse_hess, -g, tol=1e-8, M=solver_container.M, maxiter=20, callback=update_icount)
     #print('solving')
+    st = time.time()
     res, info = scipy.sparse.linalg.gmres(sparse_hess, -g, tol=1e-8, M=M, maxiter=20, callback=update_icount)
+    solve_time = time.time() - st
+
+    initial_icount = icount
+    afterfactor_icount = 0
+    re_solve_time = 0.0
+    factor_time = 0.0
     #print(info, icount, f'{time.time() - t}')
     if info > 0:
         # Fall back to LU decomposition
         #print('Falling back to LU.')
-        SolveFnContainer.lu = scipy.sparse.linalg.spilu(sparse_hess)
+        #print('Updating')
+        ft = time.time()
+        try:
+            SolveFnContainer.lu = scipy.sparse.linalg.spilu(sparse_hess)
+        except RuntimeError as e:
+            print('Found singular matrix. Saving to disk.')
+            scipy.sparse.save_npz('singular_matrix.npz', sparse_hess)
+            with open('singular_point.npz', 'wb') as f:
+                onp.savez(f, xk)
+            with open('singular_args.npz', 'wb') as f:
+                onp.savez(f, *args)
+            raise
+        factor_time = time.time() - ft
 
         # Clean super lu object to prevent memory leak.
         #if super_lu is not None:
@@ -932,21 +974,39 @@ def host_preconditioned_gmres(inputs):
         M = scipy.sparse.linalg.LinearOperator(
             (g.size, g.size), SolveFnContainer.lu.solve)
         icount = 0
-        t = time.time()
+        rst = time.time()
         res, info = scipy.sparse.linalg.gmres(sparse_hess, -g, tol=1e-8, M=M, maxiter=100, callback=update_icount)
+        re_solve_time = time.time() - rst
+        afterfactor_icount = icount
         #print(info, icount, f'{time.time() - t}')
 
         if info > 0:
             print('Falling back to standard LU.')
 
+    
+    #print(f"In  call: {time.time() - t0}")
+    in_call_time = time.time() - t0
+    #print(f'solve_stats {in_call_time} {out_call_time} {solve_time} {initial_icount} {factor_time} {re_solve_time} {afterfactor_icount}')
+    SolveFnContainer.t = time.time()
     return res
 
 # This function runs on the device.
-def device_preconditioned_gmres(lu_precond, data, row_indices, col_indptr, g):
-    inputs = (lu_precond, data, row_indices, col_indptr, g)
+def device_preconditioned_gmres(xk, args, lu_precond, data, row_indices, col_indptr, g):
+    inputs = (xk, args, lu_precond, data, row_indices, col_indptr, g)
     return hcb.call(host_preconditioned_gmres, inputs,
                     result_shape=g)
 
+
+def compare_hessians(hessian, data, row_indices, col_indptr):
+    inputs = (hessian, data, row_indices, col_indptr)
+    def compare(inputs):
+        hessian, data, row_indices, col_indptr = inputs
+        sparse_hess = scipy.sparse.csc_matrix((data, row_indices, col_indptr))
+        comparison = onp.allclose(sparse_hess.A, hessian)
+        if not comparison:
+            print('Hessians did not match up!!')
+        return 0.0
+    return hcb.call(compare, inputs, result_shape=jax.ShapeDtypeStruct((), np.float64))
 
 
 class SparseNewtonSolverHCBRestartPrecondition:
@@ -984,6 +1044,7 @@ class SparseNewtonSolverHCBRestartPrecondition:
         self.loss_hvp = loss_hvp
         self.sparse_entries_fun = sparse_entries
         self.grad_fun = jax.grad(loss_fun)
+        self.hessian_fun = jax.hessian(loss_fun)
 
         # Initialize the global solve function
         #global solver_container
@@ -1020,7 +1081,8 @@ class SparseNewtonSolverHCBRestartPrecondition:
 
                 # Sparse reconstruct gives a csc matrix format.
                 data, row_indices, col_indptr = self.sparse_reconstruct(hvp_res)
-
+                #full_hess = self.hessian_fun(state.xk, *args)
+                #res = compare_hessians(full_hess, data, row_indices, col_indptr)
                 #hcb.id_print(np.array([20000]))
                 def f1(_):
                     #hcb.id_print(np.array([30000]))
@@ -1037,7 +1099,7 @@ class SparseNewtonSolverHCBRestartPrecondition:
                     operand=None,
                 )
 
-                dx = device_preconditioned_gmres(lu_precond, data, row_indices, col_indptr, state.g)
+                dx = device_preconditioned_gmres(state.xk, args, 1.0, data, row_indices, col_indptr, state.g)
                 # Construct the step. If the step gives NaN (true case), restart the optimization.
                 xk = state.xk + dx * state.step_size
 
@@ -1102,7 +1164,7 @@ class SparseNewtonSolverHCBRestartPrecondition:
             data, row_indices, col_indptr = self.sparse_reconstruct(hvp_res)
 
             # Compute adjoint wrt upstream adjoints.
-            adjoint = device_preconditioned_gmres(0.0, data, row_indices, col_indptr, -g)
+            adjoint = device_preconditioned_gmres(xk, args, 0.0, data, row_indices, col_indptr, -g)
 
             #hcb.id_print(np.array([5, 6, 7, 8, 9]))
 

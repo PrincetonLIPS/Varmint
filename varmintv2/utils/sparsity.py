@@ -134,7 +134,7 @@ def pattern_to_reconstruction(sparsemat_csc):
     # Convert to a CSC row indices and col indptr
     indices = np.stack((all_cols, all_rows), axis=1)
     unique, unique_col_sorted_indices = np.unique(indices, axis=0, return_index=True)
-    col_indptr = np.where(np.diff(unique[:, 0]) > 0)[0] + 1
+    col_indptr = np.where(np.diff(unique[:, 0]) > 0)[0] + 1  # This only works if each column has at least one entry!!
 
     col_indptr = np.concatenate((np.array([0]), col_indptr, np.array([unique.shape[0]])))
     row_indices = unique[:, 1]

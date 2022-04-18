@@ -26,7 +26,7 @@ def prepare_experiment_args(parser, exp_root):
                         help='Overwrite the existing experiment directory.')
 
 
-def prepare_experiment_directories(args):
+def prepare_experiment_directories(args, reload=False):
     if not os.path.exists(args.exp_root):
         print(f'Creating experiment root directory {args.exp_root}')
         os.mkdir(args.exp_root)
@@ -42,10 +42,13 @@ def prepare_experiment_directories(args):
     if args.overwrite and os.path.exists(args.exp_dir):
         print('Overwriting existing directory.')
         shutil.rmtree(args.exp_dir)
-    assert not os.path.exists(args.exp_dir)
-    print(f'Creating experiment with name {args.exp_name} in {args.exp_dir}')
-    os.mkdir(args.exp_dir)
-
+    
+    if not reload:
+        assert not os.path.exists(args.exp_dir)
+        print(f'Creating experiment with name {args.exp_name} in {args.exp_dir}')
+        os.mkdir(args.exp_dir)
+    else:
+        print(f'Reloading experiment with name {args.exp_name} in {args.exp_dir}')
 
 def save_args(args):
     cmd_path = os.path.join(args.exp_dir, 'args.txt')
