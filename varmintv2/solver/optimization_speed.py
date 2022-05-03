@@ -287,7 +287,7 @@ class SparseNewtonIncrementalSolver:
 
     def get_optimize_fn(self):
         @jax.custom_vjp
-        def optimize(x0, increment_dict, tractions, ref_ctrl):
+        def optimize(x0, increment_dict, tractions, ref_ctrl, mat_params):
             # Magic numbers to tune
             succ_mult = 1.05
             fail_mult = 0.8
@@ -309,7 +309,7 @@ class SparseNewtonIncrementalSolver:
                 fixed_displacements = jax.tree_util.tree_map(
                     lambda x: increment * x, increment_dict)
                 fixed_locs = self.fixed_locs_from_dict(ref_ctrl, fixed_displacements)
-                args = (fixed_locs, tractions, ref_ctrl)
+                args = (fixed_locs, tractions, ref_ctrl, mat_params)
 
                 xk = x_s
                 g = self.grad_fun(xk, *args)
@@ -359,15 +359,15 @@ class SparseNewtonIncrementalSolver:
 
             return x_inc, all_xs, all_fixed_locs
 
-        def optimize_fwd(x0, increment_dict, tractions, ref_ctrl):
-            xk, all_xs, all_fixed_locs = optimize(x0, increment_dict, tractions, ref_ctrl)
+        def optimize_fwd(x0, increment_dict, tractions, ref_ctrl, mat_params):
+            xk, all_xs, all_fixed_locs = optimize(x0, increment_dict, tractions, ref_ctrl, mat_params)
             #return (xk, success), (xk, args)
 
-            return (xk, all_xs, all_fixed_locs), (xk, increment_dict, tractions, ref_ctrl)
+            return (xk, all_xs, all_fixed_locs), (xk, increment_dict, tractions, ref_ctrl, mat_params)
 
         def optimize_bwd(res, g_all):
             #import pdb
-            xk, increment_dict, tractions, ref_ctrl = res
+            xk, increment_dict, tractions, ref_ctrl, mat_params = res
             (g, _, _) = g_all
             #pdb.set_trace()
 
@@ -375,14 +375,14 @@ class SparseNewtonIncrementalSolver:
                 fixed_locs = self.fixed_locs_from_dict(ref_ctrl, increment_dict)
                 return (fixed_locs, tractions, ref_ctrl)
 
-            args, f_vjp = jax.vjp(preprocess, increment_dict, tractions, ref_ctrl)
+            args, f_vjp = jax.vjp(preprocess, increment_dict, tractions, ref_ctrl, mat_params)
             #pdb.set_trace()
             # Compute adjoint wrt upstream adjoints.
             #print('computing adjoint')
             adjoint = self.linear_solve(xk, args,  -g, solve_tol=self.tol)
             args_bar = self.adjoint_op(xk, adjoint, args)
-            increment_dict_bar, tractions_bar, ref_ctrl_bar = f_vjp(args_bar)
-            return None, increment_dict_bar, tractions_bar, ref_ctrl_bar
+            increment_dict_bar, tractions_bar, ref_ctrl_bar, mat_params_bar = f_vjp(args_bar)
+            return None, increment_dict_bar, tractions_bar, ref_ctrl_bar, mat_params_bar
         
         optimize.defvjp(optimize_fwd, optimize_bwd)
 

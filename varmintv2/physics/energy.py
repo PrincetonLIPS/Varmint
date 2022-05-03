@@ -9,6 +9,8 @@ from varmintv2.geometry.elements import Element
 from varmintv2.physics.constitutive import PhysicsModel
 from varmintv2.utils.typing import ArrayND
 
+import jax.experimental.host_callback as hcb
+
 
 def generate_strain_energy_fn(element: Element,
                               material: PhysicsModel,
@@ -105,7 +107,7 @@ def generate_total_energy_fn(element: Element, material: PhysicsModel):
         line_deformation_fns.append(element.get_quad_map_boundary_fn(i))
 
     jacobian_ctrl_fn = element.get_quad_ctrl_jacobian_fn()
-    vmap_energy_fn = jax.vmap(energy_fn, in_axes=(0,))
+    vmap_energy_fn = jax.vmap(energy_fn, in_axes=(0, None, None))
     jac_dets_fn = jax.vmap(jnpla.det, in_axes=(0,))
 
     defgrads_fn = jax.vmap(
@@ -127,7 +129,7 @@ def generate_total_energy_fn(element: Element, material: PhysicsModel):
     gravity = 0.0 # 981.0  # cm/s^2
     #gravity = 981.0  # cm/s^2
 
-    def all_energy(def_ctrl, def_vels, ref_ctrl, active_boundaries, traction):
+    def all_energy(def_ctrl, def_vels, ref_ctrl, active_boundaries, traction, mat_params):
         """Compute the various components of energy of this element.
 
         In the following, n_b is element.num_boundaries, and n_d is element.n_d.
@@ -148,6 +150,8 @@ def generate_total_energy_fn(element: Element, material: PhysicsModel):
           condition applied to it. Shape is (n_b,), representing boundary indices.
         traction: array_like
           Vector of traction force for each of the boundaries. Shape: (n_b, n_d)
+        mat_params: (param1, param2)
+          Parameters describing the material in this element.
 
         Returns
         -------
@@ -177,7 +181,7 @@ def generate_total_energy_fn(element: Element, material: PhysicsModel):
         # Strain energy density wrt parent config.
         # Units are GPa = 10^9 J / m^3 in the reference configuration.
         # Convert to J / cm^3 by multiplying by 10^3.
-        strain_energy_density = vmap_energy_fn(defgrads) * jnp.abs(ref_jac_dets)
+        strain_energy_density = vmap_energy_fn(defgrads, mat_params[0], mat_params[1]) * jnp.abs(ref_jac_dets)
 
         # Total potential energy via integrating over parent config.
         strain_potential = 1e3 * jnp.sum(quad_fn(strain_energy_density))

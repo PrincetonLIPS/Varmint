@@ -7,25 +7,25 @@ import jax.numpy.linalg as npla
 from functools import partial
 
 
-def neohookean_energy2d_log(shear, bulk, F):
+def neohookean_energy2d_log(F, shear, bulk):
     I1 = np.trace(F.T @ F)
     J = npla.det(F)
     return (shear/2) * (I1 - 2 - 2*np.log(J)) + (bulk/2)*np.log(J)**2
 
 
-def linear_elastic_energy2d(lmbda, mu, F):
+def linear_elastic_energy2d(F, lmbda, mu):
     strain = 0.5 * (F + F.T - 2 * np.eye(2))
     return 0.5 * lmbda * (np.trace(strain) ** 2) + \
         mu * np.tensordot(strain, strain, axes=([0, 1], [0, 1]))
 
 
-def neohookean_energy3d_log(shear, bulk, F):
+def neohookean_energy3d_log(F, shear, bulk):
     I1 = np.trace(F.T @ F)
     J = npla.det(F)
     return (shear/2) * (I1 - 3 - 2*np.log(J)) + (bulk/2)*(J-1)**2
 
 
-def neohookean_energy2d(shear, bulk, F):
+def neohookean_energy2d(F, shear, bulk):
     I1 = np.trace(F.T @ F)
     J = npla.det(F)
     J23 = J**(-2/3)
@@ -53,7 +53,8 @@ class LinearElastic2D(PhysicsModel):
         self._density = self.material.density
 
     def get_energy_fn(self):
-        return partial(linear_elastic_energy2d, self.lmbda, self.mu)
+        return linear_elastic_energy2d
+        #return partial(linear_elastic_energy2d, lmbda=self.lmbda, mu=self.mu)
 
     @property
     def density(self):
@@ -73,9 +74,11 @@ class NeoHookean2D(PhysicsModel):
 
     def get_energy_fn(self):
         if self.log:
-            return partial(neohookean_energy2d_log, self.shear, self.bulk)
+            return neohookean_energy2d_log
+            #return partial(neohookean_energy2d_log, shear=self.shear, bulk=self.bulk)
 
-        return partial(neohookean_energy2d, self.shear, self.bulk)
+        return neohookean_energy2d
+        #return partial(neohookean_energy2d, shear=self.shear, bulk=self.bulk)
 
     @property
     def density(self):
@@ -91,7 +94,8 @@ class NeoHookean3D(PhysicsModel):
         self._density = self.material.density
 
     def get_energy_fn(self):
-        return partial(neohookean_energy3d_log, self.shear, self.bulk)
+        return neohookean_energy3d_log
+        #return partial(neohookean_energy3d_log, shear=self.shear, bulk=self.bulk)
 
     @property
     def density(self):

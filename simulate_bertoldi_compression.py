@@ -128,12 +128,16 @@ if __name__ == '__main__':
     l2g, g2l = cell.get_global_local_maps()
 
     ref_ctrl = radii_to_ctrl_fn(init_radii)
+    mat_params = (
+        TPUMat.shear * np.ones(ref_ctrl.shape[0]),
+        TPUMat.bulk * np.ones(ref_ctrl.shape[0]),
+    )
+
     fixed_locs = cell.fixed_locs_from_dict(ref_ctrl, {})
     tractions = cell.tractions_from_dict({})
 
     optimizer = SparseNewtonIncrementalSolver(cell, potential_energy_fn, max_iter=1000,
-                                              step_size=1.0, tol=1e-8, ls_backtrack=0.95, update_every=10, save_mats=100)
-
+                                              step_size=1.0, tol=1e-8, ls_backtrack=0.95, update_every=10, save_mats=0)
 
     x0 = l2g(ref_ctrl, ref_ctrl)
     optimize = optimizer.get_optimize_fn()
@@ -154,7 +158,7 @@ if __name__ == '__main__':
             '2': np.array([0.0, -5.0]),
         }
 
-        current_x, all_xs, all_fixed_locs = optimize(current_x, increment_dict, tractions, ref_ctrl)
+        current_x, all_xs, all_fixed_locs = optimize(current_x, increment_dict, tractions, ref_ctrl, mat_params)
 
         #return current_x, (None, None, None)
         return current_x, (np.stack(all_xs, axis=0), np.stack(all_fixed_locs, axis=0), None)
