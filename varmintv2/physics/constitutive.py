@@ -7,7 +7,11 @@ import jax.numpy.linalg as npla
 from functools import partial
 
 
-def neohookean_energy2d_log(F, shear, bulk):
+def neohookean_energy2d_log(F, E, nu):
+    # Convert E and nu to shear and bulk
+    shear = E / (2*(1+nu))
+    bulk = E / (3*(1-2*nu))
+
     I1 = np.trace(F.T @ F)
     J = npla.det(F)
     return (shear/2) * (I1 - 2 - 2*np.log(J)) + (bulk/2)*np.log(J)**2
@@ -25,7 +29,11 @@ def neohookean_energy3d_log(F, shear, bulk):
     return (shear/2) * (I1 - 3 - 2*np.log(J)) + (bulk/2)*(J-1)**2
 
 
-def neohookean_energy2d(F, shear, bulk):
+def neohookean_energy2d(F, E, nu):
+    # Convert E and nu to shear and bulk
+    shear = E / (2*(1+nu))
+    bulk = E / (3*(1-2*nu))
+
     I1 = np.trace(F.T @ F)
     J = npla.det(F)
     J23 = J**(-2/3)
@@ -73,6 +81,7 @@ class NeoHookean2D(PhysicsModel):
         self._density = self.material.density
 
     def get_energy_fn(self):
+
         if self.log:
             return neohookean_energy2d_log
             #return partial(neohookean_energy2d_log, shear=self.shear, bulk=self.bulk)
