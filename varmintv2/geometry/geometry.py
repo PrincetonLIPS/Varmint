@@ -529,7 +529,9 @@ class SingleElementGeometry(Geometry):
                  init_ctrl: ArrayND, constraints: Tuple[Array1D, Array1D],
                  dirichlet_labels: Dict[str, ArrayND],
                  traction_labels: Dict[str, ArrayND],
-                 rigid_patches_boolean: Array1D = None):
+                 rigid_patches_boolean: Array1D = None,
+                 verbose: bool = True,
+                 comm = None):
         """Initialize a SingleElementGeometry.
 
         The node numbers of the local coordinate system will be in flatten
@@ -652,7 +654,8 @@ class SingleElementGeometry(Geometry):
             rigid_labels_incomplete[group] = group_indices
 
         # Complete the rigidity groups according to the sparsity pattern
-        print('Computing rigidity groups.')
+        if verbose and comm and comm.rank == 0:
+            print('Computing rigidity groups.')
         self.rigid_labels = {}
         self.all_rigid_indices = onp.zeros(init_ctrl.shape[:-1], dtype=onp.bool)
         for group in all_rigid_groups:
@@ -666,7 +669,8 @@ class SingleElementGeometry(Geometry):
             # Aggregate all rigid points
             self.all_rigid_indices = \
                 self.all_rigid_indices | self.rigid_labels[group]
-        print('\tDone.')
+        if verbose and comm and comm.rank == 0:
+            print('\tDone.')
 
         # Complete the dirichlet_labels according to the sparsity graph.
         self.dirichlet_labels = {}
@@ -867,13 +871,17 @@ class SingleElementGeometry(Geometry):
             csr_matrix((all_entries, (all_rows, all_cols)),
                        (n_nonfixed + n_rigid, n_nonfixed + n_rigid), dtype=onp.int8)
 
-        print(f'Number of dof: {n_nonfixed + n_rigid}.')
+        if verbose and comm and comm.rank == 0:
+            print(f'Number of dof: {n_nonfixed + n_rigid}.')
         self.n_dof = n_nonfixed + n_rigid
-        print('Sparsity precomputation.')
+        if verbose and comm and comm.rank == 0:
+            print('Sparsity precomputation.')
         self._jac_reconstruction_tangents, self._jac_reconstruction_fn = \
             sparsity.pattern_to_reconstruction(self._jac_sparsity_graph)
-        print('\tDone.')
-        print(f'\t# JVPs: {self._jac_reconstruction_tangents.shape[0]}')
+        if verbose and comm and comm.rank == 0:
+            print('\tDone.')
+        if verbose and comm and comm.rank == 0:
+            print(f'\t# JVPs: {self._jac_reconstruction_tangents.shape[0]}')
 
         """
         print(f"Precomputing mass matrix.")

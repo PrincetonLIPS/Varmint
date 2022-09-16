@@ -599,7 +599,7 @@ class Patch2D(Element):
                 self.spline_deg
             )
         return deformation_fn
-    
+
     def get_map_fn_fixed_ctrl(self, ctrl):
         def deformation_fn(point):
             return bspline2d(
@@ -833,7 +833,7 @@ class Patch2D(Element):
         # We want to concatenate all_indices with pairs:
         all_indices = onp.broadcast_to(all_indices, pairs.shape)
         concat = onp.concatenate((all_indices, pairs), axis=-1)
-        
+
         # all_pairs contains all candidates, but many of them will be
         # out of bounds. Filter those out.
         all_pairs = concat.reshape((-1, 4))
