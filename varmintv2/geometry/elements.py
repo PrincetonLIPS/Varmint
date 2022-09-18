@@ -854,7 +854,7 @@ class Patch2D(Element):
         return 2
 
     def get_boundary_path(self):
-        N = 100
+        N = 20
         uu = onp.linspace(1e-6, 1-1e-6, N)
         path = onp.hstack([
             onp.vstack([uu[0]*onp.ones(N), uu]),

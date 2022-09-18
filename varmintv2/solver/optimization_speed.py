@@ -2,6 +2,7 @@ from collections import namedtuple
 import os
 import gc
 
+from tqdm import tqdm
 import jax
 from jax.core import InconclusiveDimensionOperation
 import jax.numpy as np
@@ -213,6 +214,7 @@ class SparseNewtonIncrementalSolver:
             all_xs = []
             all_fixed_locs = []
 
+            #pbar = tqdm(total=100)
             def try_increment(increment, x_s, tol):
                 fixed_displacements = jax.tree_util.tree_map(
                     lambda x: increment * x, increment_dict)
@@ -265,6 +267,7 @@ class SparseNewtonIncrementalSolver:
 
                 if success:
                     solved_increment = min(1.0, solved_increment + proposed_increment)
+                    #pbar.update(int(solved_increment * 100))
                     x_inc = xk
                     proposed_increment = proposed_increment * succ_mult
                     #print(f'solved up to increment {solved_increment}')
@@ -274,6 +277,7 @@ class SparseNewtonIncrementalSolver:
                     proposed_increment = proposed_increment * fail_mult
                     #print(f'failed. new increment is {proposed_increment}')
 
+            #pbar.close()
             return x_inc, all_xs, all_fixed_locs
 
         def optimize_fwd(x0, increment_dict, tractions, ref_ctrl, mat_params, lin_elastic_params=None):

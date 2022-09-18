@@ -5,12 +5,26 @@ import jax.numpy.linalg as jnpla
 import numpy as onp
 import logging
 
+from functools import partial
+
 from varmintv2.geometry.elements import Element
 from varmintv2.physics.constitutive import PhysicsModel
 from varmintv2.utils.typing import ArrayND
 
 import jax.experimental.host_callback as hcb
 
+# @partial(jnp.vectorize, signature='(n,m),(m,k)->(n,k)')
+# def twodimsolve(A, B):
+#     A_det = (A[0, 0] * A[1, 1] - A[0, 1] * A[1, 0])
+#     A_inv = 1. / A_det * jnp.array([
+#         [A[1, 1], -A[0, 1]],
+#         [-A[1, 0], A[0, 0]]
+#     ])
+
+#     return A_inv @ B
+
+def twodimsolve(A, B):
+    return jnpla.solve(A, B)
 
 def generate_strain_energy_fn(element: Element,
                               material: PhysicsModel,
@@ -24,7 +38,7 @@ def generate_strain_energy_fn(element: Element,
     vmap_energy_fn = jax.vmap(energy_fn, in_axes=(0,))
 
     defgrads_fn = jax.vmap(
-        lambda A, B: jnpla.solve(B.T, A.T).T,
+        lambda A, B: twodimsolve(B.T, A.T).T,
         in_axes=(0, 0),
     )
 
@@ -58,7 +72,7 @@ def generate_stress_fn(element: Element,
     vmap_stress_fn = jax.vmap(stress_fn, in_axes=(0,))
 
     defgrads_fn = jax.vmap(
-        lambda A, B: jnpla.solve(B.T, A.T).T,
+        lambda A, B: twodimsolve(B.T, A.T).T,
         in_axes=(0, 0),
     )
 
@@ -111,7 +125,8 @@ def generate_total_energy_fn(element: Element, material: PhysicsModel):
     jac_dets_fn = jax.vmap(jnpla.det, in_axes=(0,))
 
     defgrads_fn = jax.vmap(
-        lambda A, B: jnpla.solve(B.T, A.T).T,
+        #lambda A, B: jnpla.solve(B.T, A.T).T,
+        lambda A, B: twodimsolve(B.T, A.T).T,
         in_axes=(0, 0),
     )
 
