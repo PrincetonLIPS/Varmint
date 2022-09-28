@@ -17,6 +17,8 @@ import experiment_utils as eutils
 from mpi_utils import *
 from pore_shape_targets import get_shape_target_generator
 
+import tensorflow_datasets as tfds
+
 import numpy.random as npr
 import numpy as onp
 import jax.numpy as np
@@ -31,13 +33,15 @@ from mpi4py import MPI
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(SCRIPT_DIR))
 
-from construct_pore_shape_shape import generate_pore_shapes_geometry, generate_bertoldi_radii, generate_circular_radii, generate_rectangular_radii
+from construct_digital_mnist_shape import generate_digital_mnist_shape, generate_bertoldi_radii, generate_circular_radii, generate_rectangular_radii
 from varmintv2.geometry.elements import Patch2D
 from varmintv2.geometry.geometry import Geometry, SingleElementGeometry
 from varmintv2.physics.constitutive import NeoHookean2D, LinearElastic2D, NeoHookean2DClamped
 from varmintv2.physics.materials import Material
 from varmintv2.utils.movie_utils import create_movie, create_static_image, plot_ctrl
 from varmintv2.solver.optimization_speed import SparseNewtonIncrementalSolver
+
+import varmintv2.geometry.bsplines as bsplines
 
 import optax
 import haiku as hk
@@ -46,13 +50,16 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 import jaxboard
 
+import digital_mnist_patches
+from digital_mnist_movie_utils import create_movie_mnist
+
 
 FLAGS = flags.FLAGS
 eutils.prepare_experiment_args(
     None, exp_root='/n/fs/mm-iga/Varmint/nma_mpi/experiments',
             source_root='n/fs/mm-iga/Varmint/nma_mpi')
 
-config_flags.DEFINE_config_file('config', 'config/pore_shapes/default.py')
+config_flags.DEFINE_config_file('config', 'config/digital_mnist_finetune/default.py')
 
 
 class TPUMat(Material):
@@ -94,8 +101,8 @@ def main(argv):
     else:
         raise ValueError('Incorrect material model')
 
-    cell, radii_to_ctrl_fn, n_cells, get_central_pore_points, init_central_radii, init_mesh_perturb = \
-        generate_pore_shapes_geometry(config, mat)
+    cell, radii_to_ctrl_fn, n_cells = \
+        generate_digital_mnist_shape(config, mat)
 
     init_radii = np.concatenate(
         (
@@ -103,7 +110,6 @@ def main(argv):
             #generate_circular_radii((n_cells,), config.ncp),
         )
     )
-    all_init_radii = (init_radii, init_central_radii, init_mesh_perturb)
     rprint(f'radii: {init_radii.shape}', comm=comm)
 
     potential_energy_fn = cell.get_potential_energy_fn()
@@ -118,9 +124,22 @@ def main(argv):
 
     l2g, g2l = cell.get_global_local_maps()
 
-    ref_ctrl = radii_to_ctrl_fn(*all_init_radii)
+    ref_ctrl = radii_to_ctrl_fn(init_radii)
     fixed_locs = cell.fixed_locs_from_dict(ref_ctrl, {})
     tractions = cell.tractions_from_dict({})
+
+    # Initialize the color controls
+    n_patches = ref_ctrl.shape[0]
+    init_color_controls = np.zeros((n_patches, config.ncp, config.ncp, 1))
+    color_eval_pts = bsplines.mesh(
+            np.linspace(1e-4, 1-1e-4, 5 * config.ncp),
+            np.linspace(1e-4, 1-1e-4, 5 * config.ncp))
+
+    color_eval_pts = color_eval_pts.reshape((-1, 2))
+    color_eval_fn = jax.jit(jax.vmap(cell.element.get_map_fn(color_eval_pts)), device=jax.devices()[dev_id])
+
+    all_points_dict = digital_mnist_patches.get_all_points_dict(
+            5, config.cell_size, config.border_size)
 
     if config.mat_model == 'NeoHookean2D':
         mat_params = (
@@ -158,16 +177,16 @@ def main(argv):
     x0 = l2g(ref_ctrl, ref_ctrl)
     optimize = optimizer.get_optimize_fn()
 
-    def _radii_to_ref_and_init_x(radii, central_radii, mesh_perturb):
-        ref_ctrl = radii_to_ctrl_fn(radii, central_radii, mesh_perturb)
+    def _radii_to_ref_and_init_x(radii):
+        ref_ctrl = radii_to_ctrl_fn(radii)
         init_x = l2g(ref_ctrl, ref_ctrl)
         return ref_ctrl, init_x
-    
+
     radii_to_ref_and_init_x = jax.jit(_radii_to_ref_and_init_x, device=jax.devices()[dev_id])
     fixed_locs_from_dict = jax.jit(cell.fixed_locs_from_dict, device=jax.devices()[dev_id])
 
-    def simulate(disps, radii, internal_radii, mesh_perturb):
-        ref_ctrl, current_x = radii_to_ref_and_init_x(radii, internal_radii, mesh_perturb)
+    def simulate(disps, radii):
+        ref_ctrl, current_x = radii_to_ref_and_init_x(radii)
 
         increment_dict = config.get_increment_dict(disps)
         current_x, all_xs, all_fixed_locs, _ = optimize(
@@ -176,155 +195,113 @@ def main(argv):
         return current_x, (np.stack(all_xs, axis=0), np.stack(all_fixed_locs, axis=0), None)
 
     nn_fn = config.get_nn_fn(
-            config.max_disp, config.n_layers, config.n_activations, config.n_disps)
-    central_pore_points = get_central_pore_points(ref_ctrl)
+            config.max_disp, config.n_disps)
 
-    def normalize_pore_shape(cps):
-        center = np.mean(cps, axis=0)
-        cps = cps - center
-        norm = np.mean(np.linalg.norm(cps, axis=-1))
-
-        return cps / norm
-
-    def min_dist_rotation_reindexing(normed1, normed2, rotation=True, norm=None):
-        """Factor out rotation (using Procrustes 2-D) and reindexing."""
-
-        @partial(jax.vmap, in_axes=(None, 0), out_axes=0)
-        def min_rotation_angle(cp1, cp2):
-            # Find best angle of rotation from cp2 to cp1
-            numer = np.sum(cp2[:, 0] * cp1[:, 1] - cp2[:, 1] * cp1[:, 0])
-            denom = np.sum(cp2[:, 0] * cp1[:, 0] + cp2[:, 1] * cp1[:, 1])
-
-            theta = np.arctan(numer / denom)
-
-            rot_mat = np.array([
-                [np.cos(theta), -np.sin(theta)],
-                [np.sin(theta),  np.cos(theta)]
-            ])
-
-            return (rot_mat @ cp2.T).T
-
-        n_points = normed2.shape[0]
-        indices = (np.arange(n_points).reshape(1, -1) + np.arange(n_points).reshape(-1, 1)) % n_points
-        all_reindexed_normed2 = normed2[indices]
-
-        if rotation:
-            all_reindexed_normed2_rotated = min_rotation_angle(normed1, all_reindexed_normed2)
-        else:
-            all_reindexed_normed2_rotated = all_reindexed_normed2
-
-        # Consider pairwise differences, take sum over all points, and find min index rotation.
-        min_index = np.argmin(
-            np.mean(
-                np.linalg.norm(all_reindexed_normed2_rotated - normed1, axis=-1, ord=norm), axis=-1))
-        min_dist = np.min(
-            np.mean(
-                np.linalg.norm(all_reindexed_normed2_rotated - normed1, axis=-1, ord=norm), axis=-1))
-
-        return min_dist, all_reindexed_normed2_rotated[min_index]
-
-    n_interior = central_pore_points.shape[0]
     nn_fn_t = hk.transform(nn_fn)
     nn_fn_t = hk.without_apply_rng(nn_fn_t)
     rng = jax.random.PRNGKey(22)
-    dummy_displacements = central_pore_points.flatten()
+    dummy_displacements = np.zeros((1, 28, 28, 1))
     init_nn_params = nn_fn_t.init(rng, dummy_displacements)
 
-    rprint('NMA Neural Network:', comm=comm)
-    rprint(hk.experimental.tabulate(nn_fn_t)(dummy_displacements), comm=comm)
+    with open(config.nn_checkpoint, 'rb') as f:
+        pretrained_nn_params = pickle.load(f)
 
-    shape_generator = get_shape_target_generator(
-            config.shape_family, n_interior, config.shape_parameters)
-    fixed_target_shape = shape_generator()
+    with open(config.material_checkpoint, 'rb') as f:
+        curr_all_params, _, _, _ = pickle.load(f)
+        _, curr_radii, curr_color_controls = curr_all_params
 
-    if config.debug_single_shape:
-        rprint('Fixing target shape (DEBUGGING ONLY).', comm=comm)
-        assert comm.Get_size() == 1, 'Fixed target shape meant for debugging only.'
-        shape_generator = lambda: fixed_target_shape
+    #last_layer_w_init = np.zeros((10, config.n_disps)) + 1e-5
+    #pretrained_nn_params['linear_3'] = {}
+    #pretrained_nn_params['linear_3']['w'] = last_layer_w_init
 
-    # Visualize dataset
-    if comm.rank == 0:
-        fig, ax = plt.subplots(config.num_ds_samples, 2)
-        fig.set_size_inches(10, 5 * config.num_ds_samples)
-        for i in range(config.num_ds_samples):
-            target_shape = shape_generator()
-            normalized_target_shape = normalize_pore_shape(target_shape)
+    #init_nn_params = pretrained_nn_params
 
-            # Plot target shape
-            ax[i][0].scatter(target_shape[:, 0], target_shape[:, 1])
-            ax[i][0].scatter(target_shape[0, 0], target_shape[0, 1], c='red')
-            ax[i][0].set_aspect('equal')
+    def eval_color_score(pts, other_pts, other_pts_colors):
+        width = 1.0
 
-            ax[i][1].scatter(normalized_target_shape[:, 0], normalized_target_shape[:, 1])
-            ax[i][1].scatter(normalized_target_shape[0, 0], normalized_target_shape[0, 1], c='red')
-            ax[i][1].set_aspect('equal')
+        pts = pts.reshape(-1, 1, 2)
+        other_pts = other_pts.reshape(1, -1, 2)
 
-            target_image_path = os.path.join(
-                args.exp_dir,
-                f'sim-{args.exp_name}-fixed_target.png')
-            fig.savefig(target_image_path)
-    rprint('Generated shape dataset samples.', comm=comm)
+        inv_dists = 1. / np.maximum(np.linalg.norm(pts - other_pts, axis=-1), 1e-5)
+        softmax = jax.nn.softmax(config.softmax_temp * inv_dists)
+        return np.mean(np.sum(other_pts_colors * softmax, axis=-1))
 
-    def loss_fn(all_params, cps):
-        normalized_target_cps = normalize_pore_shape(cps)
+    digits_to_segments = [
+            (['1', '2', '3', '4', '5', '7'], ['6']),  # 0
+            (['3', '4'], ['1', '2', '5', '6', '7']),  # 1
+            (['1', '4', '5', '6', '7'], ['2', '3']),  # 2
+            (['3', '4', '5', '6', '7'], ['1', '2']),  # 3
+            (['2', '3', '4', '6'], ['1', '5', '7']),  # 4
+            (['2', '3', '5', '6', '7'], ['1', '4']),  # 5
+            (['1', '2', '3', '5', '6', '7'], ['4']),  # 6
+            (['3', '4', '7'], ['1', '2', '5', '6']),  # 7
+            (['1', '2', '3', '4', '5', '6', '7'], []),  # 8
+            (['2', '3', '4', '6', '7'], ['1', '5']),  # 9
+    ]
 
-        nn_params, (radii, internal_radii, mesh_perturb) = all_params
+    def loss_fn(all_params, ds_element):
+        nn_params, radii, color_params = all_params
+        digit = ds_element['label']
+        color_params = jax.nn.sigmoid(color_params)
+        if config.freeze_colors:
+            color_params = jax.lax.stop_gradient(color_params)
         if config.freeze_radii:
             radii = jax.lax.stop_gradient(radii)
-            internal_radii = jax.lax.stop_gradient(internal_radii)
         if config.freeze_nn:
-            mat_inputs = np.ones_like(central_pore_points.flatten()) * config.freeze_nn_val
+            mat_inputs = np.ones(config.n_disps) * config.freeze_nn_val
         else:
-            mat_inputs = nn_fn_t.apply(nn_params, normalized_target_cps.flatten())
-
-        if not config.perturb_mesh:
-            mesh_perturb = jax.lax.stop_gradient(mesh_perturb)
+            mat_inputs = nn_fn_t.apply(
+                    nn_params, ds_element['image'].reshape(1, 28, 28, 1)).squeeze()
+            #mat_inputs = nn_params[digit]
 
         final_x, (all_xs, all_fixed_locs, all_strain_energies) = simulate(
-                mat_inputs, radii, internal_radii, mesh_perturb)
-        final_x_local = g2l(final_x, all_fixed_locs[-1], radii_to_ctrl_fn(radii, internal_radii, mesh_perturb))
-        our_cps = get_central_pore_points(final_x_local)
-        normalized_our_cps = normalize_pore_shape(our_cps)
+                mat_inputs, radii)
+        final_x_local = g2l(final_x, all_fixed_locs[-1], radii_to_ctrl_fn(radii))
+
+        other_pts_locs = color_eval_fn(final_x_local).reshape(-1, 2)
+        other_pts_colors = color_eval_fn(color_params).flatten()
+
+        pos_segments, neg_segments = digits_to_segments[digit]
+        pos_segment_pts = [all_points_dict[s] for s in pos_segments]
+
+        pos_segment_score = \
+                sum(1 - eval_color_score(s, other_pts_locs, other_pts_colors) \
+                        for s in pos_segment_pts)
+
+        if digit != 8:
+            neg_segment_pts = [all_points_dict[s] for s in neg_segments]
+            neg_segment_score = \
+                    sum(eval_color_score(s, other_pts_locs, other_pts_colors) \
+                            for s in neg_segment_pts)
 
         if config.radii_smoothness_penalty > 0.0:
             outer_smoothness_penalty = np.mean(np.square(np.diff(radii, axis=-1)))
-            internal_smoothness_penalty = np.mean(np.square(np.diff(internal_radii)))
-            total_smoothness_penalty = config.radii_smoothness_penalty * (outer_smoothness_penalty + internal_smoothness_penalty)
+            total_smoothness_penalty = \
+                    config.radii_smoothness_penalty * outer_smoothness_penalty
         else:
             total_smoothness_penalty = 0.0
 
-        if config.loss_type == 'mse':
-            return np.mean(np.linalg.norm(normalized_target_cps - normalized_our_cps, axis=-1)) + total_smoothness_penalty
-        elif config.loss_type == 'mse_rotation':
-            min_dist, _ = min_dist_rotation_reindexing(
-                    normalized_target_cps, normalized_our_cps, norm=config.loss_norm)
-            return min_dist + total_smoothness_penalty
-        elif config.loss_type == 'mse_reindex':
-            min_dist, _ = min_dist_rotation_reindexing(
-                    normalized_target_cps, normalized_our_cps, rotation=False, norm=config.loss_norm)
-            return min_dist + total_smoothness_penalty
-        elif config.loss_type == 'argmin':
-            normalized_target_cps = normalized_target_cps.reshape(-1, 1, 2)
-            normalized_our_cps = normalized_our_cps.reshape(1, -1, 2)
-
-            dists = np.linalg.norm(normalized_target_cps - normalized_our_cps, axis=-1)
-            return np.mean(np.argmin(dists, axis=-1)) + total_smoothness_penalty
+        if digit != 8:
+            return neg_segment_score + pos_segment_score
+        else:
+            return pos_segment_score
 
     rprint(f'Starting NMA optimization...', comm=comm)
 
     mpi_size = comm.Get_size()
     lr = config.lr * mpi_size
 
-    nn_optimizer = optax.adam(lr)
-    geometry_optimizer = optax.adam(lr * config.geometry_lr_multiplier)
-
-    param_labels = ('nn_radii', ('nn_radii', 'nn_radii', 'geometry'))
-    optimizer = optax.multi_transform(
-            {'nn_radii': nn_optimizer, 'geometry': geometry_optimizer},
-            param_labels)
+    optimizer = optax.adam(lr)
 
     all_losses = []
-    curr_all_params = (init_nn_params, all_init_radii)
+
+    #with open(config.material_checkpoint, 'rb') as f:
+    #    curr_all_params, _, _, _ = pickle.load(f)
+    #    _, curr_radii, curr_color_controls = curr_all_params
+    if config.init_from_ckpt:
+        curr_all_params = (pretrained_nn_params, curr_radii, curr_color_controls)
+    else:
+        curr_all_params = (init_nn_params, init_radii, init_color_controls)
 
     # If reload is set, reload either the last checkpoint or the specified
     # args.load_iter. Otherwise start from scratch.
@@ -359,6 +336,15 @@ def main(argv):
 
     loss_val_and_grad = jax.value_and_grad(loss_fn)
 
+    split = 'train'
+    train_ds = tfds.load("mnist:3.*.*", split=split).cache().repeat()
+    train_ds = train_ds.shuffle(1000, seed=2)
+    train_iterator = iter(tfds.as_numpy(train_ds))
+
+    split = 'test'
+    test_ds = tfds.load("mnist:3.*.*", split=split).cache().repeat()
+    test_iterator = iter(tfds.as_numpy(test_ds))
+
     ewa_loss = None
     ewa_weight = 0.95
 
@@ -366,11 +352,12 @@ def main(argv):
     rprint(f'All processes at barrier.', comm=comm)
     for i in range(iter_num + 1, 100000):
         iter_time = time.time()
-        target_disps = onp.zeros((mpi_size, n_interior, 2))
-        for j in range(mpi_size):
-            target = shape_generator()
-            target_disps[j] = target
-        loss, grad_loss = loss_val_and_grad(curr_all_params, target_disps[comm.rank])
+
+        ds_elements = []
+        for _ in range(mpi_size):
+            ds_elements.append(next(train_iterator))
+
+        loss, grad_loss = loss_val_and_grad(curr_all_params, ds_elements[comm.rank])
         avg_loss = pytree_reduce(comm, loss, scale=1./mpi_size)
         avg_grad_loss = pytree_reduce(comm, grad_loss, scale=1./mpi_size)
         step_time = time.time() - iter_time
@@ -393,18 +380,29 @@ def main(argv):
 
         updates, opt_state = optimizer.update(avg_grad_loss, opt_state)
         curr_all_params = optax.apply_updates(curr_all_params, updates)
-        curr_nn_params, (curr_radii, curr_internal_radii, curr_mesh_perturb) = curr_all_params
+        curr_nn_params, curr_radii, curr_color_controls = curr_all_params
+
+        if config.freeze_pretrain:
+            pass
+            #init_nn_params['linear_3']['w'] = curr_nn_params['linear_3']['w']
+            #curr_nn_params = init_nn_params
+
+        #rprint(f'NN params: {jax.tree_util.tree_map(lambda x: np.linalg.norm(x), curr_nn_params)}', comm=comm)
+
         curr_radii = np.clip(curr_radii, config.radii_range[0], config.radii_range[1])
-        curr_internal_radii = np.clip(curr_internal_radii, config.internal_radii_clip[0], config.internal_radii_clip[1])
-        curr_mesh_perturb = np.clip(curr_mesh_perturb, config.cell_length * config.mesh_perturb_range[0], config.cell_length * config.mesh_perturb_range[1])
-        curr_all_params = curr_nn_params, (curr_radii, curr_internal_radii, curr_mesh_perturb)
+        curr_all_params = curr_nn_params, curr_radii, curr_color_controls
 
         # Saving figure after every iteration.
-        curr_ref_ctrl = radii_to_ctrl_fn(curr_radii, curr_internal_radii, curr_mesh_perturb)
+        curr_ref_ctrl = radii_to_ctrl_fn(curr_radii)
         fig, ax = plt.subplots(1, 1)
         fig.set_size_inches(10, 10)
 
         plot_ctrl(ax, cell.element, curr_ref_ctrl)
+        color_locs = color_eval_fn(curr_ref_ctrl)
+        colors = color_eval_fn(jax.nn.sigmoid(curr_color_controls))
+        ax.scatter(color_locs[..., 0], color_locs[..., 1], c=colors, s=7)
+
+        digital_mnist_patches.draw_mpl_patches(ax, config.cell_size, config.border_size)
         ax.set_aspect('equal')
 
         target_image_path = os.path.join(
@@ -429,68 +427,53 @@ def main(argv):
             # Generate video
             if comm.rank == 0:
                 rprint(f'Generating image and video with optimization so far.', comm=comm)
-                fig, ax = plt.subplots(config.num_eval, 4)
-                fig.set_size_inches(20, 5 * config.num_eval)
 
-                for trial in range(config.num_eval):
-                    curr_nn_params, (curr_radii, curr_internal_radii, curr_mesh_perturb) = curr_all_params
-                    target = shape_generator()
-                    normalized_target_cps = normalize_pore_shape(target)
-                    if config.freeze_nn:
-                        mat_inputs = np.ones_like(central_pore_points.flatten()) * config.freeze_nn_val
-                    else:
-                        mat_inputs = nn_fn_t.apply(curr_nn_params, normalized_target_cps.flatten())
-                    curr_ref_ctrl = radii_to_ctrl_fn(curr_radii, curr_internal_radii, curr_mesh_perturb)
+                fig, ax = plt.subplots(config.num_trials, 2)
+                fig.set_size_inches(2 * 10, config.num_trials * 10)
+                for trial in range(config.num_trials):
+                    ds_element = next(test_iterator)
+                    curr_nn_params, curr_radii, curr_color_controls = curr_all_params
+                    mat_inputs = nn_fn_t.apply(
+                            curr_nn_params, ds_element['image'].reshape(1, 28, 28, 1)).squeeze()
+                    curr_ref_ctrl = radii_to_ctrl_fn(curr_radii)
 
                     optimized_curr_g_pos, (all_displacements, all_fixed_locs, _) = \
-                            simulate(mat_inputs, curr_radii, curr_internal_radii, curr_mesh_perturb)
-                    final_x_local = g2l(optimized_curr_g_pos, all_fixed_locs[-1], radii_to_ctrl_fn(curr_radii, curr_internal_radii, curr_mesh_perturb))
-                    our_cps = get_central_pore_points(final_x_local)
-                    normalized_our_cps = normalize_pore_shape(our_cps)
-                    _, min_dist_curve = min_dist_rotation_reindexing(
-                            normalized_target_cps, normalized_our_cps)
+                            simulate(mat_inputs, curr_radii)
+                    final_x_local = g2l(
+                            optimized_curr_g_pos, all_fixed_locs[-1], radii_to_ctrl_fn(curr_radii))
+
+                    ax[trial][0].imshow(ds_element['image'])
+                    plot_ctrl(ax[trial][1], cell.element, final_x_local)
+                    color_locs = color_eval_fn(final_x_local)
+                    colors = color_eval_fn(jax.nn.sigmoid(curr_color_controls))
+                    ax[trial][1].scatter(color_locs[..., 0], color_locs[..., 1], c=colors, s=7)
+
+                    digital_mnist_patches.draw_mpl_patches(ax[trial][1], config.cell_size, config.border_size, alpha=1.0)
+                    ax[trial][1].set_aspect('equal')
 
                     all_velocities = np.zeros_like(all_displacements)
                     all_fixed_vels = np.zeros_like(all_fixed_locs)
 
-                    # Plot target shape
-                    ax[trial][0].scatter(normalized_target_cps[:, 0], normalized_target_cps[:, 1], c='blue', label='target')
-                    ax[trial][0].scatter(normalized_target_cps[0, 0], normalized_target_cps[0, 1], c='red')
-
-                    ax[trial][0].scatter(min_dist_curve[:, 0], min_dist_curve[:, 1], c='orange', label='ours')
-                    ax[trial][0].scatter(min_dist_curve[0, 0], min_dist_curve[0, 1], c='purple')
-
-                    ax[trial][0].set_aspect('equal')
-                    ax[trial][0].legend()
-
-                    ax[trial][1].bar(np.arange(config.n_disps), mat_inputs)
-
-                    plot_ctrl(ax[trial][2], cell.element,
-                              g2l(optimized_curr_g_pos, all_fixed_locs[-1],
-                                  radii_to_ctrl_fn(curr_radii, curr_internal_radii, curr_mesh_perturb)))
-                    ax[trial][2].set_aspect('equal')
-
-                    plot_ctrl(ax[trial][3], cell.element, curr_ref_ctrl)
-                    ax[trial][3].set_aspect('equal')
-
                     # Visualize incremental displacement movie.
                     ctrl_seq, _ = cell.unflatten_dynamics_sequence(
                         all_displacements, all_velocities, all_fixed_locs,
-                        all_fixed_vels, radii_to_ctrl_fn(curr_radii, curr_internal_radii, curr_mesh_perturb))
+                        all_fixed_vels, radii_to_ctrl_fn(curr_radii))
 
                     vid_path = os.path.join(
                             args.exp_dir,
                             f'sim-{args.exp_name}-optimized-{i}-trial-{trial}.mp4')
-                    create_movie(cell.element, ctrl_seq, vid_path, comet_exp=None)
-
-                summary_writer.plot(f'static_target', plt, step=i, close_plot=False)
-                summary_writer.flush()
+                    create_movie_mnist(
+                            config, cell.element, ctrl_seq,
+                            vid_path, curr_color_controls, color_eval_fn)
 
                 target_image_path = os.path.join(
                     args.exp_dir,
-                    f'sim-{args.exp_name}-optimized-{i}-static-trials.png')
+                    f'sim-{args.exp_name}-optimized-{i}-static-trials-config.png')
                 fig.savefig(target_image_path)
                 plt.close(fig)
+
+                summary_writer.plot(f'static_target', plt, step=i, close_plot=False)
+                summary_writer.flush()
 
                 # Plot losses
                 loss_curve_path = os.path.join(

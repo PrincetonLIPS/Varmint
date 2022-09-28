@@ -12,15 +12,10 @@ from scipy.sparse import csr_matrix, csc_matrix, kron, save_npz
 from scipy.sparse.csgraph import connected_components, dijkstra
 from scipy.spatial import KDTree
 
-import sys
-import os
-sys.path.append(os.path.dirname('/n/fs/mm-iga/Varmint/varmintv2'))
 from varmintv2.geometry import elements
 from varmintv2.geometry import bsplines
 from varmintv2.geometry.geometry import SingleElementGeometry
 from varmintv2.physics.constitutive import PhysicsModel
-
-from mpi4py import MPI
 
 
 class ShapeUnit2D(object):
@@ -59,22 +54,18 @@ class UnitCell2D(ShapeUnit2D):
         return np.array(init_radii)
 
     @staticmethod
-    def _gen_cell_edge(center, radial_ncp, corner1, corner2, radii, normalized=False):
+    def _gen_cell_edge(center, corner1, corner2, radii):
         num_ctrl = len(radii)
 
         right_perim = jnp.linspace(corner1, corner2, num_ctrl)
-        if not normalized:
-            left_perim = radii[:, jnp.newaxis] * (right_perim - center) + center
-        else:
-            left_perim = radii[:, jnp.newaxis] * \
-                (right_perim - center) / jnp.linalg.norm(right_perim - center, axis=-1)[:, jnp.newaxis] + center
+        left_perim = radii[:, jnp.newaxis] * (right_perim - center) + center
 
-        ctrl = jnp.linspace(left_perim, right_perim, radial_ncp)
+        ctrl = jnp.linspace(left_perim, right_perim, num_ctrl)
 
         return ctrl
 
     @staticmethod
-    def _gen_cell(corners, radial_ncp, radii, normalized=False):
+    def _gen_cell(corners, radii):
         sides = corners.shape[0]
         num_ctrl = (len(radii) // sides) + 1
         centroid = jnp.mean(corners, axis=0)
@@ -90,18 +81,16 @@ class UnitCell2D(ShapeUnit2D):
 
             new_ctrl = UnitCell2D._gen_cell_edge(
                 centroid,
-                radial_ncp,
                 corner1,
                 corner2,
                 jnp.take(radii, indices, mode='wrap'),
-                normalized,
             )
 
             ctrl.append(new_ctrl)
 
         return jnp.stack(ctrl, axis=0)
 
-    def __init__(self, corners, ncp, radial_ncp, patch_offset, side_labels=None, radii=None):
+    def __init__(self, corners, ncp, patch_offset, side_labels=None, radii=None):
         if radii is None:
             radii = UnitCell2D._gen_random_radii(ncp)
 
@@ -112,12 +101,11 @@ class UnitCell2D(ShapeUnit2D):
             self.side_labels = side_labels
 
         self.ncp = ncp
-        self.radial_ncp = radial_ncp
         self.corners = corners
-        self.ctrl = UnitCell2D._gen_cell(corners, radial_ncp, radii)
+        self.ctrl = UnitCell2D._gen_cell(corners, radii)
         n_all_ctrl = self.ctrl.size // self.ctrl.shape[-1]
         self.indices = np.arange(n_all_ctrl).reshape(self.ctrl.shape[:-1])
-        self.ctrl_offset = patch_offset * ncp * radial_ncp
+        self.ctrl_offset = patch_offset * ncp * ncp
         self.patch_offset = patch_offset
 
         self.n_patches = 4
@@ -151,7 +139,7 @@ class UnitCell2D(ShapeUnit2D):
             raise ValueError(f'Invalid side {side}')
 
     def get_side_index_array(self, side, global_n_patches):
-        ind_array = np.zeros((global_n_patches, self.radial_ncp, self.ncp))
+        ind_array = np.zeros((global_n_patches, self.ncp, self.ncp))
 
         if side == 'top':
             ind_array[self.patch_offset + 1, -1, :] = 1
@@ -252,18 +240,78 @@ class UnitSquare2D(ShapeUnit2D):
         return ind_array
 
 
-def generate_pore_shapes_geometry(config, material):
-    patch_ncp = config.ncp
-    radial_ncp = config.radial_ncp
-    quad_degree = config.quad_deg
-    spline_degree = config.spline_deg
+def get_connectivity_matrix(num_x, num_y, arr2lin, units, global_ctrl):
+    n_cp = global_ctrl.size // global_ctrl.shape[-1]
+    unflat_indices = np.arange(n_cp).reshape(global_ctrl.shape[:-1])
 
-    xknots = bsplines.default_knots(spline_degree, radial_ncp)
+    row_inds = []
+    col_inds = []
+
+    # Handle internal constraints for each unit
+    for u in units:
+        new_row, new_col = u.compute_internal_constraints()
+        row_inds.append(new_row)
+        col_inds.append(new_col)
+
+    # Handle the constraints between cells
+    for x in range(num_x):
+        for y in range(num_y):
+            if (x, y) not in arr2lin:
+                continue
+
+            this_unit = units[arr2lin[(x, y)]]
+            if x > 0 and (x-1, y) in arr2lin:
+                # Handle constraint with left
+                that_unit = units[arr2lin[(x-1, y)]]
+                side1 = this_unit.get_side_indices('left')
+                side2 = that_unit.get_side_indices('right')
+
+                row_inds.append(side1)
+                col_inds.append(side2)
+
+            if y > 0 and (x, y-1) in arr2lin:
+                # Handle constraint with bottom
+                that_unit = units[arr2lin[(x, y-1)]]
+                side1 = this_unit.get_side_indices('bottom')
+                side2 = that_unit.get_side_indices('top')
+
+                row_inds.append(side1)
+                col_inds.append(side2)
+
+            if x < num_x - 1 and (x+1, y) in arr2lin:
+                # Handle constraint with right
+                that_unit = units[arr2lin[(x+1, y)]]
+                side1 = this_unit.get_side_indices('right')
+                side2 = that_unit.get_side_indices('left')
+
+                row_inds.append(side1)
+                col_inds.append(side2)
+
+            if y < num_y - 1 and (x, y+1) in arr2lin:
+                # Handle constraint with top
+                that_unit = units[arr2lin[(x, y+1)]]
+                side1 = this_unit.get_side_indices('top')
+                side2 = that_unit.get_side_indices('bottom')
+
+                row_inds.append(side1)
+                col_inds.append(side2)
+
+    all_rows = np.concatenate(row_inds)
+    all_cols = np.concatenate(col_inds)
+
+    return unflat_indices, (all_rows, all_cols)
+
+
+def construct_cell2D(input_str, patch_ncp, quad_degree, spline_degree,
+                     material: PhysicsModel) -> Tuple[SingleElementGeometry, Callable, int]:
+    cell_length = 5  # TODO(doktay): This is arbitrary.
+
+    xknots = bsplines.default_knots(spline_degree, patch_ncp)
     yknots = bsplines.default_knots(spline_degree, patch_ncp)
 
     element = elements.Patch2D(xknots, yknots, spline_degree, quad_degree)
 
-    lines = [l.split(' ') for l in config.grid_str.strip().split('\n')[::-1]]
+    lines = [l.split(' ') for l in input_str.strip().split('\n')[::-1]]
     # Grid will be specified as cells or solid squares (maybe add other shapes in the future)
     # Each location has two characters: First is shape type, second is boundary condition class.
     # S - square, C - cell, 0 - empty
@@ -275,8 +323,8 @@ def generate_pore_shapes_geometry(config, material):
     # Let's transpose to be consistent with the way the code was written before
     cell_array = np.array(lines).T
 
-    widths = config.cell_length * np.ones(cell_array.shape[0])
-    heights = config.cell_length * np.ones(cell_array.shape[1])
+    widths = cell_length * np.ones(cell_array.shape[0])
+    heights = cell_length * np.ones(cell_array.shape[1])
 
     width_mesh = np.concatenate([np.array([0.0]), np.cumsum(widths)])
     height_mesh = np.concatenate([np.array([0.0]), np.cumsum(heights)])
@@ -312,7 +360,7 @@ def generate_pore_shapes_geometry(config, material):
                     unit = UnitSquare2D(corners, patch_ncp, npatches)
                 elif cell_array[i, j][0] == 'C':
                     # Construct a cell.
-                    unit = UnitCell2D(corners, patch_ncp, radial_ncp, npatches)
+                    unit = UnitCell2D(corners, patch_ncp, npatches)
                     corner_width_indices.append([i, i, i+1, i+1])
                     corner_height_indices.append([j, j+1, j+1, j])
                     n_cells += 1
@@ -321,34 +369,59 @@ def generate_pore_shapes_geometry(config, material):
 
                 npatches += unit.n_patches
                 units.append(unit)
-                ctrls.append(unit.ctrl.reshape(-1, radial_ncp, patch_ncp, 2))
+                ctrls.append(unit.ctrl.reshape(-1, patch_ncp, patch_ncp, 2))
                 arr2lin[(i, j)] = len(units) - 1
 
                 if cell_array[i, j][1] != '0':
                     group = cell_array[i, j][1]
-                    fixed.append((len(units)-1, 'left'))
-                    fixed_groups[group].append(
-                        (len(units)-1, 'left'))
+                    if group.isdigit():
+                        fixed.append((len(units)-1, 'left'))
+                        fixed_groups[group].append(
+                            (len(units)-1, 'left'))
+                    else:
+                        traction_groups[group].append(
+                            (len(units)-1, 'left'))
 
                 if cell_array[i, j][2] != '0':
                     group = cell_array[i, j][2]
-                    fixed.append((len(units)-1, 'top'))
-                    fixed_groups[group].append(
-                        (len(units)-1, 'top'))
+                    if group.isdigit():
+                        fixed.append((len(units)-1, 'top'))
+                        fixed_groups[group].append(
+                            (len(units)-1, 'top'))
+                    else:
+                        traction_groups[group].append(
+                            (len(units)-1, 'top'))
 
                 if cell_array[i, j][3] != '0':
                     group = cell_array[i, j][3]
-                    fixed.append((len(units)-1, 'right'))
-                    fixed_groups[group].append(
-                        (len(units)-1, 'right'))
+                    if group.isdigit():
+                        fixed.append((len(units)-1, 'right'))
+                        fixed_groups[group].append(
+                            (len(units)-1, 'right'))
+                    else:
+                        traction_groups[group].append(
+                            (len(units)-1, 'right'))
 
                 if cell_array[i, j][4] != '0':
                     group = cell_array[i, j][4]
-                    fixed.append((len(units)-1, 'bottom'))
-                    fixed_groups[group].append(
-                        (len(units)-1, 'bottom'))
+                    if group.isdigit():
+                        fixed.append((len(units)-1, 'bottom'))
+                        fixed_groups[group].append(
+                            (len(units)-1, 'bottom'))
+                    else:
+                        traction_groups[group].append(
+                            (len(units)-1, 'bottom'))
 
-    frame_ctrls = jnp.concatenate(ctrls, axis=0)
+    ctrls = jnp.concatenate(ctrls, axis=0)
+    #flat_ctrls = ctrls.reshape((-1, 2))
+    #kdtree = KDTree(flat_ctrls)
+    #constraints = kdtree.query_pairs(1e-10)
+    #constraints = np.array(list(constraints))
+    #constraints = (constraints[:, 0], constraints[:, 1])
+
+    # Now create index array from matching control points.
+    unflat_indices, constraints = get_connectivity_matrix(
+        num_x, num_y, arr2lin, units, ctrls)
 
     dirichlet_labels = {}
     for group in fixed_groups:
@@ -358,15 +431,29 @@ def generate_pore_shapes_geometry(config, material):
                 side, npatches) for (i, side) in sides)
         dirichlet_labels[group] = group_array
 
-    x_coor = num_x * config.cell_length
-    y_coor = num_y * config.cell_length
 
+    traction_labels = {}
+    for group in traction_groups:
+        sides = traction_groups[group]
+        traction_labels[group] = \
+            sum(units[i].get_side_orientation(side, npatches)
+                for (i, side) in sides)
 
     corner_groups = {}
-    corner_groups['99'] = np.sum(np.abs(frame_ctrls - np.array([x_coor, y_coor])), axis=-1) < 1e-14
-    corner_groups['98'] = np.sum(np.abs(frame_ctrls - np.array([x_coor, 0.0])), axis=-1) < 1e-14
-    corner_groups['97'] = np.sum(np.abs(frame_ctrls - np.array([0.0, y_coor])), axis=-1) < 1e-14
-    corner_groups['96'] = np.sum(np.abs(frame_ctrls - np.array([0.0, 0.0])), axis=-1) < 1e-14
+    #for g in range(1, num_y):
+    #    y_coor = cell_length * g
+    #    group_selection = \
+    #        np.sum(np.abs(ctrls - np.array([0.0, y_coor])), axis=-1) < 1e-14
+    #    corner_groups[str(g + 100)] = group_selection
+
+    x_coor = num_x * cell_length
+    y_coor = num_y * cell_length
+    #print(x_coor)
+    #print(y_coor)
+    corner_groups['99'] = np.sum(np.abs(ctrls - np.array([x_coor, y_coor])), axis=-1) < 1e-14
+    corner_groups['98'] = np.sum(np.abs(ctrls - np.array([x_coor, 0.0])), axis=-1) < 1e-14
+    corner_groups['97'] = np.sum(np.abs(ctrls - np.array([0.0, y_coor])), axis=-1) < 1e-14
+    corner_groups['96'] = np.sum(np.abs(ctrls - np.array([0.0, 0.0])), axis=-1) < 1e-14
 
     # Construct the radii_to_ctrl function for initialization of control points.
     all_corners = []
@@ -377,27 +464,16 @@ def generate_pore_shapes_geometry(config, material):
             all_indices.extend(
                 list(range(u.patch_offset, u.patch_offset + 4)))
 
-    all_dirichlet_labels = {**dirichlet_labels, **corner_groups}
-
-    internal_corners = total_mesh[config.internal_corners[:, 0], config.internal_corners[:, 1]]
-    init_central_radii = np.ones((patch_ncp-1)*config.internal_corners.shape[0]) * config.internal_radii
-    internal_ctrls = UnitCell2D._gen_cell(
-            internal_corners, radial_ncp, np.ones((patch_ncp-1)*config.internal_corners.shape[0]) * config.internal_radii, normalized=config.normalized_init)
-
-    # Augment the dirichlet_labels with the new control points.
-    for key in all_dirichlet_labels.keys():
-        all_dirichlet_labels[key] = np.concatenate((all_dirichlet_labels[key], np.zeros(internal_ctrls.shape[:-1])), axis=0)
-
-    # config.internal_corners is also the number of patches on the inside of the large pore.
-    internal_ctrls_indices = np.arange(frame_ctrls.shape[0], frame_ctrls.shape[0] + config.internal_corners.shape[0])
-
-    all_ctrls = jnp.concatenate((frame_ctrls, internal_ctrls), axis=0)
-
-    def get_central_pore_points(ctrl):
-        # Get last n patches
-        n_central_patches = config.internal_corners.shape[0]
-        last_ctrls = ctrl[-n_central_patches:]
-        return last_ctrls[:, 0, :-1].reshape(-1, 2)
+    # Case when we have no cells.
+    if len(all_corners) == 0:
+        return SingleElementGeometry(
+            element=element,
+            material=material,
+            init_ctrl=ctrls,
+            constraints=constraints,
+            dirichlet_labels={**dirichlet_labels, **corner_groups},
+            traction_labels=traction_labels
+        ), lambda _: ctrls, 0
 
     all_corners = np.stack(all_corners, axis=0)
     all_indices = np.array(all_indices)
@@ -406,47 +482,34 @@ def generate_pore_shapes_geometry(config, material):
     corner_height_indices = np.stack(corner_height_indices, axis=0)
     all_corners = total_mesh[corner_width_indices, corner_height_indices]
 
-    vmap_gencell = jax.vmap(UnitCell2D._gen_cell, in_axes=(0, None, 0))
+    vmap_gencell = jax.vmap(UnitCell2D._gen_cell)
 
     total_mesh = jnp.array(total_mesh)
     init_mesh_perturb = np.zeros_like(total_mesh[1:-1, 1:-1])
-    def radii_to_ctrl(radii, central_radii, mesh_perturb=None):
+    def radii_to_ctrl(radii, mesh_perturb=None):
         if mesh_perturb is not None:
             modified_total_mesh = total_mesh.at[1:-1, 1:-1].add(mesh_perturb)
         else:
             modified_total_mesh = total_mesh
 
         all_corners = modified_total_mesh[corner_width_indices, corner_height_indices]
-        internal_corners = modified_total_mesh[config.internal_corners[:, 0], config.internal_corners[:, 1]]
-
-        cell_ctrls = vmap_gencell(all_corners, radial_ncp, radii).reshape(
-            (-1, radial_ncp, patch_ncp, 2))
-        new_frame_ctrls = frame_ctrls.at[all_indices].set(cell_ctrls, indices_are_sorted=True)
-
-        new_internal_ctrls = UnitCell2D._gen_cell(internal_corners, radial_ncp, central_radii, normalized=config.normalized_init)
-        return jnp.concatenate((new_frame_ctrls, new_internal_ctrls), axis=0)
-
-    flat_ctrls = all_ctrls.reshape((-1, 2))
-
-    # Find all constraints with a KDTree. Should take O(n log n) time,
-    # and much preferable to manually constructing constraints.
-    #print('Finding constraints.')
-    kdtree = KDTree(flat_ctrls)
-    constraints = kdtree.query_pairs(1e-14)
-    constraints = np.array(list(constraints))
-    #print('\tDone.')
+        cell_ctrls = vmap_gencell(all_corners, radii).reshape(
+            (-1, patch_ncp, patch_ncp, 2))
+        return ctrls.at[all_indices].set(cell_ctrls, indices_are_sorted=True)
+        #return jax.ops.index_update(ctrls, all_indices, cell_ctrls,
+        #                            indices_are_sorted=True)
 
     return SingleElementGeometry(
         element=element,
         material=material,
-        init_ctrl=all_ctrls,
-        constraints=(constraints[:, 0], constraints[:, 1]),
-        dirichlet_labels=all_dirichlet_labels,
-        traction_labels={},
-        comm=MPI.COMM_WORLD,
-    ), radii_to_ctrl, n_cells, get_central_pore_points, init_central_radii, init_mesh_perturb
+        init_ctrl=ctrls,
+        constraints=constraints,
+        dirichlet_labels={**dirichlet_labels, **corner_groups},
+        traction_labels=traction_labels
+    ), radii_to_ctrl, n_cells, init_mesh_perturb
 
 
+# Some helper functions to generate radii
 def generate_random_radii(shape, patch_ncp, seed=None):
     npr.seed(seed)
     init_radii = npr.rand(*shape, (patch_ncp-1)*4)*0.7 + 0.15
@@ -475,4 +538,3 @@ def generate_bertoldi_radii(shape, patch_ncp, c1, c2, L0=5, phi0=0.5):
     init_radii = np.broadcast_to(
         np.tile(xs_theta, 4), (*shape, (patch_ncp-1)*4))
     return init_radii
-

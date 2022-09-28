@@ -7,6 +7,23 @@ import jax.numpy.linalg as npla
 from functools import partial
 
 
+def neohookean_energy2d_log_clamped(F, E, nu):
+    # Convert E and nu to shear and bulk
+    shear = E / (2*(1+nu))
+    bulk = E / (3*(1-2*nu))
+
+    I1 = np.trace(F.T @ F)
+    J = npla.det(F)
+
+    # Linear model when J < 0.01
+    linear_threshold = 0.001
+    def lin_log(x):
+        return np.log(linear_threshold) + (x - linear_threshold) / linear_threshold
+    return jax.lax.cond(J > linear_threshold,
+                        lambda: (shear/2) * (I1 - 2 - 2*np.log(J)) + (bulk/2)*np.log(J)**2,
+                        lambda: (shear/2) * (I1 - 2 - 2*lin_log(J)) + (bulk/2)*lin_log(J)**2)
+
+
 def neohookean_energy2d_log(F, E, nu):
     # Convert E and nu to shear and bulk
     shear = E / (2*(1+nu))
@@ -63,6 +80,25 @@ class LinearElastic2D(PhysicsModel):
     def get_energy_fn(self):
         return linear_elastic_energy2d
         #return partial(linear_elastic_energy2d, lmbda=self.lmbda, mu=self.mu)
+
+    @property
+    def density(self):
+        # TODO: How should this interact with third dimension?
+        return self._density
+
+
+class NeoHookean2DClamped(PhysicsModel):
+    def __init__(self, material, log=True, thickness=1):
+        """ thickness in cm """
+        self.material = material
+        self.log = log
+        self.thickness = thickness
+        self.shear = self.material.shear
+        self.bulk = self.material.bulk
+        self._density = self.material.density
+
+    def get_energy_fn(self):
+        return neohookean_energy2d_log_clamped
 
     @property
     def density(self):

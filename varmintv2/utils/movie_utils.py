@@ -429,6 +429,6 @@ def plot_ctrl(
             locs = jit_map_fn(patch_ctrl)
             # line, = ax.plot(locs[:,0], locs[:,1], 'b-')
             poly, = ax.fill(locs[:, 0], locs[:, 1],
-                            facecolor='orange',
-                            edgecolor='None',
+                            facecolor='lightsalmon',
+                            edgecolor='orangered',
                             linewidth=1)

@@ -26,7 +26,7 @@ from mpi4py import MPI
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(SCRIPT_DIR))
 
-from construct_nma_shape import construct_cell2D, generate_bertoldi_radii, generate_circular_radii, generate_rectangular_radii
+from construct_nma_shape_v1 import construct_cell2D, generate_bertoldi_radii, generate_circular_radii, generate_rectangular_radii
 from varmintv2.geometry.elements import Patch2D
 from varmintv2.geometry.geometry import Geometry, SingleElementGeometry
 from varmintv2.physics.constitutive import NeoHookean2D, LinearElastic2D
@@ -45,12 +45,12 @@ eutils.prepare_experiment_args(
     None, exp_root='/n/fs/mm-iga/Varmint/nma_mpi/experiments',
             source_root='n/fs/mm-iga/Varmint/nma_mpi')
 
-config_flags.DEFINE_config_file('config', 'config/default.py')
+config_flags.DEFINE_config_file('config', 'config/pointer/default.py')
 
 
 class TPUMat(Material):
     _E = 0.07
-    _nu = 0.46
+    _nu = 0.30
     _density = 1.25
 
 
@@ -126,12 +126,8 @@ def main(argv):
             '98': np.array([0.0, 0.0]),
             '97': np.array([0.0, 0.0]),
             '96': np.array([0.0, 0.0]),
-            '2': np.array([-disps[0], 0.0]),
-            #'3': np.array([0.0, 0.0]),
-            #'3': np.array([0.0, -disps[1]]),
-            '4': np.array([-disps[2], 0.0]),
-            #'5': np.array([0.0, 0.0]),
-            #'5': np.array([0.0, -disps[3]]),
+            '1': np.array([-disps[0], 0.0]),
+            '2': np.array([-disps[1], 0.0]),
         }
 
         current_x, all_xs, all_fixed_locs = optimize(current_x, increment_dict, tractions, ref_ctrl, mat_params)

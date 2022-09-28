@@ -157,7 +157,7 @@ class SparseNewtonIncrementalSolver:
         if self.preconditioner is None:
             data, row_indices, col_indptr = self.sparse_hess_construct(xk, args)
             sparse_hess = scipy.sparse.csc_matrix((data, row_indices, col_indptr))
-            self.preconditioner = scipy.sparse.linalg.spilu(sparse_hess)
+            self.preconditioner = scipy.sparse.linalg.splu(sparse_hess)
 
         if self.save_mats > 0 and self.saved_mats < self.save_mats:
             print('Saving mat to', os.path.join(self.save_mats_path, f'saved{self.saved_mats}.npz'))
@@ -178,7 +178,7 @@ class SparseNewtonIncrementalSolver:
             sparse_hess = scipy.sparse.csc_matrix((data, row_indices, col_indptr))
 
             try:
-                self.preconditioner = scipy.sparse.linalg.spilu(sparse_hess)
+                self.preconditioner = scipy.sparse.linalg.splu(sparse_hess)
             except RuntimeError as e:
                 print('Found singular matrix. Saving to disk.')
                 scipy.sparse.save_npz('singular_matrix.npz', sparse_hess)
@@ -236,11 +236,14 @@ class SparseNewtonIncrementalSolver:
                         return xk, False, fixed_locs
                     xk = xk + dx
 
-                while np.linalg.norm(g) > tol and total_inum < n_trial_iters:
+                while np.linalg.norm(g) > tol and inum < n_trial_iters:
                     dx = self.linear_solve(xk, args, g, solve_tol=tol)
-                    xk = xk + dx * step_size
 
-                    if np.isnan(self.loss_fun(xk, *args)) and step_size > min_step_size:
+                    test_loss = self.loss_fun(xk + dx * step_size, *args)
+                    if not np.isnan(test_loss):
+                        # Even if we find a step that doesn't get NaN, step 0.8 of the way there.
+                        xk = xk + dx * step_size * 0.8
+                    elif step_size > min_step_size:
                         xk = x0
                         inum = 0
                         step_size = step_size * step_size_anneal
@@ -256,6 +259,9 @@ class SparseNewtonIncrementalSolver:
                 return xk, success, fixed_locs
 
             while solved_increment < (1.0 - 1e-8):
+                if proposed_increment < 1e-4:
+                    print(f'WARNING: Existed at increment {solved_increment}.', flush=True)
+                    return x_inc, all_xs, all_fixed_locs, solved_increment
                 increment = min(1.0, solved_increment + proposed_increment)
                 if increment > tol_switch_threshold:
                     tol = self.tol
@@ -267,6 +273,8 @@ class SparseNewtonIncrementalSolver:
 
                 if success:
                     solved_increment = min(1.0, solved_increment + proposed_increment)
+                    #print(solved_increment, proposed_increment, flush=True)
+
                     #pbar.update(int(solved_increment * 100))
                     x_inc = xk
                     proposed_increment = proposed_increment * succ_mult
@@ -274,22 +282,24 @@ class SparseNewtonIncrementalSolver:
                     all_xs.append(x_inc)
                     all_fixed_locs.append(fixed_locs)
                 else:
+                    #print('not success', flush=True)
                     proposed_increment = proposed_increment * fail_mult
-                    #print(f'failed. new increment is {proposed_increment}')
+                    #print(f'failed. new increment is {proposed_increment}', flush=True)
 
             #pbar.close()
-            return x_inc, all_xs, all_fixed_locs
+            return x_inc, all_xs, all_fixed_locs, solved_increment
 
         def optimize_fwd(x0, increment_dict, tractions, ref_ctrl, mat_params, lin_elastic_params=None):
-            xk, all_xs, all_fixed_locs = optimize(x0, increment_dict, tractions, ref_ctrl, mat_params, lin_elastic_params)
-            #return (xk, success), (xk, args)
+            xk, all_xs, all_fixed_locs, solved_increment = optimize(x0, increment_dict, tractions, ref_ctrl, mat_params, lin_elastic_params)
+            fixed_displacements = jax.tree_util.tree_map(
+                lambda x: solved_increment * x, increment_dict)
 
-            return (xk, all_xs, all_fixed_locs), (xk, increment_dict, tractions, ref_ctrl, mat_params, lin_elastic_params)
+            return (xk, all_xs, all_fixed_locs, solved_increment), (xk, fixed_displacements, tractions, ref_ctrl, mat_params, lin_elastic_params)
 
         def optimize_bwd(res, g_all):
             #import pdb
             xk, increment_dict, tractions, ref_ctrl, mat_params, lin_elastic_params = res
-            (g, _, _) = g_all
+            (g, _, _, _) = g_all
             #pdb.set_trace()
 
             def preprocess(increment_dict, tractions, ref_ctrl, mat_params):
@@ -303,6 +313,7 @@ class SparseNewtonIncrementalSolver:
             adjoint = self.linear_solve(xk, args,  -g, solve_tol=self.tol)
             args_bar = self.adjoint_op(xk, adjoint, args)
             increment_dict_bar, tractions_bar, ref_ctrl_bar, mat_params_bar = f_vjp(args_bar)
+            #print('done')
             return None, increment_dict_bar, tractions_bar, ref_ctrl_bar, mat_params_bar, None
 
         optimize.defvjp(optimize_fwd, optimize_bwd)
