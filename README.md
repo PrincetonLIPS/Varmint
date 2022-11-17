@@ -1,18 +1,16 @@
 # Varmint
-Variational Material Integrator
+Formerly: The Variational Material Integrator
 
-Goal: A robust and differentiable simulator for the dynamics of large
-deformation continuum mechanics.  Should handle collisions and simple
-constraints, and ideally run on a GPU with 32-bit floats.
+A robust and differentiable simulator for the statics and dynamics of large
+deformation continuum mechanics, with a focus on designing Neuromechanical Autoencoders.
 
-Make testing a priority.
+Uses Automatic Differentiation as a first-class citizen. Optimization is done directly
+by computing gradients and sparse Hessians of the potential and kinetic energies.
+Differentiation through the nonlinear solver is carried out through adjoint methods.
 
-## Milestones
-* [completed] Simulate composite shapes in two dimensions using a variational integrator
-  of the Lagrangian.
-* Introduce adaptive time-stepping to improve performance and stability.
-* [completed] Implement the Hamiltonian variant of the variational integrator.
-* Extend to three dimensions.
-* ~~Implement collisions with external surfaces.~~
-* Implement self collisions.
-* Compute gradients through variational integrator.
+## Publications
+Neuromechanical Autoencoders: Learning to Couple Elastic and Neural Network Nonlinearity\
+Deniz Oktay, Mehran Mirramezani, Eder Medina, Ryan P. Adams - In submission
+
+A rapid and automated approach to the design of multistable metastructures\
+Mehran Mirramezani\*, Deniz Oktay\*, Ryan P. Adams - In preparation
