@@ -21,8 +21,6 @@ from varmintv2.solver.discretize import HamiltonianStepper
 from varmintv2.utils.movie_utils import create_movie_nma, create_static_image_nma
 from varmintv2.solver.optimization_speed import SparseNewtonIncrementalSolver
 
-import jax.experimental.host_callback as hcb
-
 from varmintv2.utils import analysis_utils as autils
 from varmintv2.utils import experiment_utils as eutils
 
@@ -40,6 +38,7 @@ import haiku as hk
 
 import matplotlib.pyplot as plt
 import multiprocessing as mp
+import queue
 
 # Let's do 64-bit. Does not seem to degrade performance much.
 from jax.config import config
@@ -109,11 +108,12 @@ def worker(args, in_q, out_q, dev_id):
             generate_rectangular_radii((n_cells,), args.ncp),
         )
     )
-    potential_energy_fn = cell.get_potential_energy_fn()
-    strain_energy_fn = jax.jit(cell.get_strain_energy_fn(), device=jax.devices()[dev_id])
 
+    potential_energy_fn = cell.get_potential_energy_fn()
     grad_potential_energy_fn = jax.grad(potential_energy_fn)
     hess_potential_energy_fn = jax.hessian(potential_energy_fn)
+
+    strain_energy_fn = jax.jit(cell.get_strain_energy_fn(), device=jax.devices()[dev_id])
 
     potential_energy_fn = jax.jit(potential_energy_fn, device=jax.devices()[dev_id])
     grad_potential_energy_fn = jax.jit(grad_potential_energy_fn, device=jax.devices()[dev_id])
@@ -124,6 +124,11 @@ def worker(args, in_q, out_q, dev_id):
     ref_ctrl = radii_to_ctrl_fn(np.array(init_radii))
     fixed_locs = cell.fixed_locs_from_dict(ref_ctrl, {})
     tractions = cell.tractions_from_dict({})
+
+    mat_params = (
+        TPUMat.shear * np.ones(ref_ctrl.shape[0]),
+        TPUMat.bulk * np.ones(ref_ctrl.shape[0]),
+    )
 
     optimizer = SparseNewtonIncrementalSolver(cell, potential_energy_fn, max_iter=1000,
                                               step_size=1.0, tol=1e-8, ls_backtrack=0.95, update_every=10, dev_id=dev_id)
@@ -158,7 +163,7 @@ def worker(args, in_q, out_q, dev_id):
             #'5': np.array([0.0, -disps[3]]),
         }
 
-        current_x, all_xs, all_fixed_locs = optimize(current_x, increment_dict, tractions, ref_ctrl)
+        current_x, all_xs, all_fixed_locs = optimize(current_x, increment_dict, tractions, ref_ctrl, mat_params)
 
         #return current_x, (None, None, None)
         return current_x, (np.stack(all_xs, axis=0), np.stack(all_fixed_locs, axis=0), None)
@@ -166,16 +171,16 @@ def worker(args, in_q, out_q, dev_id):
     p1 = np.sum(np.abs(radii_to_ctrl_fn(init_radii) - np.array([12.5, 12.5])), axis=-1) < 1e-14
 
     test_pts = np.array([
-        [10.0, 15.0],
+        [11.0, 14.0],
     ])
 
-    test_disps = np.array([10.0, 15.0])
+    test_disps = np.array([11.0, 14.0])
 
     def clip_fn(x):
-        return np.clip(x, -7.0, 7.0)
-    
+        return np.clip(x, -4.0, 4.0)
+
     def tanh_clip(x):
-        return np.tanh(x) * 7.0
+        return np.tanh(x) * 4.0
     def nn_fn(input):
         mlp = hk.Sequential([
             hk.Linear(30), jax.nn.softplus,
@@ -265,10 +270,12 @@ def worker(args, in_q, out_q, dev_id):
                 ewa_loss = ewa_loss * ewa_weight + loss * (1 - ewa_weight)
             print(f'Iteration {i} Loss: {loss} EWA Loss: {ewa_loss} Radii Grad Norm: {np.linalg.norm(grad_loss[1])} Time: {time.time() - iter_time}')
 
-            updates, opt_state = optimizer.update(grad_loss, opt_state)
-            curr_all_params = optax.apply_updates(curr_all_params, updates)
+            (nn_updates, radii_updates), opt_state = optimizer.update(grad_loss, opt_state)
             curr_nn_params, curr_radii = curr_all_params
-            curr_radii = np.clip(curr_radii, 0.1, 0.9)
+            curr_nn_params = optax.apply_updates(curr_nn_params, nn_updates)
+
+            #curr_all_params = optax.apply_updates(curr_all_params, updates)
+            #curr_radii = np.clip(curr_radii, 0.1, 0.9)
             curr_all_params = (curr_nn_params, curr_radii)
 
             if i % 10 == 0:
@@ -287,7 +294,7 @@ def worker(args, in_q, out_q, dev_id):
                 create_static_image_nma(cell.element, g2l(optimized_curr_g_pos, all_fixed_locs[-1], radii_to_ctrl_fn(curr_radii)), image_path, test_pts)
                 ctrl_seq, _ = cell.unflatten_dynamics_sequence(
                     all_displacements, all_velocities, all_fixed_locs, all_fixed_vels, radii_to_ctrl_fn(curr_radii))
-                create_movie_nma(cell.element, ctrl_seq, vid_path, test_pts, comet_exp=None)
+                create_movie_nma(cell.element, ctrl_seq, vid_path, test_pts, comet_exp=None, p1=p1)
 
                 # Pickle parameters
                 print('Saving parameters.')
@@ -305,7 +312,7 @@ def worker(args, in_q, out_q, dev_id):
                 # Prepare the targets for all workers (including our own)
                 iter_time = time.time()
 
-                target_disps = onp.random.uniform(10.0, 15.0, size=(jax.device_count() * args.tasks_per_device, 2))
+                target_disps = onp.random.uniform(11.0, 14.0, size=(jax.device_count() * args.tasks_per_device, 2))
                 for disps in target_disps:
                     in_q.put((curr_all_params, disps))
         
@@ -313,7 +320,7 @@ def worker(args, in_q, out_q, dev_id):
                 loss, grad_loss = out_q.get(False)
                 results_from_iter.append((loss, grad_loss))
                 num_from_iter += 1
-            except:
+            except queue.Empty:
                 time.sleep(0.1)
 
             if num_from_iter == target_disps.shape[0]:
@@ -328,7 +335,7 @@ def worker(args, in_q, out_q, dev_id):
         try:
             params, disps = in_q.get(False)
             simulate_element(params, disps)
-        except:
+        except queue.Empty:
             time.sleep(0.1)
 
 
@@ -360,5 +367,5 @@ if __name__ == '__main__':
         p = mp.Process(target=worker, args=(args, in_q, out_q, dev_id))
         p.start()
         workers.append(p)
-    
+
     workers[0].join()

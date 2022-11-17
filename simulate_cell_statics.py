@@ -140,13 +140,13 @@ def main():
         # Solve for new state
         print(f'Starting optimization at iteration {i}.')
         opt_start = time.time()
-        new_x, success = optimize(curr_g_pos, (fixed_locs, tractions, ref_ctrl))
-        if not success:
-            print(f'Optimization reached max iters.')
-            break
-        if np.any(np.isnan(new_x)):
-            print(f'Found NaN in solution. Terminating.')
-            break
+        new_x = optimize(curr_g_pos, (fixed_locs, tractions, ref_ctrl))
+        #if not success:
+        #    print(f'Optimization reached max iters.')
+        #    break
+        #if np.any(np.isnan(new_x)):
+        #    print(f'Found NaN in solution. Terminating.')
+        #    break
         print(f'Optimization finished in {time.time() - opt_start} s')
                                           
         curr_g_pos = new_x

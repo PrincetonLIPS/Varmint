@@ -15,7 +15,7 @@ from varmintv2.utils.movie_utils import create_movie, create_static_image
 import varmintv2.utils.analysis_utils as autils
 import varmintv2.utils.experiment_utils as eutils
 
-from varmintv2.solver.optimization import NewtonSolver
+from varmintv2.solver.optimization import SparseNewtonSolver, DenseNewtonSolver
 
 import scipy.optimize
 from scipy.spatial import KDTree
@@ -89,7 +89,7 @@ def main():
             - Rectangle(dolfin.Point(2., 1.25), dolfin.Point(3., 1.75)) \
             - Circle(dolfin.Point(1, 4), .25) \
             - Circle(dolfin.Point(4, 4), .25)
-    mesh2d = generate_mesh(domain, 45)
+    mesh2d = generate_mesh(domain, 15)
     points = mesh2d.coordinates()
     cells = mesh2d.cells()
 
@@ -142,7 +142,7 @@ def main():
     curr_g_pos = l2g(ref_ctrl)
     print(f'Optimizing with {curr_g_pos.shape[0]} degrees of freedom.')
 
-    n_increments = 30
+    n_increments = 20
     strain_energies = []
     increments = []
     all_displacements = []
@@ -151,7 +151,7 @@ def main():
     all_fixed_locs = []
     all_fixed_vels = []
 
-    optimizer = NewtonSolver(cell, potential_energy_fn, max_iter=20)
+    optimizer = DenseNewtonSolver(cell, potential_energy_fn, max_iter=20)
     for i in range(n_increments):
         # Increment displacement a little bit.
         fixed_displacements = {

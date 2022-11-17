@@ -10,10 +10,33 @@ import numpy.linalg as onpla
 
 import scipy.optimize as spopt
 import scipy.sparse.linalg
+import scipy.sparse
 import scipy.stats
 
 import time
 from functools import partial
+
+
+class SuperLUOptimizer:
+  def __init__(self, niter=5):
+    self.niter = niter
+    self.iter_num = 0
+
+  def optimize(self, x0, residual_fun, jvp_fun, jac_fun):
+    xk = x0
+
+    for i in range(self.niter):
+      jac = jac_fun(xk).block_until_ready()
+      rk = residual_fun(xk).block_until_ready()
+
+      sjac = scipy.sparse.csc_matrix(jac)
+      B = scipy.sparse.linalg.splu(sjac)
+      pk = B.solve(onp.array(-rk))
+
+      xk = xk + pk
+      self.iter_num += 1
+
+    return xk, None
 
 
 class ILUPreconditionedOptimizer:

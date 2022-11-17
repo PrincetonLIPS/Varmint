@@ -395,10 +395,57 @@ class SingleElementGeometry(Geometry):
 
         return lagrangian
 
+    def get_debug_potential_energy_fn(self):
+        """Allow debugging a bit easier by decoupling l2g, g2l from energy computation."""
+
+        l2g, g2l = self.get_global_local_maps()
+        active_traction_boundaries_nr = self.active_traction_boundaries[~self.rigid_patches_boolean]
+        active_traction_boundaries_r = self.active_traction_boundaries[self.rigid_patches_boolean]
+
+        l2g = jax.jit(l2g)
+        g2l = jax.jit(g2l)
+
+        @jax.jit
+        def potential_energy(def_ctrl, fix_l_position, traction, ref_l_position, mat_params):
+            def_ctrl_nr = def_ctrl[~self.rigid_patches_boolean]
+            ref_l_position_nr = ref_l_position[~self.rigid_patches_boolean]
+            traction_nr = traction[~self.rigid_patches_boolean]
+            mat_params_nr = jax.tree_map(lambda x: x[~self.rigid_patches_boolean], mat_params)
+
+            # Non-rigid patches
+            _, G_nr, S_nr, T_nr = jax.vmap(self.element_energy_fn)(
+                def_ctrl_nr, jnp.zeros_like(def_ctrl_nr), ref_l_position_nr,
+                active_traction_boundaries_nr, traction_nr, mat_params_nr
+            )
+
+            def_ctrl_r = def_ctrl[self.rigid_patches_boolean]
+            ref_l_position_r = ref_l_position[self.rigid_patches_boolean]
+            traction_r = traction[self.rigid_patches_boolean]
+            mat_params_r = jax.tree_map(lambda x: x[self.rigid_patches_boolean], mat_params)
+
+            # Rigid patches
+            _, G_r, _, T_r = jax.vmap(self.element_energy_fn)(
+                def_ctrl_r, jnp.zeros_like(def_ctrl_r), ref_l_position_r,
+                active_traction_boundaries_r, traction_r, mat_params_r
+            )
+
+            return jnp.sum(G_nr + S_nr + T_nr) + jnp.sum(G_r + T_r)
+
+        def decoupled_potential_energy(cur_g_position, fix_l_position, traction, ref_l_position, mat_params):
+            def_ctrl = g2l(cur_g_position, fix_l_position, ref_l_position)
+
+            return potential_energy(def_ctrl, fix_l_position, traction, ref_l_position, mat_params)
+
+        return decoupled_potential_energy
+
     def get_potential_energy_fn(self):
         l2g, g2l = self.get_global_local_maps()
         active_traction_boundaries_nr = self.active_traction_boundaries[~self.rigid_patches_boolean]
         active_traction_boundaries_r = self.active_traction_boundaries[self.rigid_patches_boolean]
+
+        batch_dim = onp.sum(~self.rigid_patches_boolean)
+        print('batch dim', batch_dim)
+        outer = 1
 
         def potential_energy(cur_g_position, fix_l_position, traction, ref_l_position, mat_params):
             def_ctrl = g2l(cur_g_position, fix_l_position, ref_l_position)
@@ -409,6 +456,12 @@ class SingleElementGeometry(Geometry):
             mat_params_nr = jax.tree_map(lambda x: x[~self.rigid_patches_boolean], mat_params)
 
             # Non-rigid patches
+            #xs = [def_ctrl_nr, jnp.zeros_like(def_ctrl_nr), ref_l_position_nr,
+            #      active_traction_boundaries_nr, traction_nr, mat_params_nr]
+            #xs = jax.tree_map(lambda x: x.reshape((outer, batch_dim // outer) + x.shape[1:]), xs)
+            #def mapped_element_energy_fn(xs):
+            #    return jax.vmap(self.element_energy_fn)(*xs)
+            #_, G_nr, S_nr, T_nr = jax.lax.map(mapped_element_energy_fn, xs)
             _, G_nr, S_nr, T_nr = jax.vmap(self.element_energy_fn)(
                 def_ctrl_nr, jnp.zeros_like(def_ctrl_nr), ref_l_position_nr,
                 active_traction_boundaries_nr, traction_nr, mat_params_nr

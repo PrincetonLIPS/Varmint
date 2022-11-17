@@ -12,6 +12,8 @@ from varmintv2.physics.materials import Material
 from varmintv2.solver.discretize import HamiltonianStepper
 from varmintv2.utils.movie_utils import create_movie, create_static_image
 
+from varmintv2.geometry.metamaterial_fem import make_metamaterial_mesh
+
 import varmintv2.utils.analysis_utils as autils
 import varmintv2.utils.experiment_utils as eutils
 
@@ -83,11 +85,18 @@ def main():
 
     element = IsoparametricQuad2D(quad_deg=args.quaddeg)
 
-    domain =   Rectangle(dolfin.Point(0., 0.), dolfin.Point(5., 5.)) \
-            - Rectangle(dolfin.Point(2., 1.25), dolfin.Point(3., 1.75)) \
-            - Circle(dolfin.Point(1, 4), .25) \
-            - Circle(dolfin.Point(4, 4), .25)
-    mesh2d = generate_mesh(domain, 45)
+    #domain =   Rectangle(dolfin.Point(0., 0.), dolfin.Point(5., 5.)) \
+    #        - Rectangle(dolfin.Point(2., 1.25), dolfin.Point(3., 1.75)) \
+    #        - Circle(dolfin.Point(1, 4), .25) \
+    #        - Circle(dolfin.Point(4, 4), .25)
+    #mesh2d = generate_mesh(domain, 45)
+
+    domain = Rectangle(dolfin.Point(0., 0.), dolfin.Point(5., 5.)) \
+             - Circle(dolfin.Point(2.5, 2.5), 0.5)
+    mesh2d = generate_mesh(domain, 30)
+    #n_cells = 9
+    #mesh2d = make_metamaterial_mesh(1.0, 0.0, 0.0, 80, 0.15, 20, n_cells, 0.5)
+
     points = mesh2d.coordinates()
     cells = mesh2d.cells()
 
@@ -135,7 +144,7 @@ def main():
 
     @cell.register_dirichlet_bc('2')
     def group_2_movement(t):
-        return t / T * np.array([0.0, -1.0])
+        return t / T * np.array([0.0, -2.0])
 
     def friction_force(q, qdot, ref_ctrl, fixed_pos, fixed_vel, tractions):
         return -1e-7 * qdot

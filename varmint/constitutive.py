@@ -32,7 +32,7 @@ def neohookean_energy2d(shear, bulk, F):
 
 class LinearElastic2D:
     def __init__(self, material, thickness=1):
-        ''' thickness in cm '''
+        """ thickness in cm """
         self.material = material
         self.thickness = thickness
         self.lmbda = self.material.lmbda
@@ -49,7 +49,7 @@ class LinearElastic2D:
 
 class NeoHookean2D:
     def __init__(self, material, log=True, thickness=1):
-        ''' thickness in cm '''
+        """ thickness in cm """
         self.material = material
         self.log = log
         self.thickness = thickness

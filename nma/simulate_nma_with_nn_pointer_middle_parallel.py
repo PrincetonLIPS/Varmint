@@ -8,6 +8,7 @@ import sys
 import os
 import gc
 
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(SCRIPT_DIR))
 
@@ -18,6 +19,7 @@ from varmintv2.physics.constitutive import NeoHookean2D, LinearElastic2D
 from varmintv2.physics.materials import Material
 from varmintv2.solver.discretize import HamiltonianStepper
 from varmintv2.utils.movie_utils import create_movie_nma, create_static_image_nma
+from varmintv2.solver.optimization_speed import SparseNewtonIncrementalSolver
 
 import jax.experimental.host_callback as hcb
 
@@ -106,14 +108,14 @@ def worker(args, in_q, out_q, dev_id):
         )
     )
     potential_energy_fn = cell.get_potential_energy_fn()
-    strain_energy_fn = jax.jit(cell.get_strain_energy_fn())
+    strain_energy_fn = jax.jit(cell.get_strain_energy_fn(), device=jax.devices()[dev_id])
 
     grad_potential_energy_fn = jax.grad(potential_energy_fn)
     hess_potential_energy_fn = jax.hessian(potential_energy_fn)
 
-    potential_energy_fn = jax.jit(potential_energy_fn)
-    grad_potential_energy_fn = jax.jit(grad_potential_energy_fn)
-    hess_potential_energy_fn = jax.jit(hess_potential_energy_fn)
+    potential_energy_fn = jax.jit(potential_energy_fn, device=jax.devices()[dev_id])
+    grad_potential_energy_fn = jax.jit(grad_potential_energy_fn, device=jax.devices()[dev_id])
+    hess_potential_energy_fn = jax.jit(hess_potential_energy_fn, device=jax.devices()[dev_id])
 
     l2g, g2l = cell.get_global_local_maps()
 
@@ -121,44 +123,43 @@ def worker(args, in_q, out_q, dev_id):
     fixed_locs = cell.fixed_locs_from_dict(ref_ctrl, {})
     tractions = cell.tractions_from_dict({})
 
-    optimizer = SparseNewtonSolverHCBRestartPrecondition(cell, potential_energy_fn, max_iter=1000,
-                                                         step_size=1.0, tol=1e-8, ls_backtrack=0.95, update_every=10)
+    optimizer = SparseNewtonIncrementalSolver(cell, potential_energy_fn, max_iter=1000,
+                                              step_size=1.0, tol=1e-8, ls_backtrack=0.95, update_every=10, dev_id=dev_id)
 
     x0 = l2g(ref_ctrl, ref_ctrl)
-    optimize = optimizer.get_optimize_fn(x0, (fixed_locs, tractions, ref_ctrl))
+    optimize = optimizer.get_optimize_fn()
+    #optimize = jax.jit(optimizer.get_optimize_fn(x0, (fixed_locs, tractions, ref_ctrl)))
 
-    n_increments = 100
+    n_increments = 50
 
-    @jax.jit
-    def simulate(disps, radii):
+    def _radii_to_ref_and_init_x(radii):
         ref_ctrl = radii_to_ctrl_fn(radii)
         init_x = l2g(ref_ctrl, ref_ctrl)
+        return ref_ctrl, init_x
+    
+    radii_to_ref_and_init_x = jax.jit(_radii_to_ref_and_init_x, device=jax.devices()[dev_id])
+    fixed_locs_from_dict = jax.jit(cell.fixed_locs_from_dict, device=jax.devices()[dev_id])
 
-        increments = disps / n_increments
-        increments = increments[..., np.newaxis] * np.arange(n_increments + 1)
-        increments = increments.T  # increments is (n_increments, n_boundaries)
+    def simulate(disps, radii):
+        ref_ctrl, current_x = radii_to_ref_and_init_x(radii)
 
-        def sim_increment(x_prev, increment):
-            fixed_displacements = {
-                '99': np.array([0.0, 0.0]),
-                '98': np.array([0.0, 0.0]),
-                '97': np.array([0.0, 0.0]),
-                '96': np.array([0.0, 0.0]),
-                '2': np.array([-increment[0], 0.0]),
-                #'3': np.array([0.0, -increment[1]]),
-                '3': np.array([0.0, 0.0]),
-                '4': np.array([-increment[2], 0.0]),
-                '5': np.array([0.0, 0.0]),
-                #'5': np.array([0.0, -increment[3]]),
-            }
-            fixed_locs = cell.fixed_locs_from_dict(ref_ctrl, fixed_displacements)
-            new_x = optimize(x_prev, (fixed_locs, tractions, ref_ctrl))
-            strain_energy = strain_energy_fn(new_x, fixed_locs, tractions, ref_ctrl)
+        increment_dict = {
+            '99': np.array([0.0, 0.0]),
+            '98': np.array([0.0, 0.0]),
+            '97': np.array([0.0, 0.0]),
+            '96': np.array([0.0, 0.0]),
+            '2': np.array([-disps[0], 0.0]),
+            '3': np.array([0.0, 0.0]),
+            #'3': np.array([0.0, -disps[1]]),
+            '4': np.array([-disps[2], 0.0]),
+            '5': np.array([0.0, 0.0]),
+            #'5': np.array([0.0, -disps[3]]),
+        }
 
-            return new_x, (new_x, fixed_locs, strain_energy)
-        
-        final_x, (all_xs, all_fixed_locs, all_strain_energies) = jax.lax.scan(sim_increment, init_x, increments)
-        return final_x, (all_xs, all_fixed_locs, all_strain_energies)
+        current_x, all_xs, all_fixed_locs = optimize(current_x, increment_dict, tractions, ref_ctrl)
+
+        #return current_x, (None, None, None)
+        return current_x, (np.stack(all_xs, axis=0), np.stack(all_fixed_locs, axis=0), None)
 
     p1 = np.sum(np.abs(radii_to_ctrl_fn(init_radii) - np.array([7.5, 7.5])), axis=-1) < 1e-14
 
@@ -178,7 +179,7 @@ def worker(args, in_q, out_q, dev_id):
             hk.Linear(30), jax.nn.softplus,
             hk.Linear(30), jax.nn.softplus,
             hk.Linear(10), jax.nn.softplus,
-            hk.Linear(4),   tanh_clip,
+            hk.Linear(4),  tanh_clip,
         ])
 
         return mlp(input)
@@ -225,7 +226,8 @@ def worker(args, in_q, out_q, dev_id):
         optimizer = None
         opt_state = None
 
-    loss_val_and_grad = jax.jit(jax.value_and_grad(loss_fn), device=jax.devices()[dev_id // args.tasks_per_device])
+    #loss_val_and_grad = jax.jit(jax.value_and_grad(loss_fn), device=jax.devices()[dev_id // args.tasks_per_device])
+    loss_val_and_grad = jax.value_and_grad(loss_fn)
 
     target_disps = onp.array([
         [6.0, 6.0],

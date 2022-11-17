@@ -3,7 +3,7 @@ from .exceptions import *
 
 
 class classproperty(object):
-    ''' Make it so that there can be class-level properties. '''
+    """ Make it so that there can be class-level properties. """
 
     def __init__(self, f):
         self.f = f
@@ -13,7 +13,7 @@ class classproperty(object):
 
 
 class Material:
-    ''' Base class to represent material properties.
+    """ Base class to represent material properties.
 
     The core functionality of this class is to implement relationships between
     commonly used material parameters, specifically:
@@ -32,14 +32,14 @@ class Material:
     Lame-first/shear pair.  These are _E/_nu and _lmbda/_mu, respectively.
     This class also requires density to be specified in grams per cubic cm.
 
-    '''
+    """
 
     def __init__(self):
         self.check_values()
         self.check_pairs()
 
     def check_values(self):
-        ''' Run through some simple range checks for sensible parameters. '''
+        """ Run through some simple range checks for sensible parameters. """
         if '_E' in dir(self):
             self.verify_youngs()
         if '_nu' in dir(self):
@@ -54,88 +54,88 @@ class Material:
         self.verify_density()
 
     def verify_youngs(self):
-        ''' Basic checks for reasonable Young's moduli '''
+        """ Basic checks for reasonable Young's moduli """
         if self._E > 1000:
-            raise UnitsError('''
+            raise UnitsError("""
       Young's modulus of %f seems too large. This should be in GPa.
-      ''' % (self._E))
+      """ % (self._E))
         elif self._E < 0:
-            raise MaterialError('''
+            raise MaterialError("""
       Young's modulus must be positive. Got %f.
-      ''' % (self._E))
+      """ % (self._E))
 
     def verify_poissons(self):
-        ''' Basic checks for reasonable Poisson's ratio '''
+        """ Basic checks for reasonable Poisson's ratio """
         if self._nu < 0 or self._nu > 0.5:
-            raise MaterialError('''
+            raise MaterialError("""
       Poisson's ratio must be between 0 and 0.5. Got %f.
-      ''' % (self.nu))
+      """ % (self.nu))
 
     def verify_lame1(self):
-        ''' Basic checks for reasonble Lame's first parameter '''
+        """ Basic checks for reasonble Lame's first parameter """
         if self._lmbda > 1000:
-            raise UnitsError('''
+            raise UnitsError("""
       Lame's first parameter of %f seems too large. This should be in GPa.
-      ''' % (self._lmbda))
+      """ % (self._lmbda))
         elif self._lmbda < 0:
-            raise MaterialError('''
+            raise MaterialError("""
       Lame's first parameter must be positive. Got %f.
-      ''' % (self._lmbda))
+      """ % (self._lmbda))
 
     def verify_shear(self):
-        ''' Basic checks for reasonble shear modulus '''
+        """ Basic checks for reasonble shear modulus """
         if self._mu > 1000:
-            raise UnitsError('''
+            raise UnitsError("""
       Shear modulus of %f seems too large. This should be in GPa.
-      ''' % (self._mu))
+      """ % (self._mu))
         elif self._mu < 0:
-            raise MaterialError('''
+            raise MaterialError("""
       Shear modulus must be positive. Got %f.
-      ''' % (self._mu))
+      """ % (self._mu))
 
     def verify_bulk(self):
-        ''' Basic checks for reasonble bulk modulus '''
+        """ Basic checks for reasonble bulk modulus """
         if self._K > 1000:
-            raise UnitsError('''
+            raise UnitsError("""
       Bulk modulus of %f seems too large. This should be in GPa.
-      ''' % (self._K))
+      """ % (self._K))
         elif self._K < 0:
-            raise MaterialError('''
+            raise MaterialError("""
       Bulk modulus must be positive. Got %f.
-      ''' % (self._K))
+      """ % (self._K))
 
     def verify_density(self):
-        ''' Basic checks for reasonable densities. '''
+        """ Basic checks for reasonable densities. """
         if self._density <= 0:
-            raise MaterialError('''
+            raise MaterialError("""
       Density must be a positive number. Got %f.
-      ''' % (self._density))
+      """ % (self._density))
         elif self._density < 0.05:
-            raise UnitsError('''
+            raise UnitsError("""
       Surprisingly small density of %f (less than styrofoam).
       This quantity should be in g/cm^3.
-      ''' % (self._density))
+      """ % (self._density))
         elif self._density > 8:
-            raise UnitsError('''
+            raise UnitsError("""
       Surprisingly high density of %f (greater than steel).
       This quantity should be in g/cm^3.
-      ''' % (self._density))
+      """ % (self._density))
 
     def check_pairs(self):
-        ''' Since we don't have all conversions implemented, verify that we can at
-        least accommodate the major pairs. '''
+        """ Since we don't have all conversions implemented, verify that we can at
+        least accommodate the major pairs. """
         if '_E' in dir(self) and '_nu' in dir(self):
             return
         elif '_lmbda' in dir(self) and '_mu' in dir(self):
             return
         else:
-            raise MaterialError('''
+            raise MaterialError("""
       Need to specify either E/nu or lmbda/mu
-      ''')
+      """)
 
     @classproperty
     def E(cls):
-        ''' Young's modulus: GPa = 10^9 kg / (m * s**2) '''
+        """ Young's modulus: GPa = 10^9 kg / (m * s**2) """
         if '_E' in dir(cls):
             return cls._E
 
@@ -150,7 +150,7 @@ class Material:
 
     @classproperty
     def nu(cls):
-        ''' Poisson's ratio: unitless '''
+        """ Poisson's ratio: unitless """
         if '_nu' in dir(cls):
             return cls._nu
 
@@ -164,7 +164,7 @@ class Material:
 
     @classproperty
     def lmbda(cls):
-        ''' Lame's first parameter '''
+        """ Lame's first parameter """
         if '_lmbda' in dir(cls):
             return cls._lmbda
 
@@ -178,7 +178,7 @@ class Material:
 
     @classproperty
     def mu(cls):
-        ''' Shear modulus: GPa = 10^9 kg / (m * s**2) '''
+        """ Shear modulus: GPa = 10^9 kg / (m * s**2) """
         if '_mu' in dir(cls):
             return cls._mu
 
@@ -192,7 +192,7 @@ class Material:
 
     @classproperty
     def K(cls):
-        ''' Bulk modulus: GPa = 10^9 kg / (m * s**2)  '''
+        """ Bulk modulus: GPa = 10^9 kg / (m * s**2)  """
         if '_K' in dir(cls):
             return cls._K
 

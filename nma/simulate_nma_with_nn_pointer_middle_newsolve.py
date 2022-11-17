@@ -24,7 +24,7 @@ import jax.experimental.host_callback as hcb
 from varmintv2.utils import analysis_utils as autils
 from varmintv2.utils import experiment_utils as eutils
 
-from varmintv2.solver.optimization_speed import SparseNewtonSolverHCBRestartPrecondition
+from varmintv2.solver.optimization_speed import SparseNewtonIncrementalSolver
 
 import scipy.optimize
 
@@ -134,8 +134,8 @@ if __name__ == '__main__':
     fixed_locs = cell.fixed_locs_from_dict(ref_ctrl, {})
     tractions = cell.tractions_from_dict({})
 
-    optimizer = SparseNewtonSolverHCBRestartPrecondition(cell, potential_energy_fn, max_iter=1000,
-                                                         step_size=1.0, tol=1e-5, ls_backtrack=0.95, update_every=10)
+    optimizer = SparseNewtonIncrementalSolver(cell, potential_energy_fn, max_iter=1000,
+                                              step_size=1.0, tol=1e-8, ls_backtrack=0.95, update_every=10)
 
     x0 = l2g(ref_ctrl, ref_ctrl)
     optimize = optimizer.get_optimize_fn()
@@ -153,28 +153,20 @@ if __name__ == '__main__':
     def simulate(disps, radii):
         ref_ctrl, current_x = radii_to_ref_and_init_x(radii)
 
-        increments = disps / n_increments
-        increments = increments[..., np.newaxis] * np.arange(n_increments + 1)
-        increments = increments.T  # increments is (n_increments, n_boundaries)
+        increment_dict = {
+            '99': np.array([0.0, 0.0]),
+            '98': np.array([0.0, 0.0]),
+            '97': np.array([0.0, 0.0]),
+            '96': np.array([0.0, 0.0]),
+            '2': np.array([-disps[0], 0.0]),
+            '3': np.array([0.0, -disps[1]]),
+            '4': np.array([-disps[2], 0.0]),
+            '5': np.array([0.0, -disps[3]]),
+        }
 
-        all_xs = []
-        all_fixed_locs = []
-        for increment in increments:
-            fixed_displacements = {
-                '99': np.array([0.0, 0.0]),
-                '98': np.array([0.0, 0.0]),
-                '97': np.array([0.0, 0.0]),
-                '96': np.array([0.0, 0.0]),
-                '2': np.array([-increment[0], 0.0]),
-                '3': np.array([0.0, -increment[1]]),
-                '4': np.array([-increment[2], 0.0]),
-                '5': np.array([0.0, -increment[3]]),
-            }
-            fixed_locs = fixed_locs_from_dict(ref_ctrl, fixed_displacements)
-            current_x = optimize(current_x, (fixed_locs, tractions, ref_ctrl))
-            all_xs.append(current_x)
-            all_fixed_locs.append(fixed_locs)
+        current_x, all_xs, all_fixed_locs = optimize(current_x, increment_dict, tractions, ref_ctrl)
 
+        #return current_x, (None, None, None)
         return current_x, (np.stack(all_xs, axis=0), np.stack(all_fixed_locs, axis=0), None)
 
     p1 = np.sum(np.abs(radii_to_ctrl_fn(init_radii) - np.array([7.5, 7.5])), axis=-1) < 1e-14

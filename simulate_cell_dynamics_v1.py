@@ -142,7 +142,7 @@ def main():
     )
 
     grid_str = "C0500 C0500 C0500\n"\
-               "CA000 C0000 C00D0\n"\
+               "C0000 C0000 C0000\n"\
                "C0001 C0001 C0001\n"
 
     cell = Cell2D(cell_shape=cell_shape, material=mat, instr=grid_str)

@@ -424,7 +424,7 @@ def construct_cell2D(input_str, patch_ncp, quad_degree, spline_degree,
         group_array = \
             sum(units[i].get_side_index_array(
                 side, npatches) for (i, side) in sides)
-        dirichlet_labels[group] = group_array
+        dirichlet_labels[group] = (group_array, np.array([0, 1]))
 
 
     traction_labels = {}
@@ -445,9 +445,9 @@ def construct_cell2D(input_str, patch_ncp, quad_degree, spline_degree,
     y_coor = num_y * cell_length
     #print(x_coor)
     #print(y_coor)
-    corner_groups['99'] = np.sum(np.abs(ctrls - np.array([x_coor, y_coor])), axis=-1) < 1e-14
-    corner_groups['98'] = np.sum(np.abs(ctrls - np.array([x_coor, 0.0])), axis=-1) < 1e-14
-    corner_groups['97'] = np.sum(np.abs(ctrls - np.array([0.0, y_coor])), axis=-1) < 1e-14
+    #corner_groups['99'] = np.sum(np.abs(ctrls - np.array([x_coor, y_coor])), axis=-1) < 1e-14
+    #corner_groups['98'] = np.sum(np.abs(ctrls - np.array([x_coor, 0.0])), axis=-1) < 1e-14
+    #corner_groups['97'] = np.sum(np.abs(ctrls - np.array([0.0, y_coor])), axis=-1) < 1e-14
     corner_groups['96'] = np.sum(np.abs(ctrls - np.array([0.0, 0.0])), axis=-1) < 1e-14
 
     # Construct the radii_to_ctrl function for initialization of control points.

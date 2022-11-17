@@ -2,6 +2,7 @@ import jax
 import jax.numpy as np
 import jax.numpy.linalg as npla
 
+
 vmap_dot = jax.jit(
     jax.vmap(
         np.dot,

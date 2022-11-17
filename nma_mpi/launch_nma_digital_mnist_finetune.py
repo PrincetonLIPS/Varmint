@@ -3,7 +3,7 @@ from absl import flags
 
 import os
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-os.environ["JAX_PLATFORMS"] = "gpu,cpu"
+#os.environ["JAX_PLATFORMS"] = "gpu,cpu"
 import re
 import sys
 import time
@@ -338,7 +338,7 @@ def main(argv):
 
     split = 'train'
     train_ds = tfds.load("mnist:3.*.*", split=split).cache().repeat()
-    train_ds = train_ds.shuffle(1000, seed=2)
+    train_ds = train_ds.shuffle(1000, seed=72)
     train_iterator = iter(tfds.as_numpy(train_ds))
 
     split = 'test'
@@ -389,28 +389,6 @@ def main(argv):
 
         #rprint(f'NN params: {jax.tree_util.tree_map(lambda x: np.linalg.norm(x), curr_nn_params)}', comm=comm)
 
-        curr_radii = np.clip(curr_radii, config.radii_range[0], config.radii_range[1])
-        curr_all_params = curr_nn_params, curr_radii, curr_color_controls
-
-        # Saving figure after every iteration.
-        curr_ref_ctrl = radii_to_ctrl_fn(curr_radii)
-        fig, ax = plt.subplots(1, 1)
-        fig.set_size_inches(10, 10)
-
-        plot_ctrl(ax, cell.element, curr_ref_ctrl)
-        color_locs = color_eval_fn(curr_ref_ctrl)
-        colors = color_eval_fn(jax.nn.sigmoid(curr_color_controls))
-        ax.scatter(color_locs[..., 0], color_locs[..., 1], c=colors, s=7)
-
-        digital_mnist_patches.draw_mpl_patches(ax, config.cell_size, config.border_size)
-        ax.set_aspect('equal')
-
-        target_image_path = os.path.join(
-            args.exp_dir,
-            f'sim-{args.exp_name}-optimized-{i}-inspect-ref-config.png')
-        fig.savefig(target_image_path)
-        plt.close(fig)
-
         if i % config.save_every == 0:
             # Verify that the parameters have not deviated between different MPI ranks.
             test_pytrees_equal(comm, curr_all_params)
@@ -427,6 +405,28 @@ def main(argv):
             # Generate video
             if comm.rank == 0:
                 rprint(f'Generating image and video with optimization so far.', comm=comm)
+
+                curr_radii = np.clip(curr_radii, config.radii_range[0], config.radii_range[1])
+                curr_all_params = curr_nn_params, curr_radii, curr_color_controls
+
+                # Saving figure after every iteration.
+                curr_ref_ctrl = radii_to_ctrl_fn(curr_radii)
+                fig, ax = plt.subplots(1, 1)
+                fig.set_size_inches(10, 10)
+
+                plot_ctrl(ax, cell.element, curr_ref_ctrl)
+                color_locs = color_eval_fn(curr_ref_ctrl)
+                colors = color_eval_fn(jax.nn.sigmoid(curr_color_controls))
+                ax.scatter(color_locs[..., 0], color_locs[..., 1], c=colors, s=7)
+
+                digital_mnist_patches.draw_mpl_patches(ax, config.cell_size, config.border_size)
+                ax.set_aspect('equal')
+
+                target_image_path = os.path.join(
+                    args.exp_dir,
+                    f'sim-{args.exp_name}-optimized-{i}-inspect-ref-config.png')
+                fig.savefig(target_image_path)
+                plt.close(fig)
 
                 fig, ax = plt.subplots(config.num_trials, 2)
                 fig.set_size_inches(2 * 10, config.num_trials * 10)

@@ -126,6 +126,7 @@ def solve_slab_with_hole(spline_degree, patch_ncp):
         constraints=(constraints[:, 0], constraints[:, 1]),
         dirichlet_labels=dirichlet_groups,
         traction_labels=traction_groups,
+        rigid_patches_boolean=np.array([1, 0, 1, 0], dtype=np.bool),
     )
 
     ref_ctrl = ctrls
@@ -186,3 +187,7 @@ def solve_slab_with_hole(spline_degree, patch_ncp):
         return cell.patch_and_parent_to_point(pind, qd, ref_ctrl)
 
     return (ref_ctrl, g2l(new_x, fixed_locs), element, cell, ndof), stress_at, deformation_at, ref_at
+
+
+if __name__ == '__main__':
+    solve_slab_with_hole(3, 10)

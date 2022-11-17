@@ -2,6 +2,7 @@ from comet_ml import Experiment
 import time
 import os
 import argparse
+import sys
 
 import optax
 
@@ -188,6 +189,11 @@ if __name__ == '__main__':
     image_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-target.png')
     vid_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-target.mp4')
     create_static_image(cell.element, g2l(final_x, all_fixed_locs[-1], get_ref_ctrl_fn(gps_i)), image_path)
+
+    image_path_undisplaced = os.path.join(args.exp_dir, f'sim-{args.exp_name}-target.pdf')
+    create_static_image(cell.element, get_ref_ctrl_fn(gps_i), image_path_undisplaced)
+    print('Finished undisplaced image')
+    sys.exit()
 
     ctrl_seq, _ = cell.unflatten_dynamics_sequence(
     all_displacements, all_velocities, all_fixed_locs, all_fixed_vels, get_ref_ctrl_fn(gps_i))

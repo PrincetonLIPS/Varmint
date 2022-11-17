@@ -3,7 +3,7 @@ import time
 import jax.numpy as np
 from . import utils
 
-from varmint.optimizers import ILUPreconditionedOptimizer
+from varmint.optimizers import ILUPreconditionedOptimizer, SuperLUOptimizer
 
 
 def discretize_eulag(L):
@@ -61,6 +61,9 @@ class HamiltonianStepper:
         if strategy == 'ilu_preconditioning':
             print('Using ILU Preconditioning.')
             optimizer = ILUPreconditionedOptimizer(cell=self.cell)
+        elif strategy == 'superlu':
+            print('Using SuperLUOptimizer')
+            optimizer = SuperLUOptimizer()
         else:
             raise ValueError(
                 f'Unsupported preconditioning strategy: {strategy}.')

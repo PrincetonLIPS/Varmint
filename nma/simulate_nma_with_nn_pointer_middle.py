@@ -37,7 +37,6 @@ import optax
 import haiku as hk
 
 import matplotlib.pyplot as plt
-import multiprocessing as mp
 
 # Let's do 64-bit. Does not seem to degrade performance much.
 from jax.config import config
@@ -216,61 +215,16 @@ if __name__ == '__main__':
 
     optimizer = optax.adam(lr)
     opt_state = optimizer.init(curr_all_params)
-
-    # Let's parallelize
-    print(f'Parallelizing over {jax.device_count()} devices.')
-    jitted_loss_fns = []
-    for i, dev in enumerate(jax.devices()):
-        loss_val_and_grad = jax.jit(jax.value_and_grad(loss_fn), device=dev)
-        jitted_loss_fns.append(loss_val_and_grad)
-    #loss_val_and_grad = jax.pmap(loss_val_and_grad, axis_name='b', in_axes=(None, 0), out_axes=0)
-
-    mp.set_start_method('forkserver')
-
-    global device_run
-    def device_run(curr_all_params, target, dev, q):
-        """Run loss_val_and_grad with `target` displacement on device id `dev`. Put result in queue `q`."""
-        loss, grad_loss = jitted_loss_fns[dev](curr_all_params, target)
-        q.put((loss, grad_loss))
-
-    q = mp.Queue()
+    loss_val_and_grad = jax.jit(jax.value_and_grad(loss_fn))
 
     ewa_loss = None
     ewa_weight = 0.95
     for i in range(1, 10000001):
-        #target_disps = onp.random.uniform(6.0, 9.0, size=(jax.device_count(), 2))
+        target_disps = onp.random.uniform(6.0, 9.0, size=(2,))
         #target_disps = test_disps
-        target_disps = onp.array([
-            [6.0, 6.0],
-            [6.0, 9.0],
-            [9.0, 6.0],
-            [9.0, 9.0],
-            #[7.5, 8.5],
-            #[7.5, 6.5],
-            #[8.5, 7.5],
-            #[6.5, 7.5],
-        ])
 
         iter_time = time.time()
-
-        for dev_id, disps in enumerate(target_disps):
-            p = mp.Process(target=device_run, args=(curr_all_params, disps, dev_id, q))
-            p.start()
-        
-        results = []
-        for dev_id in range(jax.device_count()):
-            results.append(q.get())
-
-        #loss, grad_loss = loss_val_and_grad(curr_all_params, target_disps)
-        
-        losses = [res[0] for res in results]
-        lgrads = [res[1] for res in results]
-
-        # Combine the losses from parallelism
-        loss = np.mean(np.stack(losses, axis=0), axis=0)
-        grad_loss = jax.tree_map(
-            lambda *g: np.mean(np.stack(g, axis=0), axis=0), *lgrads
-        )
+        loss, grad_loss = loss_val_and_grad(curr_all_params, target_disps)
 
         if ewa_loss == None:
             ewa_loss = loss
@@ -337,3 +291,23 @@ if __name__ == '__main__':
     #plt.plot(increments, all_strain_energies)
     #plt.savefig(os.path.join(args.exp_dir, f'strain_energy_graph-{args.exp_name}.png'))
 """
+
+
+
+
+def loss_fn(params):
+    value = simulate(params)
+    return value
+
+lr = 0.0005
+optimizer = optax.adam(lr)
+opt_state = optimizer.init(curr_all_params)
+loss_val_and_grad = jax.jit(jax.value_and_grad(loss_fn))
+
+for i in range(1, 1000):
+    loss, grad_loss = loss_val_and_grad(params, target_disps)
+
+    updates, opt_state = optimizer.update(grad_loss, opt_state)
+    params = optax.apply_updates(params, updates)
+
+

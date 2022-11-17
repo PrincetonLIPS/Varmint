@@ -109,7 +109,15 @@ if __name__ == '__main__':
                "C1000 C0000 C0000 C0000 C0000 C0000 C0000 C0000\n"\
                "C1000 C0000 C0000 C0000 C0000 C0000 C0000 C0000\n"\
                "C1001 C0001 C0001 C0001 C0001 C0001 C0001 C0001\n"
-    
+
+    #grid_str = "S1000 S0200 S0000 S0300 S0000 S0400 S0000 S0100\n"\
+    #           "S1000 S0000 S0000 S0000 S0000 S0000 S0000 S0000\n"\
+    #           "S1000 S0000 S0000 S0000 S0000 S0000 S0000 S0000\n"\
+    #           "S1000 S0000 S0000 S0000 S0000 S0000 S0000 S0000\n"\
+    #           "S1000 S0000 S0000 S0000 S0000 S0000 S0000 S0000\n"\
+    #           "S1000 S0000 S0000 S0000 S0000 S0000 S0000 S0000\n"\
+    #           "C1001 S0001 S0001 S0001 S0001 S0001 S0001 S0001\n"
+
     cell, radii_to_ctrl_fn, n_cells = \
         construct_cell2D(input_str=grid_str, patch_ncp=args.ncp,
                          quad_degree=args.quaddeg, spline_degree=args.splinedeg,
@@ -144,7 +152,7 @@ if __name__ == '__main__':
     x0 = l2g(ref_ctrl, ref_ctrl)
     optimize = optimizer.get_optimize_fn(x0, (fixed_locs, tractions, ref_ctrl))
 
-    n_increments = 100
+    n_increments = 50
 
     @jax.jit
     def simulate(disps, radii):
@@ -206,19 +214,19 @@ if __name__ == '__main__':
         final_x, (all_xs, all_fixed_locs, all_strain_energies) = simulate(mat_inputs, radii)
         final_x_local = g2l(final_x, all_fixed_locs[-1], radii_to_ctrl_fn(radii))
 
-        return np.sum(np.abs(final_x_local[p1] - ref_ctrl[p1] - np.array([displacements[0], 0.0]))) + \
-               np.sum(np.abs(final_x_local[p2] - ref_ctrl[p2] - np.array([displacements[1], 0.0]))) + \
-               np.sum(np.abs(final_x_local[p3] - ref_ctrl[p3] - np.array([displacements[2], 0.0])))
+        return np.sum(np.abs(final_x_local[p1][..., 0] - ref_ctrl[p1][..., 0] - displacements[0])) / ref_ctrl[p1].shape[0] + \
+               np.sum(np.abs(final_x_local[p2][..., 0] - ref_ctrl[p2][..., 0] - displacements[1])) / ref_ctrl[p2].shape[0] + \
+               np.sum(np.abs(final_x_local[p3][..., 0] - ref_ctrl[p2][..., 0] - displacements[2])) / ref_ctrl[p3].shape[0]
 
     print('Starting NMA optimization')
     loss_val_and_grad = jax.jit(jax.value_and_grad(loss_fn))
     curr_all_params = (init_nn_params, init_radii)
-    lr = 0.01
+    lr = 0.1
 
     optimizer = optax.adam(lr)
     opt_state = optimizer.init(curr_all_params)
-    for i in range(1, 1001):
-        target_disps = onp.random.uniform(-2.0, 2.0, 3)
+    for i in range(1, 10000001):
+        target_disps = onp.random.uniform(-1.0, 1.0, 3)
 
         iter_time = time.time()
         loss, grad_loss = loss_val_and_grad(curr_all_params, target_disps)
@@ -228,7 +236,7 @@ if __name__ == '__main__':
         updates, opt_state = optimizer.update(grad_loss, opt_state)
         curr_all_params = optax.apply_updates(curr_all_params, updates)
         curr_nn_params, curr_radii = curr_all_params
-        curr_radii = np.clip(curr_radii, 0.1, 0.9)
+        curr_radii = np.clip(curr_radii, 0.2, 0.8)
         curr_all_params = (curr_nn_params, curr_radii)
 
         if i % 10 == 0:

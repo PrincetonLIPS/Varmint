@@ -536,11 +536,11 @@ _bspline3d_derivs_jax = \
 
 
 # Hand-coded appears slightly faster, but don't use it unless we need the speed.
-bspline1d_derivs = _bspline1d_derivs_jax
-bspline1d_basis_derivs = _bspline1d_basis_derivs_jax
+bspline1d_derivs = _bspline1d_derivs_hand
+bspline1d_basis_derivs = _bspline1d_basis_derivs_hand
 
-bspline2d_derivs = _bspline2d_derivs_jax
-bspline2d_basis_derivs = _bspline2d_basis_derivs_jax
+bspline2d_derivs = _bspline2d_derivs_hand
+bspline2d_basis_derivs = _bspline2d_basis_derivs_hand
 
 # Don't bother coding the 3d derivatives by hand.
 bspline3d_derivs = _bspline3d_derivs_jax
@@ -630,7 +630,7 @@ _bspline3d_derivs_ctrl_jax = \
 
 
 # Hand-coded appears slightly faster, but don't use it unless we need the speed.
-bspline1d_derivs_ctrl = _bspline1d_derivs_ctrl_jax
+bspline1d_derivs_ctrl = _bspline1d_derivs_ctrl_hand
 bspline2d_derivs_ctrl = _bspline2d_derivs_ctrl_jax  # fixme?
 bspline3d_derivs_ctrl = _bspline3d_derivs_ctrl_jax
 

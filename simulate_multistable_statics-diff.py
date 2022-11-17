@@ -117,11 +117,6 @@ def construct_simulation(geo_params, numx, numy, disp_t):
     return cell, simulate
 
 
-        
-#def update(gps, nx, ny, disp_t, se_t, lr = 0.01):
-#    return gps - lr * jax.grad(loss_fn)(gps, nx, ny, disp_t, se_t)
-
-
 if __name__ == '__main__':
     args = parser.parse_args()
     eutils.prepare_experiment_directories(args)
@@ -147,10 +142,6 @@ if __name__ == '__main__':
     disp_t = DISP[-1]
     nx = 1
     ny = 1
-    
-    #N = 2
-    #for _ in range(N):
-    #    gps = update(gps, nx, ny, disp_t, se_t)
     
     cell, sim_fn = construct_simulation(gps, nx, ny, disp_t)
     l2g, g2l = cell.get_global_local_maps()

@@ -1,4 +1,4 @@
-from comet_ml import Experiment
+#from comet_ml import Experiment
 import time
 import os
 import argparse
@@ -23,7 +23,7 @@ import jax.experimental.host_callback as hcb
 from varmintv2.utils import analysis_utils as autils
 from varmintv2.utils import experiment_utils as eutils
 
-from varmintv2.solver.optimization import SparseNewtonSolverHCB, SparseNewtonSolverHCBRestart, SparseNewtonSolverHCBRestartPrecondition
+from varmintv2.solver.optimization import SparseNewtonSolverHCBRestartPrecondition
 
 import scipy.optimize
 
@@ -48,8 +48,8 @@ eutils.prepare_experiment_args(
 
 # Geometry parameters.
 parser.add_argument('-c', '--ncp', type=int, default=5)
-parser.add_argument('-q', '--quaddeg', type=int, default=8)
-parser.add_argument('-s', '--splinedeg', type=int, default=3)
+parser.add_argument('-q', '--quaddeg', type=int, default=5)
+parser.add_argument('-s', '--splinedeg', type=int, default=2)
 
 parser.add_argument('--simtime', type=float, default=50.0)
 parser.add_argument('--dt', type=float, default=0.5)
@@ -191,7 +191,7 @@ if __name__ == '__main__':
     print('Starting adjoint optimization')
     loss_val_and_grad = jax.jit(jax.value_and_grad(loss_fn))
     curr_radii = init_radii
-    lr = 0.01
+    lr = 0.001
 
     optimizer = optax.adam(lr)
     opt_state = optimizer.init(curr_radii)

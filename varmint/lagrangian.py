@@ -11,7 +11,7 @@ from .vmap_utils import *
 
 
 def generate_patch_lagrangian(patch: Patch2D):
-    ''' For when all the patches have the same control point shapes. '''
+    """ Generate a Lagrangian function for a Patch2D object. """
 
     jacobian_u_fn = patch.get_jacobian_u_fn()
     line_jacobian_u_fn = patch.get_line_derivs_u_fn()

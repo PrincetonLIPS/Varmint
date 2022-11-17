@@ -90,7 +90,7 @@ def get_config() -> config_dict.ConfigDict:
     # Adjoint optimization parameters
     config.lr = 0.0001
     config.geometry_lr_multiplier = 1.0
-    config.freeze_radii = False
+    config.freeze_radii = True
     config.freeze_nn = False
     config.freeze_nn_val = 2.0
     config.init_from_ckpt = False

@@ -2,7 +2,6 @@ from collections import namedtuple
 import os
 import gc
 
-from tqdm import tqdm
 import jax
 from jax.core import InconclusiveDimensionOperation
 import jax.numpy as np
@@ -26,6 +25,7 @@ import time
 from functools import partial
 
 from varmintv2.geometry.geometry import Geometry, SingleElementGeometry
+from varmintv2.utils.timer import Timer, Time
 
 
 def hvp(f, primals, tangents, args):
@@ -36,7 +36,7 @@ def hvp(f, primals, tangents, args):
 
 class SparseNewtonIncrementalSolver:
     def __init__(self, geometry: SingleElementGeometry, loss_fun, base_incs=10,
-                 max_iter=20, step_size=1.0, tol=1e-8, ls_backtrack=0.95, update_every=10, dev_id=0, save_mats=0, save_mats_path='saved_mats/', lin_loss_fun=None):
+                 max_iter=20, step_size=1.0, tol=1e-8, ls_backtrack=0.95, update_every=10, dev_id=0, save_mats=0, save_mats_path='saved_mats/', lin_loss_fun=None, print_runtime_stats=False):
         self.max_iter = max_iter
         self.iter_num = 0
         self.geometry = geometry
@@ -45,19 +45,12 @@ class SparseNewtonIncrementalSolver:
         self.save=False
         self.ls_backtrack = ls_backtrack
         self.update_every = update_every
+        self.print_runtime_stats = print_runtime_stats
 
         # This function takes in a vector of increments and forms a dictionary
         # mapping the increments to the boundary conditions.
         self.fixed_locs_from_dict = jax.jit(geometry.fixed_locs_from_dict, device=jax.devices()[dev_id])
         self.base_incs = base_incs
-
-        self.stats = {
-            'factorization_time': 0.0,
-            'num_hess_calls': 0,
-            'jvps_time': 0.0,
-            'jac_reconstruction_time': 0.0,
-            'solve_time': 0.0,
-        }
 
         self.sparse_reconstruct = geometry.get_jac_reconstruction_fn()
         self.sparsity_tangents = geometry.jac_reconstruction_tangents
@@ -110,6 +103,8 @@ class SparseNewtonIncrementalSolver:
         self.save_mats = save_mats
         self.save_mats_path = save_mats_path
 
+        self.timer = Timer()
+
         def adjoint_op(xk, adjoint, args):
             def partial_grad(args):
                 return self.grad_fun(xk, *args)
@@ -117,64 +112,23 @@ class SparseNewtonIncrementalSolver:
             _, f_pgrad = jax.vjp(partial_grad, args)
             args_bar = f_pgrad(-adjoint)[0]
             return args_bar
-        
+
         self.adjoint_op = jax.jit(adjoint_op, device=jax.devices()[dev_id])
 
     def lin_elastic_solve(self, xk, args, g, solve_tol=1e-5):
         if self.preconditioner is None:
             data, row_indices, col_indptr = self.lin_sparse_hess_construct(xk, args)
             sparse_hess = scipy.sparse.csc_matrix((data, row_indices, col_indptr))
-            self.preconditioner = scipy.sparse.linalg.spilu(sparse_hess)
+            self.preconditioner = scipy.sparse.linalg.splu(sparse_hess)
 
         M = scipy.sparse.linalg.LinearOperator(
-            (g.size, g.size), self.preconditioner.solve)
+            (g.size, g.size), lambda x: self.preconditioner.solve(x).astype(np.float64))
         A = scipy.sparse.linalg.LinearOperator(
             (g.size, g.size), lambda v: self.lin_loss_hvp(xk, v, args))
         res, info = scipy.sparse.linalg.lgmres(A, -g, tol=solve_tol, M=M, inner_m=3, maxiter=5)
 
         if info > 0:
             data, row_indices, col_indptr = self.lin_sparse_hess_construct(xk, args)
-            sparse_hess = scipy.sparse.csc_matrix((data, row_indices, col_indptr))
-
-            try:
-                self.preconditioner = scipy.sparse.linalg.spilu(sparse_hess)
-            except RuntimeError as e:
-                print('Found singular matrix. Saving to disk.')
-                scipy.sparse.save_npz('singular_matrix.npz', sparse_hess)
-                with open('singular_point.npz', 'wb') as f:
-                    onp.savez(f, xk)
-                with open('singular_args.npz', 'wb') as f:
-                    onp.savez(f, *args)
-                raise
-            M = scipy.sparse.linalg.LinearOperator(
-                (g.size, g.size), self.preconditioner.solve)
-            res, info = scipy.sparse.linalg.lgmres(sparse_hess, -g, tol=solve_tol, M=M, maxiter=10)
-            if info > 0:
-                print('WARNING: Direct ILU factorization was not good enough at 100 iterations.')
-        return res
-
-    def linear_solve(self, xk, args, g, solve_tol=1e-5):
-        if self.preconditioner is None:
-            data, row_indices, col_indptr = self.sparse_hess_construct(xk, args)
-            sparse_hess = scipy.sparse.csc_matrix((data, row_indices, col_indptr))
-            self.preconditioner = scipy.sparse.linalg.splu(sparse_hess)
-
-        if self.save_mats > 0 and self.saved_mats < self.save_mats:
-            print('Saving mat to', os.path.join(self.save_mats_path, f'saved{self.saved_mats}.npz'))
-            data, row_indices, col_indptr = self.sparse_hess_construct(xk, args)
-            sparse_hess = scipy.sparse.csc_matrix((data, row_indices, col_indptr))
-            scipy.sparse.save_npz(os.path.join(self.save_mats_path, f'saved{self.saved_mats}.npz'), sparse_hess)
-            onp.savez(os.path.join(self.save_mats_path, f'saved_grad_{self.saved_mats}.npz'), -g)
-            self.saved_mats += 1
-
-        M = scipy.sparse.linalg.LinearOperator(
-            (g.size, g.size), self.preconditioner.solve)
-        A = scipy.sparse.linalg.LinearOperator(
-            (g.size, g.size), lambda v: self.loss_hvp(xk, v, args))
-        res, info = scipy.sparse.linalg.lgmres(A, -g, tol=solve_tol, M=M, inner_m=3, maxiter=5)
-
-        if info > 0:
-            data, row_indices, col_indptr = self.sparse_hess_construct(xk, args)
             sparse_hess = scipy.sparse.csc_matrix((data, row_indices, col_indptr))
 
             try:
@@ -188,8 +142,67 @@ class SparseNewtonIncrementalSolver:
                     onp.savez(f, *args)
                 raise
             M = scipy.sparse.linalg.LinearOperator(
-                (g.size, g.size), self.preconditioner.solve)
+                (g.size, g.size), lambda x: self.preconditioner.solve(x).astype(np.float64))
             res, info = scipy.sparse.linalg.lgmres(sparse_hess, -g, tol=solve_tol, M=M, maxiter=10)
+            if info > 0:
+                print('WARNING: Direct ILU factorization was not good enough at 100 iterations.')
+        return res
+
+    def linear_solve(self, xk, args, g, solve_tol=1e-5):
+        if self.preconditioner is None:
+            with Time(self.timer, 'hessian_construction'):
+                data, row_indices, col_indptr = self.sparse_hess_construct(xk, args)
+                sparse_hess = scipy.sparse.csc_matrix((data, row_indices, col_indptr))
+            with Time(self.timer, 'lu_decomposition'):
+                self.preconditioner = scipy.sparse.linalg.splu(sparse_hess)
+
+        if self.save_mats > 0 and self.saved_mats < self.save_mats:
+            print('Saving mat to', os.path.join(self.save_mats_path, f'saved{self.saved_mats}.npz'))
+            data, row_indices, col_indptr = self.sparse_hess_construct(xk, args)
+            sparse_hess = scipy.sparse.csc_matrix((data, row_indices, col_indptr))
+            scipy.sparse.save_npz(os.path.join(self.save_mats_path, f'saved{self.saved_mats}.npz'), sparse_hess)
+            onp.savez(os.path.join(self.save_mats_path, f'saved_grad_{self.saved_mats}.npz'), -g)
+            self.saved_mats += 1
+
+        def _precondition_solve(x):
+            with Time(self.timer, 'preconditioner_solve'):
+                return self.preconditioner.solve(x).astype(np.float64)
+        M = scipy.sparse.linalg.LinearOperator(
+            (g.size, g.size), _precondition_solve, dtype=np.float64)
+
+        def _loss_hvp(v):
+            with Time(self.timer, 'loss_hvp'):
+                return self.loss_hvp(xk, v.astype(np.float64), args).block_until_ready()
+        A = scipy.sparse.linalg.LinearOperator(
+            (g.size, g.size), _loss_hvp, dtype=np.float64)
+        with Time(self.timer, 'gmres'):
+            res, info = scipy.sparse.linalg.lgmres(A, -g, tol=solve_tol, M=M, inner_m=3, maxiter=5)
+
+        if info > 0:
+            with Time(self.timer, 'hessian_construction'):
+                data, row_indices, col_indptr = self.sparse_hess_construct(xk, args)
+                sparse_hess = scipy.sparse.csc_matrix((data, row_indices, col_indptr))
+
+            try:
+                with Time(self.timer, 'lu_decomposition'):
+                    self.preconditioner = scipy.sparse.linalg.splu(sparse_hess)
+            except RuntimeError as e:
+                print('Found singular matrix. Saving to disk.')
+                scipy.sparse.save_npz('singular_matrix.npz', sparse_hess)
+                with open('singular_point.npz', 'wb') as f:
+                    onp.savez(f, xk)
+                with open('singular_args.npz', 'wb') as f:
+                    onp.savez(f, *args)
+                raise
+
+            def _precondition_solve(x):
+                with Time(self.timer, 'preconditioner_solve'):
+                    return self.preconditioner.solve(x).astype(np.float64)
+            M = scipy.sparse.linalg.LinearOperator(
+                (g.size, g.size), _precondition_solve, dtype=np.float64)
+
+            with Time(self.timer, 'gmres'):
+                res, info = scipy.sparse.linalg.lgmres(sparse_hess, -g, tol=solve_tol, M=M, maxiter=10)
             if info > 0:
                 print('WARNING: Direct ILU factorization was not good enough at 100 iterations.')
         return res
@@ -197,13 +210,15 @@ class SparseNewtonIncrementalSolver:
     def get_optimize_fn(self):
         @jax.custom_vjp
         def optimize(x0, increment_dict, tractions, ref_ctrl, mat_params, lin_elastic_params=None):
+            self.timer.reset()
+
             # Magic numbers to tune
             succ_mult = 1.05
             fail_mult = 0.8
             n_trial_iters = 50
             min_step_size = 0.001
             step_size_anneal = 0.95
-            tol_switch_threshold = 0.9
+            tol_switch_threshold = 0.90
             low_tol = 1e-1
 
             # `increment_dict` should be a pytree with increments on the appropriate
@@ -214,7 +229,6 @@ class SparseNewtonIncrementalSolver:
             all_xs = []
             all_fixed_locs = []
 
-            #pbar = tqdm(total=100)
             def try_increment(increment, x_s, tol):
                 fixed_displacements = jax.tree_util.tree_map(
                     lambda x: increment * x, increment_dict)
@@ -223,7 +237,8 @@ class SparseNewtonIncrementalSolver:
                 lin_elastic_args = (fixed_locs, tractions, ref_ctrl, lin_elastic_params)
 
                 xk = x_s
-                g = self.grad_fun(xk, *args)
+                with Time(self.timer, 'gradient'):
+                    g = self.grad_fun(xk, *args).block_until_ready()
                 inum = 0
                 total_inum = 0
                 step_size = self.step_size
@@ -237,9 +252,11 @@ class SparseNewtonIncrementalSolver:
                     xk = xk + dx
 
                 while np.linalg.norm(g) > tol and inum < n_trial_iters:
-                    dx = self.linear_solve(xk, args, g, solve_tol=tol)
+                    with Time(self.timer, 'linear_solve'):
+                        dx = self.linear_solve(xk, args, g, solve_tol=tol)
 
-                    test_loss = self.loss_fun(xk + dx * step_size, *args)
+                    with Time(self.timer, 'loss_fun'):
+                        test_loss = self.loss_fun(xk + dx * step_size, *args).block_until_ready()
                     if not np.isnan(test_loss):
                         # Even if we find a step that doesn't get NaN, step 0.8 of the way there.
                         xk = xk + dx * step_size * 0.8
@@ -248,10 +265,14 @@ class SparseNewtonIncrementalSolver:
                         inum = 0
                         step_size = step_size * step_size_anneal
 
-                    g = self.grad_fun(xk, *args)
+                    with Time(self.timer, 'gradient'):
+                        g = self.grad_fun(xk, *args).block_until_ready()
                     inum = inum + 1
                     total_inum = total_inum + 1
-                if np.isnan(self.loss_fun(xk, *args)) or total_inum >= n_trial_iters and np.linalg.norm(g) > tol:
+
+                with Time(self.timer, 'loss_fun'):
+                    loss = self.loss_fun(xk, *args).block_until_ready()
+                if np.isnan(loss) or total_inum >= n_trial_iters and np.linalg.norm(g) > tol:
                     success = False
                 else:
                     success = True
@@ -261,6 +282,8 @@ class SparseNewtonIncrementalSolver:
             while solved_increment < (1.0 - 1e-8):
                 if proposed_increment < 1e-4:
                     print(f'WARNING: Existed at increment {solved_increment}.', flush=True)
+                    if self.print_runtime_stats:
+                        self.timer.summarize()
                     return x_inc, all_xs, all_fixed_locs, solved_increment
                 increment = min(1.0, solved_increment + proposed_increment)
                 if increment > tol_switch_threshold:
@@ -273,12 +296,10 @@ class SparseNewtonIncrementalSolver:
 
                 if success:
                     solved_increment = min(1.0, solved_increment + proposed_increment)
-                    #print(solved_increment, proposed_increment, flush=True)
 
-                    #pbar.update(int(solved_increment * 100))
                     x_inc = xk
                     proposed_increment = proposed_increment * succ_mult
-                    #print(f'solved up to increment {solved_increment}')
+                    #print(f'solved up to increment {solved_increment}', flush=True)
                     all_xs.append(x_inc)
                     all_fixed_locs.append(fixed_locs)
                 else:
@@ -286,7 +307,8 @@ class SparseNewtonIncrementalSolver:
                     proposed_increment = proposed_increment * fail_mult
                     #print(f'failed. new increment is {proposed_increment}', flush=True)
 
-            #pbar.close()
+            if self.print_runtime_stats:
+                self.timer.summarize()
             return x_inc, all_xs, all_fixed_locs, solved_increment
 
         def optimize_fwd(x0, increment_dict, tractions, ref_ctrl, mat_params, lin_elastic_params=None):
