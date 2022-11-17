@@ -13,12 +13,14 @@ import shutil
 import argparse
 import random
 import itertools
+import subprocess
 
 
 slurm_param_dict = {
     'mem': '32G',
-    'time': '34:00:00',
-    'gres': 'gpu:1',
+    'time': '01:00:00',
+    'ngpus': '1',
+    'nnodes': '10',
     'job_name': 'untitled',
     'output': 'output.txt',
 }
@@ -29,13 +31,27 @@ TEMPLATE = \
 
 #SBATCH --job-name={job_name}
 #SBATCH --output={output}
-#SBATCH --account=lips
 #
-#SBATCH --gres={gres}
+#SBATCH --gres=gpu:rtx_2080:{ngpus}
+#SBATCH --ntasks-per-node={ngpus}
+#SBATCH --nodes={nnodes}
 #SBATCH --mem={mem}
 #SBATCH --time={time}
 #
 
+__conda_setup="$('/n/fs/mm-iga/miniconda3/bin/conda' 'shell.bash' 'hook' 2> /dev/null)"
+if [ $? -eq 0 ]; then
+    eval "$__conda_setup"
+else
+    if [ -f "/n/fs/mm-iga/miniconda3/etc/profile.d/conda.sh" ]; then
+        . "/n/fs/mm-iga/miniconda3/etc/profile.d/conda.sh"
+    else
+        export PATH="/n/fs/mm-iga/miniconda3/bin:$PATH"
+    fi
+fi
+unset __conda_setup
+
+conda activate igaconda38
 '''
 
 
@@ -58,8 +74,9 @@ def main():
     parser.add_argument('--experiment-name', help='experiment name')
     parser.add_argument('--slurm-overrides',
                         help='changes from slurm defaults')
+    parser.add_argument('--nrepeats', type=int, default=1, help='number of repeats to queue each experiment.')
     parser.add_argument(
-        '--experiment-dir', default='/n/fs/mm-iga/Varmint/', help='experiment base directory')
+        '--experiment-dir', default='/n/fs/mm-iga/Varmint/nma_mpi/', help='experiment base directory')
     parser.add_argument('--overwrite', action='store_true',
                         help='Overwrite the existing experiment directory.')
     parser.add_argument('-v', '--verbose', action='store_true',
@@ -137,7 +154,7 @@ def main():
                 slurm_dict_copy['job_name'] = str(
                     args.experiment_name) + 'wid{0:04}'.format(i)
                 slurm_out = TEMPLATE.format(**slurm_dict_copy)
-                command = 'srun ' + exp
+                command = 'srun --mpi=pmi2 ' + exp
                 command = substitute_command_parameters(
                     command, {'wid': '{0:04}'.format(i), 'expdir': exp_dir})
 
@@ -160,7 +177,7 @@ def main():
             slurm_dict_copy['job_name'] = str(
                 args.experiment_name) + 'wid{0:04}'.format(i)
             slurm_out = TEMPLATE.format(**slurm_dict_copy)
-            command = 'srun ' + exp
+            command = 'srun --mpi=pmi2 ' + exp
             command = substitute_command_parameters(
                 command, {'wid': '{0:04}'.format(i), 'expdir': exp_dir})
 
@@ -183,7 +200,8 @@ def main():
             print('Submitting')
             for file in files_list:
                 print('sbatch {}'.format(file))
-                os.system('sbatch {}'.format(file))
+                for _ in range(args.nrepeats):
+                    sp = subprocess.run(['sbatch', '--dependency=singleton', file], capture_output=True)
             break
         elif a == 'N':
             print('Ok bye.')
