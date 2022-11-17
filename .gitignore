@@ -139,6 +139,8 @@ nogit/
 experiments.txt
 experiment_launch.sh
 *_scratch.ipynb
+scratch/
+*.DS_Store
 
 # Vim swap files
 *.swp
