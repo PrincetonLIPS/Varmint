@@ -141,6 +141,7 @@ experiment_launch.sh
 *_scratch.ipynb
 scratch/
 *.DS_Store
+local_config.py
 
 # Vim swap files
 *.swp
