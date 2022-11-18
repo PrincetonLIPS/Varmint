@@ -7,25 +7,24 @@ import sys
 import os
 import gc
 
-from varmintv2.solver.optimization_speed import SparseNewtonIncrementalSolver
+from varmint.solver.optimization_speed import SparseNewtonIncrementalSolver
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(SCRIPT_DIR))
 
-from nma.construct_nma_shape import construct_cell2D, generate_bertoldi_radii, generate_circular_radii, generate_rectangular_radii
-from varmintv2.geometry.elements import Patch2D
-from varmintv2.geometry.geometry import Geometry, SingleElementGeometry
-from varmintv2.physics.constitutive import NeoHookean2D, LinearElastic2D
-from varmintv2.physics.materials import Material
-from varmintv2.solver.discretize import HamiltonianStepper
-from varmintv2.utils.movie_utils import create_movie, create_static_image
+from varmint.geometry.elements import Patch2D
+from varmint.geometry.geometry import Geometry, SingleElementGeometry
+from varmint.physics.constitutive import NeoHookean2D, LinearElastic2D
+from varmint.physics.materials import Material
+from varmint.solver.discretize import HamiltonianStepper
+from varmint.utils.movie_utils import create_movie, create_static_image
 
 import jax.experimental.host_callback as hcb
 
-from construct_beam_shape import construct_beam
+from small_beam_geometry import construct_beam
 
-from varmintv2.utils import analysis_utils as autils
-from varmintv2.utils import experiment_utils as eutils
+from varmint.utils import analysis_utils as autils
+from varmint.utils import experiment_utils as eutils
 
 import scipy.optimize
 

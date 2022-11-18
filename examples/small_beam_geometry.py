@@ -2,11 +2,11 @@ import jax.numpy as jnp
 import numpy as np
 import jax
 
-from varmintv2.geometry import elements
-from varmintv2.geometry import bsplines
-from varmintv2.geometry.geometry import SingleElementGeometry
-from varmintv2.physics.constitutive import PhysicsModel
-from varmintv2.utils.geometry_utils import generate_constraints
+from varmint.geometry import elements
+from varmint.geometry import bsplines
+from varmint.geometry.geometry import SingleElementGeometry
+from varmint.physics.constitutive import PhysicsModel
+from varmint.utils.geometry_utils import generate_constraints
 
 
 def construct_beam(len_x, len_y, patch_ncp, spline_degree, material):

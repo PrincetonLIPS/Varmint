@@ -11,7 +11,7 @@ from varmint.solver.optimization_speed import SparseNewtonIncrementalSolver
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(SCRIPT_DIR))
 
-from construct_nma_shape import construct_cell2D, generate_bertoldi_radii, generate_circular_radii, generate_rectangular_radii
+from bertoldi_compression_geometry import construct_cell2D, generate_bertoldi_radii, generate_circular_radii, generate_rectangular_radii
 from varmint.geometry.elements import Patch2D
 from varmint.geometry.geometry import Geometry, SingleElementGeometry
 from varmint.physics.constitutive import NeoHookean2D, LinearElastic2D
