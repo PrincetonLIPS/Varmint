@@ -14,11 +14,11 @@ from scipy.spatial import KDTree
 
 import sys
 import os
-sys.path.append(os.path.dirname('/n/fs/mm-iga/Varmint/varmintv2'))
-from varmintv2.geometry import elements
-from varmintv2.geometry import bsplines
-from varmintv2.geometry.geometry import SingleElementGeometry
-from varmintv2.physics.constitutive import PhysicsModel
+sys.path.append(os.path.dirname('/n/fs/mm-iga/Varmint/varmint'))
+from varmint.geometry import elements
+from varmint.geometry import bsplines
+from varmint.geometry.geometry import SingleElementGeometry
+from varmint.physics.constitutive import PhysicsModel
 
 from mpi4py import MPI
 

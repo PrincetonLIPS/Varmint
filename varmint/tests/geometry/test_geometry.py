@@ -8,12 +8,12 @@ import numpy.random as npr
 import numpy.testing as nptest
 import unittest as ut
 
-from varmintv2.geometry.geometry import SingleElementGeometry
-from varmintv2.geometry import elements
-from varmintv2.geometry import bsplines
-from varmintv2.utils import geometry_utils
-from varmintv2.physics.materials import WigglyMat
-from varmintv2.physics.constitutive import NeoHookean2D
+from varmint.geometry.geometry import SingleElementGeometry
+from varmint.geometry import elements
+from varmint.geometry import bsplines
+from varmint.utils import geometry_utils
+from varmint.physics.materials import WigglyMat
+from varmint.physics.constitutive import NeoHookean2D
 
 
 class Test_SEGeometry(ut.TestCase):

@@ -24,8 +24,8 @@ import scipy.stats
 import time
 from functools import partial
 
-from varmintv2.geometry.geometry import Geometry, SingleElementGeometry
-from varmintv2.utils.timer import Timer, Time
+from varmint.geometry.geometry import Geometry, SingleElementGeometry
+from varmint.utils.timer import Timer, Time
 
 
 def hvp(f, primals, tangents, args):

@@ -6,7 +6,7 @@ import timeit
 
 from functools import partial
 
-from varmintv2.utils.typing import Array1D, Array2D, Array3D, Array4D, ArrayND
+from varmint.utils.typing import Array1D, Array2D, Array3D, Array4D, ArrayND
 
 
 def mesh(*control):

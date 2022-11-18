@@ -16,13 +16,13 @@ import scipy.optimize
 import scipy.sparse
 import scipy.sparse.linalg
 
-from varmintv2.physics.constitutive import PhysicsModel
-from varmintv2.physics.energy import generate_stress_fn, generate_total_energy_fn
-from varmintv2.utils import geometry_utils
-from varmintv2.utils import sparsity
+from varmint.physics.constitutive import PhysicsModel
+from varmint.physics.energy import generate_stress_fn, generate_total_energy_fn
+from varmint.utils import geometry_utils
+from varmint.utils import sparsity
 
-from varmintv2.utils.typing import Array1D, Array2D, ArrayND
-from varmintv2.geometry.elements import Element
+from varmint.utils.typing import Array1D, Array2D, ArrayND
+from varmint.geometry.elements import Element
 
 
 class Geometry(ABC):

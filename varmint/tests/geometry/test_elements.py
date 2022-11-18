@@ -8,8 +8,8 @@ import numpy.random as npr
 import numpy.testing as nptest
 import unittest as ut
 
-from varmintv2.geometry import bsplines
-from varmintv2.geometry import elements
+from varmint.geometry import bsplines
+from varmint.geometry import elements
 
 
 class Test_Patch2D(ut.TestCase):

@@ -1,7 +1,7 @@
 import unittest as ut
 
-from varmintv2.physics.materials import *
-from varmintv2.utils.exceptions import *
+from varmint.physics.materials import *
+from varmint.utils.exceptions import *
 
 
 class Test_Material(ut.TestCase):

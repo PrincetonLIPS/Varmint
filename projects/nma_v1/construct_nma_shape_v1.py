@@ -12,10 +12,10 @@ from scipy.sparse import csr_matrix, csc_matrix, kron, save_npz
 from scipy.sparse.csgraph import connected_components, dijkstra
 from scipy.spatial import KDTree
 
-from varmintv2.geometry import elements
-from varmintv2.geometry import bsplines
-from varmintv2.geometry.geometry import SingleElementGeometry
-from varmintv2.physics.constitutive import PhysicsModel
+from varmint.geometry import elements
+from varmint.geometry import bsplines
+from varmint.geometry.geometry import SingleElementGeometry
+from varmint.physics.constitutive import PhysicsModel
 
 
 class ShapeUnit2D(object):

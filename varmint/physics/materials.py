@@ -1,5 +1,5 @@
 
-from varmintv2.utils.exceptions import *
+from varmint.utils.exceptions import *
 
 
 class classproperty(object):

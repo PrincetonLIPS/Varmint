@@ -7,9 +7,9 @@ import logging
 
 from functools import partial
 
-from varmintv2.geometry.elements import Element
-from varmintv2.physics.constitutive import PhysicsModel
-from varmintv2.utils.typing import ArrayND
+from varmint.geometry.elements import Element
+from varmint.physics.constitutive import PhysicsModel
+from varmint.utils.typing import ArrayND
 
 import jax.experimental.host_callback as hcb
 

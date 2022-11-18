@@ -6,8 +6,8 @@ import numpy as onp
 import matplotlib.pyplot as plt
 import quadpy
 
-from varmintv2.utils.typing import CtrlArray, ArrayND, Array2D, Array3D
-from varmintv2.geometry.bsplines import (
+from varmint.utils.typing import CtrlArray, ArrayND, Array2D, Array3D
+from varmint.geometry.bsplines import (
     bspline1d_derivs,
     mesh,
     bspline2d,

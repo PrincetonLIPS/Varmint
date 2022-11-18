@@ -34,14 +34,14 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(SCRIPT_DIR))
 
 from construct_digital_mnist_shape import generate_digital_mnist_shape, generate_bertoldi_radii, generate_circular_radii, generate_rectangular_radii
-from varmintv2.geometry.elements import Patch2D
-from varmintv2.geometry.geometry import Geometry, SingleElementGeometry
-from varmintv2.physics.constitutive import NeoHookean2D, LinearElastic2D, NeoHookean2DClamped
-from varmintv2.physics.materials import Material
-from varmintv2.utils.movie_utils import create_movie, create_static_image, plot_ctrl
-from varmintv2.solver.optimization_speed import SparseNewtonIncrementalSolver
+from varmint.geometry.elements import Patch2D
+from varmint.geometry.geometry import Geometry, SingleElementGeometry
+from varmint.physics.constitutive import NeoHookean2D, LinearElastic2D, NeoHookean2DClamped
+from varmint.physics.materials import Material
+from varmint.utils.movie_utils import create_movie, create_static_image, plot_ctrl
+from varmint.solver.optimization_speed import SparseNewtonIncrementalSolver
 
-import varmintv2.geometry.bsplines as bsplines
+import varmint.geometry.bsplines as bsplines
 
 import optax
 import haiku as hk

@@ -4,7 +4,7 @@ import numpy.random as npr
 import numpy.testing as nptest
 import unittest as ut
 
-import varmintv2.geometry.bsplines as bsplines
+import varmint.geometry.bsplines as bsplines
 
 from geomdl import BSpline
 

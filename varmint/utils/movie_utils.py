@@ -7,12 +7,12 @@ from operator import itemgetter
 from matplotlib.animation import FuncAnimation
 import matplotlib.patches as patches
 
-from varmintv2.geometry.bsplines import bspline2d
-import varmintv2.geometry.bsplines as bsplines
+from varmint.geometry.bsplines import bspline2d
+import varmint.geometry.bsplines as bsplines
 
 import time
 
-from varmintv2.geometry.elements import Element
+from varmint.geometry.elements import Element
 
 
 def create_movie(
