@@ -443,10 +443,6 @@ class SingleElementGeometry(Geometry):
         active_traction_boundaries_nr = self.active_traction_boundaries[~self.rigid_patches_boolean]
         active_traction_boundaries_r = self.active_traction_boundaries[self.rigid_patches_boolean]
 
-        batch_dim = onp.sum(~self.rigid_patches_boolean)
-        print('batch dim', batch_dim)
-        outer = 1
-
         def potential_energy(cur_g_position, fix_l_position, traction, ref_l_position, mat_params):
             def_ctrl = g2l(cur_g_position, fix_l_position, ref_l_position)
 
@@ -456,12 +452,6 @@ class SingleElementGeometry(Geometry):
             mat_params_nr = jax.tree_map(lambda x: x[~self.rigid_patches_boolean], mat_params)
 
             # Non-rigid patches
-            #xs = [def_ctrl_nr, jnp.zeros_like(def_ctrl_nr), ref_l_position_nr,
-            #      active_traction_boundaries_nr, traction_nr, mat_params_nr]
-            #xs = jax.tree_map(lambda x: x.reshape((outer, batch_dim // outer) + x.shape[1:]), xs)
-            #def mapped_element_energy_fn(xs):
-            #    return jax.vmap(self.element_energy_fn)(*xs)
-            #_, G_nr, S_nr, T_nr = jax.lax.map(mapped_element_energy_fn, xs)
             _, G_nr, S_nr, T_nr = jax.vmap(self.element_energy_fn)(
                 def_ctrl_nr, jnp.zeros_like(def_ctrl_nr), ref_l_position_nr,
                 active_traction_boundaries_nr, traction_nr, mat_params_nr

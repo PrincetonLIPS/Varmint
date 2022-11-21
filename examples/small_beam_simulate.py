@@ -7,21 +7,16 @@ import sys
 import os
 import gc
 
-from varmint.solver.optimization_speed import SparseNewtonIncrementalSolver
-
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(os.path.dirname(SCRIPT_DIR))
-
+from varmint.solver.incremental_loader import SparseNewtonIncrementalSolver
 from varmint.geometry.elements import Patch2D
 from varmint.geometry.geometry import Geometry, SingleElementGeometry
 from varmint.physics.constitutive import NeoHookean2D, LinearElastic2D
 from varmint.physics.materials import Material
-from varmint.solver.discretize import HamiltonianStepper
 from varmint.utils.movie_utils import create_movie, create_static_image
 
 import jax.experimental.host_callback as hcb
 
-from small_beam_geometry import construct_beam
+from geometry.small_beam_geometry import construct_beam
 
 from varmint.utils import analysis_utils as autils
 from varmint.utils import experiment_utils as eutils

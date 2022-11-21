@@ -1,4 +1,5 @@
 from absl import flags
+from absl import logging
 
 import os
 import re
@@ -10,13 +11,46 @@ import pickle
 import pandas as pd
 
 import jax.numpy as np
+import numpy.random as npr
 
 from collections import namedtuple
-from mpi_utils import *
+from varmint.utils.mpi_utils import *
+
+import varmint.utils.jaxboard as jaxboard
 
 
-kSlurmRoot = '/n/fs/mm-iga/Varmint/nma/nma_mpi/slurm_experiments/'
+kSlurmRoot = '/n/fs/mm-iga/Varmint/slurm_experiments/'
 
+
+def initialize_experiment(verbose=False):
+    # Weirdly the log level gets set to INFO with absl.
+    import matplotlib.animation
+    matplotlib.animation._log.setLevel('WARN')
+    args = flags.FLAGS
+
+    comm = MPI.COMM_WORLD
+    if verbose:
+        rprint(f'Initializing MPI with JAX.', comm=comm)
+    local_rank = find_local_rank(comm)
+    dev_id = local_rank % len(jax.devices())
+
+    if verbose and local_rank == 0:
+        print(f'Node {MPI.Get_processor_name()} reporting with {len(jax.devices())} devices: {jax.devices()}', flush=True)
+
+    prepare_experiment_directories(args, comm)
+    # args.seed and args.exp_dir should be set.
+
+    config = args.config
+    save_args(args, comm)
+
+    if 'seed' in config:
+        npr.seed(config.seed)
+
+    if comm.rank == 0:
+        logdir = args.exp_dir
+        summary_writer = jaxboard.SummaryWriter(logdir)
+
+    return args, dev_id, local_rank
 
 def prepare_experiment_args(parser, exp_root, source_root):
     # Experiment organization parameters.
@@ -59,8 +93,9 @@ def prepare_experiment_directories(args, comm):
 
 def save_args(args, comm):
     if comm.rank == 0:
-        config_path = os.path.join(args.exp_dir, 'config.py')
-        shutil.copyfile(args.config.filename, config_path)
+        if 'filename' in args.config:
+            config_path = os.path.join(args.exp_dir, 'config.py')
+            shutil.copyfile(args.config.filename, config_path)
         with open(os.path.join(args.exp_dir, 'flags.json'), 'w') as f:
             json.dump(args.config.to_json_best_effort(), f)
 
