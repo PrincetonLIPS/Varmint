@@ -7,6 +7,10 @@ import numpy as onp
 from scipy.sparse.coo import coo_matrix
 from scipy.spatial.distance import pdist, squareform
 
+from scipy.spatial import KDTree
+
+from varmint.utils.mpi_utils import rprint
+
 
 def verify_constraints(ctrl, constraints):
     """Verify whether a set of SingleElementGeometry constraints
@@ -16,12 +20,28 @@ def verify_constraints(ctrl, constraints):
     all_rows, all_cols = constraints
     flat_ctrl = ctrl.reshape(-1, ctrl.shape[-1])
     return onp.allclose(flat_ctrl[all_rows, :], flat_ctrl[all_cols, :],
-                        rtol=0.0, atol=1e-14)
+                        rtol=0.0, atol=1e-9)
+
+
+def fast_generate_constraints(ctrl, verbose=False):
+    # Find all constraints with a KDTree. Should take O(n log n) time,
+    # and much preferable to manually constructing constraints.
+    if verbose:
+        rprint('Finding constraints.')
+    kdtree = KDTree(ctrl)
+    constraints = kdtree.query_pairs(1e-9)
+    constraints = onp.array(list(constraints))
+    if len(constraints) == 0:
+       constraints = onp.array([[0,0]])
+    if verbose:
+        rprint('\tDone.')
+
+    return constraints
 
 
 def generate_constraints(ctrl):
     """Generate constraints satisfied by SingleElementGeometry control points.
-    
+
     This should only really be used for testing, since it will be inefficient.
     """
 

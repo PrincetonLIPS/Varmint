@@ -29,9 +29,6 @@ def neohookean_energy2d_log(F, E, nu):
     shear = E / (2*(1+nu))
     bulk = E / (3*(1-2*nu))
 
-    #I1 = np.trace(F.T @ F)
-    #J = npla.det(F)
-
     J = F[1, 1] * F[0, 0] - F[1, 0] * F[0, 1]
     I1 = F[1, 1] ** 2 + F[0, 0] ** 2 + F[1, 0] ** 2 + F[0, 1] ** 2
 

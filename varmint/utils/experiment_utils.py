@@ -18,8 +18,7 @@ from varmint.utils.mpi_utils import *
 
 import varmint.utils.jaxboard as jaxboard
 
-
-kSlurmRoot = '/n/fs/mm-iga/Varmint/slurm_experiments/'
+SLURM_ROOT = '/n/fs/mm-iga/Varmint/slurm_experiments/'
 
 
 def initialize_experiment(verbose=False):
@@ -51,6 +50,7 @@ def initialize_experiment(verbose=False):
         summary_writer = jaxboard.SummaryWriter(logdir)
 
     return args, dev_id, local_rank
+
 
 def prepare_experiment_args(parser, exp_root, source_root):
     # Experiment organization parameters.
