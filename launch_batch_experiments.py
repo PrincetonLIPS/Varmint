@@ -1,8 +1,6 @@
-#!/n/fs/mm-iga/miniconda3/envs/igaconda38/bin/python
-
 """
 Example use:
-    ./launch_batch_experiments.py experiment.txt --experiment-name=test_experiment --experiment-dir=test_exp_dir --slurm-overrides="mem=31G,gres=gpu:1"
+    python launch_batch_experiments.py experiment.txt --experiment-name=test_experiment --experiment-dir=test_exp_dir --slurm-overrides="mem=31G,gres=gpu:1"
 
 """
 
@@ -20,7 +18,7 @@ slurm_param_dict = {
     'mem': '32G',
     'time': '01:00:00',
     'ngpus': '1',
-    'nnodes': '10',
+    'nnodes': '1',
     'job_name': 'untitled',
     'output': 'output.txt',
 }
@@ -51,7 +49,7 @@ else
 fi
 unset __conda_setup
 
-conda activate igaconda38
+conda activate varmint
 '''
 
 
@@ -76,7 +74,7 @@ def main():
                         help='changes from slurm defaults')
     parser.add_argument('--nrepeats', type=int, default=1, help='number of repeats to queue each experiment.')
     parser.add_argument(
-        '--experiment-dir', default='/n/fs/mm-iga/Varmint/nma_mpi/', help='experiment base directory')
+        '--experiment-dir', default='/n/fs/mm-iga/Varmint/', help='experiment base directory')
     parser.add_argument('--overwrite', action='store_true',
                         help='Overwrite the existing experiment directory.')
     parser.add_argument('-v', '--verbose', action='store_true',
