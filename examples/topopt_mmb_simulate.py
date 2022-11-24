@@ -66,8 +66,7 @@ class SteelMat(Material):
 
 
 def construct_simulation(config, geo_params, numx, numy, disp_t, patch_ncp):
-    # TODO(doktay): This will currently not work when using LinearElastic2D.
-    mat = NeoHookean2D(SteelMat)
+    mat = LinearElastic2D(SteelMat)
 
     cell, get_ref_ctrl_fn = \
         construct_mmb_beam(geo_params, numx, numy, patch_ncp, quad_degree=config.quaddeg,
