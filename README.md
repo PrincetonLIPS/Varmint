@@ -12,7 +12,7 @@ Differentiation through the nonlinear solver is carried out through adjoint meth
 ```
 conda env create -f environment.yml
 conda activate varmint
-export PYTHONPATH=$(pwd)
+export PYTHONPATH=$(pwd):$PYTHONPATH
 ```
 
 Then create a file called `local_config.py` containing:
