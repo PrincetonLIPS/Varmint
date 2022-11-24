@@ -35,17 +35,23 @@ def neohookean_energy2d_log(F, E, nu):
     logJ = np.log1p(J-1)
     return (shear / 2) * (I1 - 2 - 2*logJ) + \
            (bulk  / 2) * logJ**2
-    #return (shear / 2) * (I1 - 2 - 2*np.log1p(J - 1)) + \
-    #       (bulk  / 2) * np.log1p(J - 1)**2
 
 
-def linear_elastic_energy2d(F, lmbda, mu):
+def linear_elastic_energy2d(F, E, nu):
+    # Convert E and nu to lmbda and mu
+    lmbda = nu * E / ((1+nu) * (1-2*nu))
+    mu = E / (2*(1+nu))
+
     strain = 0.5 * (F + F.T - 2 * np.eye(2))
     return 0.5 * lmbda * (np.trace(strain) ** 2) + \
         mu * np.tensordot(strain, strain, axes=([0, 1], [0, 1]))
 
 
-def neohookean_energy3d_log(F, shear, bulk):
+def neohookean_energy3d_log(F, E, nu):
+    # Convert E and nu to shear and bulk
+    shear = E / (2*(1+nu))
+    bulk = E / (3*(1-2*nu))
+
     I1 = np.trace(F.T @ F)
     J = npla.det(F)
     return (shear/2) * (I1 - 3 - 2*np.log(J)) + (bulk/2)*(J-1)**2
@@ -84,7 +90,6 @@ class LinearElastic2D(PhysicsModel):
 
     def get_energy_fn(self):
         return linear_elastic_energy2d
-        #return partial(linear_elastic_energy2d, lmbda=self.lmbda, mu=self.mu)
 
     @property
     def density(self):
@@ -122,13 +127,9 @@ class NeoHookean2D(PhysicsModel):
         self._density = self.material.density
 
     def get_energy_fn(self):
-
         if self.log:
             return neohookean_energy2d_log
-            #return partial(neohookean_energy2d_log, shear=self.shear, bulk=self.bulk)
-
         return neohookean_energy2d
-        #return partial(neohookean_energy2d, shear=self.shear, bulk=self.bulk)
 
     @property
     def density(self):
@@ -145,7 +146,6 @@ class NeoHookean3D(PhysicsModel):
 
     def get_energy_fn(self):
         return neohookean_energy3d_log
-        #return partial(neohookean_energy3d_log, shear=self.shear, bulk=self.bulk)
 
     @property
     def density(self):

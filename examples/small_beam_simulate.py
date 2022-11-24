@@ -86,8 +86,8 @@ if __name__ == '__main__':
     # Defines the material parameters.
     # Can ignore this. Only useful when doing optimization wrt material params.
     mat_params = (
-        TPUMat.shear * np.ones(ref_ctrl.shape[0]),
-        TPUMat.bulk * np.ones(ref_ctrl.shape[0]),
+        TPUMat.E * np.ones(ref_ctrl.shape[0]),
+        TPUMat.nu * np.ones(ref_ctrl.shape[0]),
     )
     tractions = beam.tractions_from_dict({})
 

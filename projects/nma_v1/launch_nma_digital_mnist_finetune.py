@@ -13,8 +13,8 @@ from functools import partial
 
 from ml_collections import config_flags
 
-import experiment_utils as eutils
-from mpi_utils import *
+import varmint.utils.experiment_utils as eutils
+from varmint.utils.mpi_utils import *
 from pore_shape_targets import get_shape_target_generator
 
 import tensorflow_datasets as tfds
@@ -30,16 +30,13 @@ config.update("jax_enable_x64", True)
 from mpi4py import MPI
 #import mpi4jax
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(os.path.dirname(SCRIPT_DIR))
-
 from construct_digital_mnist_shape import generate_digital_mnist_shape, generate_bertoldi_radii, generate_circular_radii, generate_rectangular_radii
 from varmint.geometry.elements import Patch2D
 from varmint.geometry.geometry import Geometry, SingleElementGeometry
 from varmint.physics.constitutive import NeoHookean2D, LinearElastic2D, NeoHookean2DClamped
 from varmint.physics.materials import Material
 from varmint.utils.movie_utils import create_movie, create_static_image, plot_ctrl
-from varmint.solver.optimization_speed import SparseNewtonIncrementalSolver
+from varmint.solver.incremental_loader import SparseNewtonIncrementalSolver
 
 import varmint.geometry.bsplines as bsplines
 
@@ -48,7 +45,7 @@ import haiku as hk
 
 import matplotlib.pyplot as plt
 import matplotlib as mpl
-import jaxboard
+import varmint.utils.jaxboard as jaxboard
 
 import digital_mnist_patches
 from digital_mnist_movie_utils import create_movie_mnist
@@ -56,8 +53,8 @@ from digital_mnist_movie_utils import create_movie_mnist
 
 FLAGS = flags.FLAGS
 eutils.prepare_experiment_args(
-    None, exp_root='/n/fs/mm-iga/Varmint/nma_mpi/experiments',
-            source_root='n/fs/mm-iga/Varmint/nma_mpi')
+    None, exp_root='/n/fs/mm-iga/Varmint/projects/nma_v1/experiments',
+            source_root='n/fs/mm-iga/Varmint/projects/nma_v1')
 
 config_flags.DEFINE_config_file('config', 'config/digital_mnist_finetune/default.py')
 
@@ -141,35 +138,10 @@ def main(argv):
     all_points_dict = digital_mnist_patches.get_all_points_dict(
             5, config.cell_size, config.border_size)
 
-    if config.mat_model == 'NeoHookean2D':
-        mat_params = (
-            TPUMat.shear * np.ones(ref_ctrl.shape[0]),
-            TPUMat.bulk * np.ones(ref_ctrl.shape[0]),
-        )
-        linear_mat_params = (
-            TPUMat.lmbda * np.ones(ref_ctrl.shape[0]),
-            TPUMat.mu * np.ones(ref_ctrl.shape[0]),
-        )
-    elif config.mat_model == 'NeoHookean2DClamped':
-        mat_params = (
-            TPUMat.shear * np.ones(ref_ctrl.shape[0]),
-            TPUMat.bulk * np.ones(ref_ctrl.shape[0]),
-        )
-        linear_mat_params = (
-            TPUMat.lmbda * np.ones(ref_ctrl.shape[0]),
-            TPUMat.mu * np.ones(ref_ctrl.shape[0]),
-        )
-    elif config.mat_model == 'LinearElastic2D':
-        mat_params = (
-            TPUMat.lmbda * np.ones(ref_ctrl.shape[0]),
-            TPUMat.mu * np.ones(ref_ctrl.shape[0]),
-        )
-        linear_mat_params = (
-            TPUMat.lmbda * np.ones(ref_ctrl.shape[0]),
-            TPUMat.mu * np.ones(ref_ctrl.shape[0]),
-        )
-    else:
-        raise ValueError('Incorrect material model')
+    mat_params = (
+        TPUMat.E * np.ones(ref_ctrl.shape[0]),
+        TPUMat.nu * np.ones(ref_ctrl.shape[0]),
+    )
 
     optimizer = SparseNewtonIncrementalSolver(cell, potential_energy_fn, dev_id=dev_id,
                                               **config.solver_parameters)
@@ -358,8 +330,8 @@ def main(argv):
             ds_elements.append(next(train_iterator))
 
         loss, grad_loss = loss_val_and_grad(curr_all_params, ds_elements[comm.rank])
-        avg_loss = pytree_reduce(comm, loss, scale=1./mpi_size)
-        avg_grad_loss = pytree_reduce(comm, grad_loss, scale=1./mpi_size)
+        avg_loss = pytree_reduce(loss, comm, scale=1./mpi_size)
+        avg_grad_loss = pytree_reduce(grad_loss, comm, scale=1./mpi_size)
         step_time = time.time() - iter_time
 
         if comm.rank == 0:
@@ -391,7 +363,7 @@ def main(argv):
 
         if i % config.save_every == 0:
             # Verify that the parameters have not deviated between different MPI ranks.
-            test_pytrees_equal(comm, curr_all_params)
+            test_pytrees_equal(curr_all_params, comm)
 
             if comm.rank == 0:
                 # Pickle parameters

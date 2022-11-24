@@ -117,26 +117,15 @@ def main(argv):
     l2g, g2l = cell.get_global_local_maps()
     ref_ctrl = radii_to_ctrl_fn(init_radii)
 
-    if config.mat_model == 'NeoHookean2D':
-        mat_params = (
-            TPUMat.shear * np.ones(ref_ctrl.shape[0]),
-            TPUMat.bulk * np.ones(ref_ctrl.shape[0]),
-        )
-    elif config.mat_model == 'LinearElastic2D':
-        mat_params = (
-            TPUMat.lmbda * np.ones(ref_ctrl.shape[0]),
-            TPUMat.mu * np.ones(ref_ctrl.shape[0]),
-        )
+    mat_params = (
+        TPUMat.E * np.ones(ref_ctrl.shape[0]),
+        TPUMat.nu * np.ones(ref_ctrl.shape[0]),
+    )
 
     fixed_locs = cell.fixed_locs_from_dict(ref_ctrl, {})
     tractions = cell.tractions_from_dict({})
 
-    optimizer = SparseNewtonIncrementalSolver(cell, potential_energy_fn, max_iter=1000,
-                                              step_size=1.0, tol=1e-8, ls_backtrack=0.95, update_every=10, save_mats=0, print_runtime_stats=True)
-
     x0 = l2g(ref_ctrl, ref_ctrl)
-    rprint(f'Optimizing over {x0.size} degrees of freedom.')
-    optimize = optimizer.get_optimize_fn()
 
     def _radii_to_ref_and_init_x(radii):
         ref_ctrl = radii_to_ctrl_fn(radii)
@@ -145,6 +134,11 @@ def main(argv):
 
     radii_to_ref_and_init_x = jax.jit(_radii_to_ref_and_init_x)
     fixed_locs_from_dict = jax.jit(cell.fixed_locs_from_dict)
+
+    rprint(f'Optimizing over {x0.size} degrees of freedom.')
+    optimizer = SparseNewtonIncrementalSolver(cell, potential_energy_fn,
+                                              tol=1e-8, print_runtime_stats=True)
+    optimize = optimizer.get_optimize_fn()
 
     def simulate(radii):
         ref_ctrl, current_x = radii_to_ref_and_init_x(radii)

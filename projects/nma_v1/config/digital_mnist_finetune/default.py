@@ -79,8 +79,8 @@ def get_config() -> config_dict.ConfigDict:
     config.freeze_pretrain = False
     config.freeze_colors = False
 
-    config.nn_checkpoint = '/n/fs/mm-iga/Varmint/nma_mpi/notebooks/mnist_lenet_weights_2.pkl'
-    config.material_checkpoint = '/n/fs/mm-iga/Varmint/nma_mpi/experiments/digital_mnist_experiments/digital_mnist_second_try_10digits_temp10_freezeradii/sim-digital_mnist_second_try_10digits_temp10_freezeradii-params-550.pkl'
+    config.nn_checkpoint = '/n/fs/mm-iga/Varmint_postnmav1/nma_mpi/notebooks/mnist_lenet_weights_2.pkl'
+    config.material_checkpoint = '/n/fs/mm-iga/Varmint_postnmav1/nma_mpi/experiments/digital_mnist_experiments/digital_mnist_second_try_10digits_temp10_freezeradii/sim-digital_mnist_second_try_10digits_temp10_freezeradii-params-550.pkl'
 
     config.softmax_temp = 10.0
 
