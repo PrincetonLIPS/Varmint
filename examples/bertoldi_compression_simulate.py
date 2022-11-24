@@ -46,6 +46,10 @@ config = config_dict.ConfigDict({
     'splinedeg': 2,
     'size': 8,
     'mat_model': 'NeoHookean2D',
+
+    'solver_parameters': {
+        'tol': 1e-8,
+    },
 })
 
 config_flags.DEFINE_config_dict('config', config)
@@ -122,7 +126,6 @@ def main(argv):
         TPUMat.nu * np.ones(ref_ctrl.shape[0]),
     )
 
-    fixed_locs = cell.fixed_locs_from_dict(ref_ctrl, {})
     tractions = cell.tractions_from_dict({})
 
     x0 = l2g(ref_ctrl, ref_ctrl)
@@ -133,11 +136,11 @@ def main(argv):
         return ref_ctrl, init_x
 
     radii_to_ref_and_init_x = jax.jit(_radii_to_ref_and_init_x)
-    fixed_locs_from_dict = jax.jit(cell.fixed_locs_from_dict)
 
     rprint(f'Optimizing over {x0.size} degrees of freedom.')
     optimizer = SparseNewtonIncrementalSolver(cell, potential_energy_fn,
-                                              tol=1e-8, print_runtime_stats=True)
+                                              print_runtime_stats=True,
+                                              **config.solver_parameters)
     optimize = optimizer.get_optimize_fn()
 
     def simulate(radii):

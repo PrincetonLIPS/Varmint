@@ -9,9 +9,7 @@ from varmint.physics.constitutive import PhysicsModel
 from varmint.utils.geometry_utils import generate_constraints
 
 
-def construct_beam(len_x, len_y, patch_ncp, spline_degree, material):
-    quad_degree = 10
-
+def construct_beam(len_x, len_y, patch_ncp, spline_degree, quad_degree, material):
     xknots = bsplines.default_knots(spline_degree, patch_ncp)
     yknots = bsplines.default_knots(spline_degree, patch_ncp)
 
@@ -24,9 +22,9 @@ def construct_beam(len_x, len_y, patch_ncp, spline_degree, material):
     all_ctrls = all_ctrls[None, ...]
     
     # Dirichlet labels
-    group_1 = np.abs(all_ctrls[..., 0] - 0.0) < 1e-14
-    group_2 = np.abs(all_ctrls[..., 0] - len_x) < 1e-14
-
+    group_1 = np.abs(all_ctrls[..., 0] - 0.0) < 1e-9
+    group_2 = np.abs(all_ctrls[..., 0] - len_x) < 1e-9
+    
     dirichlet_groups = {
         '1': group_1,
         '2': (group_2, np.array([0, 1])),
