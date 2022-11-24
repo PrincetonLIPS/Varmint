@@ -21,6 +21,13 @@ exp_root = USE_YOUR_ROOT_EXPERIMENT_DIRECTORY
 source_root = ABSOLUTE_ROOT_DIRECTORY_OF_REPO
 ```
 
+## Running with MPI
+After activating the conda environment, on ionic you can use commands of the form:
+```
+srun -A lips --mpi=pmi2 -t 48:00:00 --gres=gpu:4 -N 4 --ntasks-per-node 4 python launch_nma_digital_mnist_finetune.py -n exp_name
+```
+to launch jobs with MPI. The above command will use 4 nodes, using 4 GPUs per node (16 MPI ranks in total).
+
 ## Publications
 Neuromechanical Autoencoders: Learning to Couple Elastic and Neural Network Nonlinearity\
 Deniz Oktay, Mehran Mirramezani, Eder Medina, Ryan P. Adams - In submission
