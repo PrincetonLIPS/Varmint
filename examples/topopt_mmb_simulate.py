@@ -54,6 +54,10 @@ config = config_dict.ConfigDict({
     'volf': 0.4,
     'f1': 1.0,
     'f2': 4.0,
+
+    'solver_parameters': {
+        'tol': 1e-8,
+    }
 })
 
 config_flags.DEFINE_config_dict('config', config)
@@ -82,8 +86,8 @@ def construct_simulation(config, geo_params, numx, numy, disp_t, patch_ncp):
 
     potential_energy_fn = cell.get_potential_energy_fn()
     strain_energy_fn = jax.jit(cell.get_strain_energy_fn())
-    optimizer = SparseNewtonIncrementalSolver(cell, potential_energy_fn, max_iter=1000,
-                                              step_size=1.0, tol=1e-8, ls_backtrack=0.95)
+    optimizer = SparseNewtonIncrementalSolver(cell, potential_energy_fn,
+                                              **config.solver_parameters)
     optimize = optimizer.get_optimize_fn()
 
     def simulate(mat_params):
