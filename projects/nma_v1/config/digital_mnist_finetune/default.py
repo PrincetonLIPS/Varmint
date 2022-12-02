@@ -29,11 +29,7 @@ def get_config() -> config_dict.ConfigDict:
     config.E = 0.005
 
     config.solver_parameters = {
-        'max_iter': 1000,
-        'step_size': 1.0,
         'tol': 1e-8,
-        'ls_backtrack': 0.95,
-        'update_every': 10,
     }
 
     config.n_disps = 6
