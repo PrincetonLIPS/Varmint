@@ -97,9 +97,10 @@ def main(argv):
 
         # Unflatten sequence to local configuration.
         ctrl_seq = cell.unflatten_sequence(
-            all_xs, all_fixed_locs, radii_to_ctrl_fn(radii))
+            all_xs, all_fixed_locs, ref_ctrl)
+        final_x_local = g2l(current_x, all_fixed_locs[-1], ref_ctrl)
 
-        return ctrl_seq
+        return final_x_local, [ref_ctrl] + ctrl_seq
 
     # Initialize neural network (encoder).
     nn_fn = config.get_nn_fn(
@@ -120,7 +121,7 @@ def main(argv):
         mat_inputs = nn_fn_t.apply(nn_params, target)
 
         # Decoder
-        final_x_local = simulate(mat_inputs, radii)[-1]  # Get last element of sequence.
+        final_x_local, _ = simulate(mat_inputs, radii)
 
         # We want our identified point (p1) at a specified location (target).
         return jnp.sum(jnp.abs(final_x_local[p1] - target)) / ref_ctrl[p1].shape[0]
@@ -172,9 +173,12 @@ def main(argv):
 
                 # Simulate with the test input.
                 mat_inputs = nn_fn_t.apply(curr_nn_params, test_disps)
-                ctrl_seq= simulate(mat_inputs, curr_radii)
+                _, ctrl_seq = simulate(mat_inputs, curr_radii)
 
                 # Save static image and deformation sequence video.
+                image_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-ref_config-{i}.png')
+                create_static_image_nma(cell.element, ctrl_seq[0], image_path, test_disps)
+
                 image_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-optimized-{i}.png')
                 create_static_image_nma(cell.element, ctrl_seq[-1], image_path, test_disps)
 

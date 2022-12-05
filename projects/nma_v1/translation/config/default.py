@@ -77,14 +77,9 @@ def get_config() -> config_dict.ConfigDict:
 
     config.lr = 0.0001
     config.max_iter = 10000
-    config.geometry_lr_multiplier = 1.0
-    config.freeze_radii = False
-    config.freeze_nn = False
-    config.freeze_nn_val = 0.0
 
     config.save_every = 50
     config.eval_every = 50
-    config.num_eval = 5
     config.ewa_weight = 0.95
 
     return config

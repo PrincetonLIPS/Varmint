@@ -67,7 +67,7 @@ class Geometry(ABC):
 
         local_value = [g2l_map(q, f, ref_ctrl) for q, f in \
                 zip(value, fixed_value)]
-        
+
         return local_value
 
     def unflatten_dynamics_sequence(self, positions, velocities,

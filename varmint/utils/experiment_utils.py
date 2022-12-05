@@ -39,8 +39,8 @@ def initialize_experiment(verbose=False):
     prepare_experiment_directories(args, comm)
     # args.seed and args.exp_dir should be set.
 
-    with config.unlocked():
-        config.num_mpi_ranks = comm.Get_size()
+    with args.config.unlocked():
+        args.config.num_mpi_ranks = comm.Get_size()
 
     config = args.config
     save_args(args, comm)
