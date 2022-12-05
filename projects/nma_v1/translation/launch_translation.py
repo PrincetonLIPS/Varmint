@@ -74,6 +74,8 @@ def main(argv):
     ref_ctrl = radii_to_ctrl_fn(jnp.array(init_radii))
     tractions = cell.tractions_from_dict({})
 
+    # Set up material parameters based on defaults.
+    # We could optimize these per patch if we wanted to.
     mat_params = (
         TPUMat.E * jnp.ones(ref_ctrl.shape[0]),
         TPUMat.nu * jnp.ones(ref_ctrl.shape[0]),
@@ -126,11 +128,14 @@ def main(argv):
         # We want our identified point (p1) at a specified location (target).
         return jnp.sum(jnp.abs(final_x_local[p1] - target)) / ref_ctrl[p1].shape[0]
 
+    all_losses = []
+    all_ewa_losses = []
+
     # Reload parameters if needed.
     if args.reload:
         rprint('Loading parameters.')
         with open(os.path.join(args.exp_dir, f'sim-{args.exp_name}-params-{args.load_iter}.pkl'), 'rb') as f:
-            curr_all_params = pickle.load(f)
+            curr_all_params, all_losses, all_ewa_losses = pickle.load(f)
         rprint('\tDone.')
 
     # Scale the lr depending on the batch size.
@@ -155,6 +160,9 @@ def main(argv):
         avg_grad_loss = pytree_reduce(grad_loss, scale=1./batch_size)
         ewa_loss = update_ewa(ewa_loss, avg_loss, config.ewa_weight)
         rprint(f'Iteration {i} Loss: {avg_loss} EWA Loss: {ewa_loss} Time: {time.time() - iter_time}')
+
+        all_losses.append(avg_loss)
+        all_ewa_losses.append(ewa_loss)
 
         updates, opt_state = optimizer.update(avg_grad_loss, opt_state)
         curr_all_params = optax.apply_updates(curr_all_params, updates)
@@ -185,12 +193,21 @@ def main(argv):
                 vid_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-optimized-{i}.mp4')
                 create_movie_nma(cell.element, ctrl_seq, vid_path, test_disps, p1=p1)
 
+                # Export graph of losses
+                loss_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-loss.png')
+                plt.title('Loss over iterations')
+                plt.plot(all_losses, label='loss')
+                plt.plot(all_ewa_losses, label='EWA loss')
+                plt.legend()
+                plt.savefig(loss_path)
+                plt.close()
+
         if i % config.save_every == 0:
             # Pickle parameters
             if comm.rank == 0:
                 rprint('Saving parameters.')
                 with open(os.path.join(args.exp_dir, f'sim-{args.exp_name}-params-{i}.pkl'), 'wb') as f:
-                    pickle.dump(curr_all_params, f)
+                    pickle.dump((curr_all_params, all_losses, all_ewa_losses), f)
                 rprint('\tDone.')
 
         comm.barrier()
