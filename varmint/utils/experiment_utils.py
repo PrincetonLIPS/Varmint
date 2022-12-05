@@ -39,11 +39,18 @@ def initialize_experiment(verbose=False):
     prepare_experiment_directories(args, comm)
     # args.seed and args.exp_dir should be set.
 
+    with config.unlocked():
+        config.num_mpi_ranks = comm.Get_size()
+
     config = args.config
     save_args(args, comm)
 
     if 'seed' in config:
         npr.seed(config.seed)
+
+    if 'jax_seed' in config:
+        with config.unlocked():
+            config.jax_rng = jax.random.PRNGKey(config.jax_seed)
 
     if comm.rank == 0:
         logdir = args.exp_dir

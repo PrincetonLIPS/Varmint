@@ -54,9 +54,9 @@ from digital_mnist_movie_utils import create_movie_mnist
 FLAGS = flags.FLAGS
 eutils.prepare_experiment_args(
     None, exp_root='/n/fs/mm-iga/Varmint/projects/nma_v1/experiments',
-            source_root='n/fs/mm-iga/Varmint/projects/nma_v1')
+            source_root='n/fs/mm-iga/Varmint/projects/nma_v1/digital_mnist')
 
-config_flags.DEFINE_config_file('config', 'config/digital_mnist_finetune/default.py')
+config_flags.DEFINE_config_file('config', 'config/default.py')
 
 
 class TPUMat(Material):

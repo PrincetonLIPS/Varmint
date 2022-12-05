@@ -18,7 +18,6 @@ from varmint.utils.movie_utils import create_movie, create_static_image
 
 from geometry.small_beam_geometry import construct_beam
 
-from varmint.utils import analysis_utils as autils
 from varmint.utils import experiment_utils as eutils
 from varmint.utils.mpi_utils import rprint
 

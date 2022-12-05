@@ -116,8 +116,8 @@ def pytree_reduce(pytree, comm=MPI.COMM_WORLD, scale=1.0):
     return unravel(reduce_sum * scale)
 
 
-def test_pytrees_equal(pytree, comm=MPI.COMM_WORLD):
-    if comm.rank == 0:
+def test_pytrees_equal(pytree, comm=MPI.COMM_WORLD, verbose=False):
+    if comm.rank == 0 and verbose:
         print('Testing if parameters have deviated.')
         vtime = time.time()
     raveled, unravel = jax.flatten_util.ravel_pytree(pytree)
@@ -125,5 +125,6 @@ def test_pytrees_equal(pytree, comm=MPI.COMM_WORLD):
     if comm.rank == 0:
         for i in range(comm.Get_size() - 1):
             assert np.allclose(all_params[i], all_params[i+1])
-        print(f'\tVerified in {time.time() - vtime} s.')
+        if verbose:
+            print(f'\tVerified in {time.time() - vtime} s.')
 
