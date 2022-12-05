@@ -1,17 +1,16 @@
+import varmint
+
 import os
 
 import jax
-
-import numpy as np
 import jax.numpy as jnp
+import numpy as onp
 
 import haiku as hk
 
-from ml_collections import config_dict
 
-
-def get_config() -> config_dict.ConfigDict:
-    config = config_dict.ConfigDict()
+def get_config() -> varmint.config_dict.ConfigDict:
+    config = varmint.config_dict.ConfigDict()
 
     config.filename = os.path.abspath(__file__)
 
@@ -26,7 +25,6 @@ def get_config() -> config_dict.ConfigDict:
     config.border_size = 3.0
 
     config.mat_model = 'NeoHookean2D'  # Choose between LinearElastic2D and NeoHookean2D
-    config.E = 0.005
 
     config.solver_parameters = {
         'tol': 1e-8,
@@ -52,13 +50,13 @@ def get_config() -> config_dict.ConfigDict:
         def tanh_clip(x):
             return jnp.tanh(x) * max_disp
         def get_max(x):
-            return (x > 0.5).astype(np.float64)
+            return (x > 0.5).astype(jnp.float64)
         def hk_print(x):
             print(x)
             return x
 
         def nn_fn(x):
-            x = x.astype(np.float64) / 255.
+            x = x.astype(jnp.float64) / 255.
             mlp = hk.Sequential([
               hk.Flatten(),
               hk.Linear(300), jax.nn.relu,

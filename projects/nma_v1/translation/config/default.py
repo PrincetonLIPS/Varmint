@@ -1,3 +1,5 @@
+import varmint
+
 import os
 
 import jax
@@ -6,11 +8,9 @@ import numpy as onp
 
 import haiku as hk
 
-from ml_collections import config_dict
 
-
-def get_config() -> config_dict.ConfigDict:
-    config = config_dict.ConfigDict()
+def get_config() -> varmint.config_dict.ConfigDict:
+    config = varmint.config_dict.ConfigDict()
 
     config.filename = os.path.abspath(__file__)
 
@@ -22,7 +22,6 @@ def get_config() -> config_dict.ConfigDict:
     config.spline_deg = 2
 
     config.mat_model = 'NeoHookean2D'  # Choose between LinearElastic2D and NeoHookean2D
-    config.E = 0.005
 
     config.solver_parameters = {
         'tol': 1e-8,
@@ -72,6 +71,8 @@ def get_config() -> config_dict.ConfigDict:
     config.get_nn_fn = _get_nn_fn
 
     config.max_disp = 4.0
+    config.radii_range = [0.1, 0.9]
+
     config.n_layers = 3
     config.n_activations = 30
 

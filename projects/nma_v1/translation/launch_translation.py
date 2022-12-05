@@ -1,49 +1,36 @@
-from absl import app
-from absl import flags
-
 import os
-os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 import sys
 import time
 import pickle
 
-from ml_collections import config_flags
+import varmint
 
-import numpy.random as npr
-import numpy as onp
-import jax.numpy as jnp
-import jax
-
-from jax.config import config
-config.update("jax_enable_x64", True)
-
-from mpi4py import MPI
-
-from translation_geometry import construct_cell2D, generate_bertoldi_radii, generate_circular_radii, generate_rectangular_radii
-from translation_plotting import create_movie_nma, create_static_image_nma
-
-from varmint.geometry.elements import Patch2D
-from varmint.geometry.geometry import Geometry, SingleElementGeometry
 from varmint.physics.constitutive import NeoHookean2D, LinearElastic2D
 from varmint.physics.materials import Material
 from varmint.solver.incremental_loader import SparseNewtonIncrementalSolver
 
-from varmint.utils import experiment_utils as eutils
-from varmint.utils.mpi_utils import *
+from varmint.utils.mpi_utils import rprint, pytree_reduce, test_pytrees_equal
 from varmint.utils.train_utils import update_ewa
+
+from translation_geometry import construct_cell2D, generate_rectangular_radii
+from translation_plotting import create_movie_nma, create_static_image_nma
 
 import optax
 import haiku as hk
 
+import jax
+import jax.numpy as jnp
+import numpy as onp
+
 import matplotlib.pyplot as plt
 
 
-FLAGS = flags.FLAGS
-eutils.prepare_experiment_args(
+FLAGS = varmint.flags.FLAGS
+varmint.prepare_experiment_args(
     None, exp_root='/n/fs/mm-iga/Varmint/projects/nma_v1/translation/experiments',
             source_root='n/fs/mm-iga/Varmint/projects/nma_v1/translation')
 
-config_flags.DEFINE_config_file('config', 'config/default.py')
+varmint.config_flags.DEFINE_config_file('config', 'config/default.py')
 
 
 class TPUMat(Material):
@@ -53,9 +40,9 @@ class TPUMat(Material):
 
 
 def main(argv):
-    args, dev_id, local_rank = eutils.initialize_experiment(verbose=True)
+    args, dev_id, local_rank = varmint.initialize_experiment(verbose=True)
     config = args.config
-    comm = MPI.COMM_WORLD
+    comm = varmint.MPI.COMM_WORLD
 
     mat = NeoHookean2D(TPUMat)
 
@@ -167,6 +154,11 @@ def main(argv):
         updates, opt_state = optimizer.update(avg_grad_loss, opt_state)
         curr_all_params = optax.apply_updates(curr_all_params, updates)
 
+        # Clip radii
+        curr_nn_params, curr_radii = curr_all_params
+        curr_radii = jnp.clip(curr_radii, *config.radii_range)
+        curr_all_params = curr_nn_params, curr_radii
+
         if i % config.eval_every == 0:
             # Verify that the parameters have not deviated between different MPI ranks.
             test_pytrees_equal(curr_all_params)
@@ -214,4 +206,4 @@ def main(argv):
 
 
 if __name__ == '__main__':
-    app.run(main)
+    varmint.app.run(main)
