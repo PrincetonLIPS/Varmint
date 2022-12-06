@@ -8,7 +8,7 @@ Uses Automatic Differentiation as a first-class citizen. Optimization is done di
 by computing gradients and sparse Hessians of the potential and kinetic energies.
 Differentiation through the nonlinear solver is carried out through adjoint methods.
 
-For information on usage, check out the Wiki: https://github.com/PrincetonLIPS/Varmint/wiki
+For information on usage, check out the [Wiki](https://github.com/PrincetonLIPS/Varmint/wiki)
 
 ## Installation
 ```
