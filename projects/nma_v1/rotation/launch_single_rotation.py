@@ -12,8 +12,8 @@ from varmint.solver.incremental_loader import SparseNewtonIncrementalSolver
 from varmint.utils.mpi_utils import rprint, pytree_reduce, test_pytrees_equal
 from varmint.utils.train_utils import update_ewa
 
-from translation_geometry import construct_cell2D, generate_rectangular_radii
-from translation_plotting import create_movie_nma, create_static_image_nma
+from rotation_geometry import construct_cell2D, generate_rectangular_radii
+from rotation_plotting import create_movie_nma, create_static_image_nma
 
 import optax
 import haiku as hk
@@ -27,10 +27,10 @@ import matplotlib.pyplot as plt
 
 FLAGS = varmint.flags.FLAGS
 varmint.prepare_experiment_args(
-    None, exp_root='/n/fs/mm-iga/Varmint/projects/nma_v1/translation/experiments',
-            source_root='n/fs/mm-iga/Varmint/projects/nma_v1/translation')
+    None, exp_root='/n/fs/mm-iga/Varmint/projects/nma_v1/rotation/experiments',
+            source_root='/n/fs/mm-iga/Varmint/projects/nma_v1/rotation')
 
-varmint.config_flags.DEFINE_config_file('config', 'config/default.py')
+varmint.config_flags.DEFINE_config_file('config', 'config/single_rotation.py')
 
 
 class TPUMat(Material):
@@ -47,7 +47,7 @@ def main(argv):
     mat = NeoHookean2D(TPUMat)
 
     # Construct geometry function along with initial radii parameters.
-    cell, radii_to_ctrl_fn, n_cells = \
+    cell, radii_to_ctrl_fn, n_cells, init_mesh_perturb = \
         construct_cell2D(input_str=config.grid_str, patch_ncp=config.ncp,
                          quad_degree=config.quad_deg, spline_degree=config.spline_deg,
                          material=mat)
@@ -93,27 +93,44 @@ def main(argv):
 
     # Initialize neural network (encoder).
     nn_fn = config.get_nn_fn(
-            config.max_disp, config.n_layers, config.n_activations, config.n_disps, config.start_point)
+            config.max_disp, config.n_layers, config.n_activations, config.n_disps)
     nn_fn_t = hk.without_apply_rng(hk.transform(nn_fn))
-    init_nn_params = nn_fn_t.init(config.jax_rng, config.start_point)
+    init_nn_params = nn_fn_t.init(config.jax_rng, jnp.array([0.0]))
 
     # Gather all NMA parameters into a pytree.
     curr_all_params = (init_nn_params, init_radii)
 
-    # Target point
-    p1 = jnp.sum(jnp.abs(radii_to_ctrl_fn(init_radii) - config.start_point), axis=-1) < 1e-14
+    # To emulate rotation, our objective function is the rotation of two points about their center.
+    p1 = jnp.sum(jnp.abs(radii_to_ctrl_fn(init_radii) - config.left_point), axis=-1) < 1e-14
+    p2 = jnp.sum(jnp.abs(radii_to_ctrl_fn(init_radii) - config.right_point), axis=-1) < 1e-14
+    ps = [p1, p2]
 
-    def loss_fn(all_params, target):
+    def angle_to_points(angle):
+        rot = jnp.array([
+            [jnp.cos(angle[0]), -jnp.sin(angle[0])],
+            [jnp.sin(angle[0]),  jnp.cos(angle[0])],
+        ])
+
+        r = config.right_point
+        l = config.left_point
+        c = config.center_point
+
+        return rot @ (l - c) + c, rot @ (r - c) + c
+
+    def loss_fn(all_params, angle):
+        target_l, target_r = angle_to_points(angle)
+
         nn_params, radii = all_params
-
+        
         # Encoder
-        mat_inputs = nn_fn_t.apply(nn_params, target)
+        mat_inputs = nn_fn_t.apply(nn_params, angle)
 
         # Decoder
         final_x_local, _ = simulate(mat_inputs, radii)
 
-        # We want our identified point (p1) at a specified location (target).
-        return jnp.sum(jnp.abs(final_x_local[p1] - target)) / ref_ctrl[p1].shape[0]
+        # We want our identified points at specified locations determined by angle.
+        return jnp.sum(jnp.abs(final_x_local[p1] - target_l)) / ref_ctrl[p1].shape[0] + \
+                jnp.sum(jnp.abs(final_x_local[p2] - target_r)) / ref_ctrl[p2].shape[0]
 
     all_losses = []
     all_ewa_losses = []
@@ -140,9 +157,9 @@ def main(argv):
     for i in range(args.load_iter + 1, config.max_iter):
         # Do one training step, averaging gradients over MPI ranks.
         iter_time = time.time()
-        target_disps = jnp.array(onp.random.uniform(*config.target_range, size=(batch_size, 2)))
+        target_angles = onp.random.uniform(*config.angle_range, size=(batch_size, 1))
 
-        loss, grad_loss = loss_val_and_grad(curr_all_params, target_disps[comm.rank])
+        loss, grad_loss = loss_val_and_grad(curr_all_params, target_angles[comm.rank])
         avg_loss = pytree_reduce(loss, scale=1./batch_size)
         avg_grad_loss = pytree_reduce(grad_loss, scale=1./batch_size)
         ewa_loss = update_ewa(ewa_loss, avg_loss, config.ewa_weight)
@@ -165,25 +182,28 @@ def main(argv):
 
             # Generate video
             if comm.rank == 0:
-                rprint(f'Generating image and video with optimization so far.')
-                curr_nn_params, curr_radii = curr_all_params
+                # Generate two samples, one from max angle and one from min.
+                for is_max, test_angle in enumerate(config.angle_range):
+                    rprint(f'Generating image and video with optimization so far.')
+                    curr_nn_params, curr_radii = curr_all_params
 
-                # Sample a random test point.
-                test_disps = onp.random.uniform(*config.target_range, size=(2,))
+                    # Convert test angle to points.
+                    test_pts = angle_to_points(jnp.array([test_angle]))
 
-                # Simulate with the test input.
-                mat_inputs = nn_fn_t.apply(curr_nn_params, test_disps)
-                _, ctrl_seq = simulate(mat_inputs, curr_radii)
+                    # Simulate with the test input.
+                    mat_inputs = nn_fn_t.apply(curr_nn_params, jnp.array([test_angle]))
+                    _, ctrl_seq = simulate(mat_inputs, curr_radii)
 
-                # Save static image and deformation sequence video.
-                image_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-ref_config-{i}.png')
-                create_static_image_nma(cell.element, ctrl_seq[0], image_path, test_disps)
+                    # Save static image and deformation sequence video.
+                    angle_label = 'max' if is_max == 1 else 'min'
+                    image_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-ref_config-{i}-{angle_label}-angle.png')
+                    create_static_image_nma(cell.element, ctrl_seq[0], image_path, test_pts, ps=ps)
 
-                image_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-optimized-{i}.png')
-                create_static_image_nma(cell.element, ctrl_seq[-1], image_path, test_disps)
+                    image_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-optimized-{i}-{angle_label}-angle.png')
+                    create_static_image_nma(cell.element, ctrl_seq[-1], image_path, test_pts, ps=ps)
 
-                vid_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-optimized-{i}.mp4')
-                create_movie_nma(cell.element, ctrl_seq, vid_path, test_disps, p1=p1)
+                    vid_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-optimized-{i}-{angle_label}-angle.mp4')
+                    create_movie_nma(cell.element, ctrl_seq, vid_path, test_pts, ps=ps)
 
                 # Export graph of losses
                 loss_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-loss.png')
@@ -207,3 +227,4 @@ def main(argv):
 
 if __name__ == '__main__':
     varmint.app.run(main)
+
