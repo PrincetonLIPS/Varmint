@@ -423,7 +423,8 @@ def generate_pore_shapes_geometry(config, material):
             (-1, radial_ncp, patch_ncp, 2))
         new_frame_ctrls = frame_ctrls.at[all_indices].set(cell_ctrls, indices_are_sorted=True)
 
-        new_internal_ctrls = UnitCell2D._gen_cell(internal_corners, radial_ncp, central_radii, normalized=config.normalized_init)
+        new_internal_ctrls = UnitCell2D._gen_cell(internal_corners, radial_ncp,
+                                                  central_radii, normalized=config.normalized_init)
         return jnp.concatenate((new_frame_ctrls, new_internal_ctrls), axis=0)
 
     flat_ctrls = all_ctrls.reshape((-1, 2))

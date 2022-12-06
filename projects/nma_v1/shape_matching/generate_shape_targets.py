@@ -1,3 +1,5 @@
+import pickle
+
 import numpy as np
 import jax.numpy as jnp
 import jax
@@ -82,7 +84,7 @@ def al_parameterized_rff(N, num_feats, omegas, phis):
     return new_x_vals
 
 
-def get_shape_target_generator(shape_family, N, generator_params):
+def get_shape_target_generator(shape_family, N, generator_params, dataset_seed=None, save_path=None):
     if shape_family == 'circle':
         return partial(just_circle, N)
     elif shape_family == 'ellipse':
@@ -90,7 +92,7 @@ def get_shape_target_generator(shape_family, N, generator_params):
     elif shape_family == 'nside':
         return partial(random_nside, N)
     elif shape_family == 'nal_rff':
-        npr.seed(10)
+        npr.seed(dataset_seed)
         lengthscale = generator_params['lengthscale']
         num_feats = generator_params['num_feats']
 
@@ -99,16 +101,16 @@ def get_shape_target_generator(shape_family, N, generator_params):
 
         return partial(random_fourier_features, N, num_feats, omegas, phis)
     elif shape_family == 'rff':
-        npr.seed(10)
+        npr.seed(dataset_seed)
         lengthscale = generator_params['lengthscale']
         num_feats = generator_params['num_feats']
 
         omegas = npr.randn(num_feats, 2) / lengthscale
         phis = npr.rand(num_feats) * 2 * np.pi
 
-        #import pickle
-        #with open('/n/fs/mm-iga/Varmint/nma_mpi/experiments/pore_shape_experiments/dataset_pickle.pkl', 'wb') as f:
-        #    pickle.dump((omegas, phis), f)
+        if save_path is not None:
+            with open(save_path, 'wb') as f:
+                pickle.dump((omegas, phis), f)
 
         return partial(al_parameterized_rff, N, num_feats, omegas, phis)
     else:

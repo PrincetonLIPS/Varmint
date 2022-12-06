@@ -54,7 +54,8 @@ def initialize_experiment(verbose=False):
 
     if comm.rank == 0:
         logdir = args.exp_dir
-        summary_writer = jaxboard.SummaryWriter(logdir)
+        with config.unlocked():
+            config.summary_writer = jaxboard.SummaryWriter(logdir)
 
     return args, dev_id, local_rank
 
