@@ -73,6 +73,7 @@ def get_config() -> varmint.config_dict.ConfigDict:
     config.max_disp = 4.0
     config.radii_range = [0.1, 0.9]
     config.perturb_mesh = False
+    config.geometry_lr_multiplier = 10.0
 
     config.n_layers = 3
     config.n_activations = 30

@@ -148,7 +148,14 @@ def main(argv):
     batch_size = comm.Get_size()
     lr = config.lr * batch_size
 
-    optimizer = optax.adam(lr)
+    not_mesh_optimizer = optax.adam(lr)
+    mesh_optimizer = optax.adam(lr * config.geometry_lr_multiplier)
+
+    # The mesh perturbation parameters require a higher learning rate.
+    param_labels = ('not_mesh', 'not_mesh', 'mesh')
+    optimizer = optax.multi_transform(
+            {'not_mesh': not_mesh_optimizer, 'mesh': mesh_optimizer},
+            param_labels)
     opt_state = optimizer.init(curr_all_params)
 
     loss_val_and_grad = jax.value_and_grad(loss_fn)
