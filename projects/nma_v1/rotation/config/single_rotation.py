@@ -35,6 +35,22 @@ def get_config() -> varmint.config_dict.ConfigDict:
                       "C1000 C0000 C0000 C0000 C0000 C0000 C0040\n"\
                       "C0000 C0000 C0000 C0000 C0000 C0000 C0000\n"\
                       "C0000 C0000 C0000 C0000 C0000 C0000 C0000\n"
+
+    def _get_perturb_bounds(init_mesh_perturb):
+        min_pert = -5.0 * 0.45 * onp.ones_like(init_mesh_perturb)
+        max_pert =  5.0 * 0.45 * onp.ones_like(init_mesh_perturb)
+        min_pert[2][2] = 0.
+        min_pert[2][3] = 0.
+        min_pert[3][2] = 0.
+        min_pert[3][3] = 0.
+        max_pert[2][2] = 0.
+        max_pert[2][3] = 0.
+        max_pert[3][2] = 0.
+        max_pert[3][3] = 0.
+
+        return min_pert, max_pert
+    config.get_perturb_bounds = _get_perturb_bounds
+
     config.left_point   = jnp.array([15.0, 17.5])
     config.right_point  = jnp.array([20.0, 17.5])
     config.center_point = jnp.array([17.5, 17.5])
