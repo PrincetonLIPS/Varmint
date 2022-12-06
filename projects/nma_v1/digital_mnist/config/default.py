@@ -73,8 +73,8 @@ def get_config() -> varmint.config_dict.ConfigDict:
     config.freeze_pretrain = False
     config.freeze_colors = False
 
-    config.nn_checkpoint = '/n/fs/mm-iga/Varmint_postnmav1/nma_mpi/notebooks/mnist_lenet_weights_2.pkl'
-    config.material_checkpoint = '/n/fs/mm-iga/Varmint_postnmav1/nma_mpi/experiments/digital_mnist_experiments/digital_mnist_second_try_10digits_temp10_freezeradii/sim-digital_mnist_second_try_10digits_temp10_freezeradii-params-550.pkl'
+    config.nn_checkpoint = ''
+    config.material_checkpoint = ''
 
     config.softmax_temp = 10.0
 
@@ -82,6 +82,7 @@ def get_config() -> varmint.config_dict.ConfigDict:
     config.radii_smoothness_penalty = 0.0
 
     # Adjoint optimization parameters
+    config.max_iters = 10000
     config.lr = 0.0001
     config.geometry_lr_multiplier = 1.0
     config.freeze_radii = True
@@ -97,5 +98,6 @@ def get_config() -> varmint.config_dict.ConfigDict:
     config.save_every = 50
     config.eval_every = 50
     config.num_trials = 5
+    config.ewa_weight = 0.95
 
     return config

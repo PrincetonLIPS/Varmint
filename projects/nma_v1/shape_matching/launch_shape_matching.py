@@ -50,13 +50,8 @@ def main(argv):
 
     if config.mat_model == 'NeoHookean2D':
         mat = NeoHookean2D(TPUMat)
-        linear_mat = LinearElastic2D(TPUMat)
-    elif config.mat_model == 'NeoHookean2DClamped':
-        mat = NeoHookean2DClamped(TPUMat)
-        linear_mat = LinearElastic2D(TPUMat)
     elif config.mat_model == 'LinearElastic2D':
         mat = LinearElastic2D(TPUMat)
-        linear_mat = LinearElastic2D(TPUMat)
     else:
         raise ValueError('Incorrect material model')
 
@@ -336,17 +331,18 @@ def main(argv):
         avg_grad_loss = pytree_reduce(grad_loss, scale=1./batch_size)
         step_time = time.time() - iter_time
 
-        rprint(f'Iteration {i} Loss: {avg_loss} '
-               f'EWA Loss: {ewa_loss} '
-               f'Time: {step_time}')
-
         if comm.rank == 0:
             config.summary_writer.scalar('avg_loss', avg_loss, i)
             config.summary_writer.scalar('step_time', step_time, i)
             config.summary_writer.flush()
 
-        all_losses.append(avg_loss)
         ewa_loss = update_ewa(ewa_loss, avg_loss, config.ewa_weight)
+        all_losses.append(avg_loss)
+        all_ewa_losses.append(ewa_loss)
+
+        rprint(f'Iteration {i} Loss: {avg_loss} '
+               f'EWA Loss: {ewa_loss} '
+               f'Time: {step_time}')
 
         updates, opt_state = optimizer.update(avg_grad_loss, opt_state)
         curr_all_params = optax.apply_updates(curr_all_params, updates)
@@ -423,9 +419,7 @@ def main(argv):
 
                     ax[trial][1].bar(jnp.arange(config.n_disps), mat_inputs)
 
-                    plot_ctrl(ax[trial][2], cell.element,
-                              g2l(optimized_curr_g_pos, all_fixed_locs[-1],
-                                  radii_to_ctrl_fn(curr_radii, curr_internal_radii, curr_mesh_perturb)))
+                    plot_ctrl(ax[trial][2], cell.element, final_x_local)
                     ax[trial][2].set_aspect('equal')
 
                     plot_ctrl(ax[trial][3], cell.element, curr_ref_ctrl)
@@ -450,7 +444,9 @@ def main(argv):
                 loss_curve_path = os.path.join(
                     args.exp_dir,
                     f'sim-{args.exp_name}-loss.png')
-                plt.plot(all_losses)
+                plt.plot(all_losses, label='loss')
+                plt.plot(all_ewa_losses, label='EWA loss')
+                plt.legend()
                 plt.savefig(loss_curve_path)
                 plt.close()
         comm.barrier()
