@@ -58,7 +58,7 @@ def main(argv):
     # Initialization of local-global transformations, reference control points, tractions.
     potential_energy_fn = cell.get_potential_energy_fn()
     l2g, g2l = cell.get_global_local_maps()
-    ref_ctrl = radii_to_ctrl_fn(jnp.array(init_radii))
+    ref_ctrl = radii_to_ctrl_fn(jnp.array(init_radii), init_mesh_perturb)
     tractions = cell.tractions_from_dict({})
 
     # Set up material parameters based on defaults.
@@ -74,8 +74,8 @@ def main(argv):
     optimize = optimizer.get_optimize_fn()
 
     # Differentiable simulation function for given displacements and radii (decoder).
-    def simulate(disps, radii):
-        ref_ctrl = radii_to_ctrl_fn(radii)
+    def simulate(disps, radii, mesh_perturb):
+        ref_ctrl = radii_to_ctrl_fn(radii, mesh_perturb)
 
         # The optimizer works in the global configuration.
         current_x = l2g(ref_ctrl, ref_ctrl)
@@ -98,11 +98,11 @@ def main(argv):
     init_nn_params = nn_fn_t.init(config.jax_rng, jnp.array([0.0]))
 
     # Gather all NMA parameters into a pytree.
-    curr_all_params = (init_nn_params, init_radii)
+    curr_all_params = (init_nn_params, init_radii, init_mesh_perturb)
 
     # To emulate rotation, our objective function is the rotation of two points about their center.
-    p1 = jnp.sum(jnp.abs(radii_to_ctrl_fn(init_radii) - config.left_point), axis=-1) < 1e-14
-    p2 = jnp.sum(jnp.abs(radii_to_ctrl_fn(init_radii) - config.right_point), axis=-1) < 1e-14
+    p1 = jnp.sum(jnp.abs(radii_to_ctrl_fn(init_radii, init_mesh_perturb) - config.left_point), axis=-1) < 1e-14
+    p2 = jnp.sum(jnp.abs(radii_to_ctrl_fn(init_radii, init_mesh_perturb) - config.right_point), axis=-1) < 1e-14
     ps = [p1, p2]
 
     def angle_to_points(angle):
@@ -120,13 +120,15 @@ def main(argv):
     def loss_fn(all_params, angle):
         target_l, target_r = angle_to_points(angle)
 
-        nn_params, radii = all_params
-        
+        nn_params, radii, mesh_perturb = all_params
+        if not config.perturb_mesh:
+            mesh_perturb = jax.lax.stop_gradient(mesh_perturb)
+
         # Encoder
         mat_inputs = nn_fn_t.apply(nn_params, angle)
 
         # Decoder
-        final_x_local, _ = simulate(mat_inputs, radii)
+        final_x_local, _ = simulate(mat_inputs, radii, mesh_perturb)
 
         # We want our identified points at specified locations determined by angle.
         return jnp.sum(jnp.abs(final_x_local[p1] - target_l)) / ref_ctrl[p1].shape[0] + \
@@ -152,6 +154,8 @@ def main(argv):
     loss_val_and_grad = jax.value_and_grad(loss_fn)
     ewa_loss = None
 
+    min_mesh_perturb, max_mesh_perturb = config.get_perturb_bounds(init_mesh_perturb)
+
     comm.barrier()
     rprint(f'All processes at barrier. Starting training over {batch_size} MPI ranks.')
     for i in range(args.load_iter + 1, config.max_iter):
@@ -172,9 +176,11 @@ def main(argv):
         curr_all_params = optax.apply_updates(curr_all_params, updates)
 
         # Clip radii
-        curr_nn_params, curr_radii = curr_all_params
+        curr_nn_params, curr_radii, curr_mesh_perturb = curr_all_params
         curr_radii = jnp.clip(curr_radii, *config.radii_range)
-        curr_all_params = curr_nn_params, curr_radii
+        curr_mesh_perturb = \
+                jnp.clip(curr_mesh_perturb, min_mesh_perturb, max_mesh_perturb)
+        curr_all_params = curr_nn_params, curr_radii, curr_mesh_perturb
 
         if i % config.eval_every == 0:
             # Verify that the parameters have not deviated between different MPI ranks.
@@ -185,14 +191,14 @@ def main(argv):
                 # Generate two samples, one from max angle and one from min.
                 for is_max, test_angle in enumerate(config.angle_range):
                     rprint(f'Generating image and video with optimization so far.')
-                    curr_nn_params, curr_radii = curr_all_params
+                    curr_nn_params, curr_radii, curr_mesh_perturb = curr_all_params
 
                     # Convert test angle to points.
                     test_pts = angle_to_points(jnp.array([test_angle]))
 
                     # Simulate with the test input.
                     mat_inputs = nn_fn_t.apply(curr_nn_params, jnp.array([test_angle]))
-                    _, ctrl_seq = simulate(mat_inputs, curr_radii)
+                    _, ctrl_seq = simulate(mat_inputs, curr_radii, curr_mesh_perturb)
 
                     # Save static image and deformation sequence video.
                     angle_label = 'max' if is_max == 1 else 'min'

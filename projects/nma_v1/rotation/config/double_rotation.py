@@ -36,6 +36,21 @@ def get_config() -> varmint.config_dict.ConfigDict:
                       "C0000 C0000 C0000 C0000 C0000 C0000 C0000\n"\
                       "C0000 C0000 C0003 C0003 C0003 C0000 C0000\n"
 
+    def _get_perturb_bounds(init_mesh_perturb):
+        min_pert = -5.0*0.2*onp.ones_like(init_mesh_perturb)
+        max_pert =  5.0*0.2*onp.ones_like(init_mesh_perturb)
+        min_pert[2][2] = 0.
+        min_pert[2][3] = 0.
+        min_pert[3][2] = 0.
+        min_pert[3][3] = 0.
+        max_pert[2][2] = 0.
+        max_pert[2][3] = 0.
+        max_pert[3][2] = 0.
+        max_pert[3][3] = 0.
+
+        return min_pert, max_pert
+    config.get_perturb_bounds = _get_perturb_bounds
+
     config.left_point   = jnp.array([15.0, 17.5])
     config.right_point  = jnp.array([20.0, 17.5])
     config.center_point = jnp.array([17.5, 17.5])
@@ -73,14 +88,14 @@ def get_config() -> varmint.config_dict.ConfigDict:
         return nn_fn
     config.get_nn_fn = _get_nn_fn
 
-    config.max_disp = 4.0
+    config.max_disp = 3.0
     config.radii_range = [0.1, 0.9]
-    config.perturb_mesh = False
+    config.perturb_mesh = True
 
     config.n_layers = 3
     config.n_activations = 30
 
-    config.lr = 0.01
+    config.lr = 0.001
     config.max_iter = 10000
 
     config.save_every = 50
