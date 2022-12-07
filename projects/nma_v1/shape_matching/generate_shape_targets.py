@@ -1,3 +1,6 @@
+import varmint
+
+import os
 import pickle
 
 import numpy as np
@@ -108,9 +111,10 @@ def get_shape_target_generator(shape_family, N, generator_params, dataset_seed=N
         omegas = npr.randn(num_feats, 2) / lengthscale
         phis = npr.rand(num_feats) * 2 * np.pi
 
-        if save_path is not None:
-            with open(save_path, 'wb') as f:
-                pickle.dump((omegas, phis), f)
+        if varmint.MPI.COMM_WORLD.rank == 0:
+            if save_path is not None and not os.path.exists(save_path):
+                with open(save_path, 'wb') as f:
+                    pickle.dump((omegas, phis), f)
 
         return partial(al_parameterized_rff, N, num_feats, omegas, phis)
     else:

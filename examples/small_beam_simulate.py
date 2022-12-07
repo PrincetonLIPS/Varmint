@@ -1,5 +1,4 @@
-from absl import app
-from absl import flags
+import varmint
 
 import time
 import os
@@ -10,39 +9,28 @@ import os
 import gc
 
 from varmint.solver.incremental_loader import SparseNewtonIncrementalSolver
-from varmint.geometry.elements import Patch2D
-from varmint.geometry.geometry import Geometry, SingleElementGeometry
 from varmint.physics.constitutive import NeoHookean2D, LinearElastic2D
 from varmint.physics.materials import Material
 from varmint.utils.movie_utils import create_movie, create_static_image
 
 from geometry.small_beam_geometry import construct_beam
 
-from varmint.utils import experiment_utils as eutils
 from varmint.utils.mpi_utils import rprint
 
-import numpy.random as npr
-import numpy as onp
-import jax.numpy as np
 import jax
-
-from ml_collections import config_dict
-from ml_collections import config_flags
+import jax.numpy as jnp
+import numpy as onp
 
 import optax
 
 import matplotlib.pyplot as plt
 
-# Let's do 64-bit. Does not seem to degrade performance much.
-from jax.config import config
-config.update("jax_enable_x64", True)
 
-
-eutils.prepare_experiment_args(
+varmint.prepare_experiment_args(
     None, exp_root='/n/fs/mm-iga/Varmint/experiments',
             source_root='n/fs/mm-iga/Varmint/')
 
-config = config_dict.ConfigDict({
+config = varmint.config_dict.ConfigDict({
     'ncp': 10,
     'quaddeg': 5,
     'splinedeg': 3,
@@ -56,7 +44,7 @@ config = config_dict.ConfigDict({
     },
 })
 
-config_flags.DEFINE_config_dict('config', config)
+varmint.config_flags.DEFINE_config_dict('config', config)
 
 class TPUMat(Material):
     _E = 0.07
@@ -65,7 +53,7 @@ class TPUMat(Material):
 
 
 def main(argv):
-    args, dev_id, local_rank = eutils.initialize_experiment(verbose=True)
+    args, dev_id, local_rank = varmint.initialize_experiment(verbose=True)
     config = args.config
 
     if config.mat_model == 'NeoHookean2D':
@@ -85,8 +73,8 @@ def main(argv):
     # Defines the material parameters.
     # Can ignore this. Only useful when doing optimization wrt material params.
     mat_params = (
-        TPUMat.E * np.ones(ref_ctrl.shape[0]),
-        TPUMat.nu * np.ones(ref_ctrl.shape[0]),
+        TPUMat.E * jnp.ones(ref_ctrl.shape[0]),
+        TPUMat.nu * jnp.ones(ref_ctrl.shape[0]),
     )
     tractions = beam.tractions_from_dict({})
 
@@ -103,14 +91,14 @@ def main(argv):
     def simulate():
         current_x = init_x
         increment_dict = {
-            '1': np.array([0.0, 0.0]),
-            '2': np.array([-1.0]),
+            '1': jnp.array([0.0, 0.0]),
+            '2': jnp.array([-1.0]),
         }
 
         current_x, all_xs, all_fixed_locs, solved_increment = optimize(
                 current_x, increment_dict, tractions, ref_ctrl, mat_params)
 
-        return current_x, (np.stack(all_xs, axis=0), np.stack(all_fixed_locs, axis=0), None)
+        return current_x, (jnp.stack(all_xs, axis=0), jnp.stack(all_fixed_locs, axis=0), None)
 
     rprint('Starting optimization (may be slow because of compilation).')
     iter_time = time.time()
@@ -118,8 +106,8 @@ def main(argv):
     rprint(f'\tSolve time: {time.time() - iter_time}')
 
     rprint(f'Generating image and video with optimization.')
-    all_velocities = np.zeros_like(all_displacements)
-    all_fixed_vels = np.zeros_like(all_fixed_locs)
+    all_velocities = jnp.zeros_like(all_displacements)
+    all_fixed_vels = jnp.zeros_like(all_fixed_locs)
 
     ref_config_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-ref.png')
     image_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-optimized.png')
@@ -135,4 +123,4 @@ def main(argv):
 
 
 if __name__ == '__main__':
-    app.run(main)
+    varmint.app.run(main)

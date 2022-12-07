@@ -118,7 +118,7 @@ def get_config() -> varmint.config_dict.ConfigDict:
     # Adjoint optimization parameters
     config.max_iter = 10000
     config.lr = 0.0001
-    config.geometry_lr_multiplier = 1.0
+    config.geometry_lr_multiplier = 5.0
     config.freeze_radii = False
     config.freeze_nn = False
     config.freeze_nn_val = 0.0
