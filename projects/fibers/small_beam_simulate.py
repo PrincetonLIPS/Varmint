@@ -60,15 +60,14 @@ def main(argv):
         mat = NeoHookean2D(TPUMat)
     elif config.mat_model == 'LinearElastic2D':
         mat = LinearElastic2D(TPUMat)
+    else:
+        raise ValueError(f'Unknown material model: {config.mat_model}')
 
     # Construct geometry (simple beam).
     beam, ref_ctrl = construct_beam(
             len_x=config.len_x, len_y=config.len_y,
             patch_ncp=config.ncp, spline_degree=config.splinedeg,
             quad_degree=config.quaddeg, material=mat)
-
-    potential_energy_fn = beam.get_potential_energy_fn()
-    strain_energy_fn = jax.jit(beam.get_strain_energy_fn())
 
     # Defines the material parameters.
     # Can ignore this. Only useful when doing optimization wrt material params.
@@ -78,45 +77,51 @@ def main(argv):
     )
     tractions = beam.tractions_from_dict({})
 
+    # We would like to minimize the potential energy.
+    potential_energy_fn = beam.get_potential_energy_fn()
     optimizer = SparseNewtonIncrementalSolver(
             beam, potential_energy_fn, **config.solver_parameters)
+    optimize = optimizer.get_optimize_fn()
 
     # ref_ctrl is in "local" coordinates. The "global" coordinates are reparameterized
     # versions (with Dirichlet conditions factored out) to perform unconstrained
     # optimization on. The l2g and g2l functions translate between the two representations.
     l2g, g2l = beam.get_global_local_maps()
-    init_x = l2g(ref_ctrl, ref_ctrl)
 
-    optimize = optimizer.get_optimize_fn()
     def simulate():
-        current_x = init_x
+        current_x = l2g(ref_ctrl, ref_ctrl)
         increment_dict = {
             '1': jnp.array([0.0, 0.0]),
-            '2': jnp.array([-1.0]),
+            '2': jnp.array([-1.0]),  # Only applied to y-coordinate.
         }
 
         current_x, all_xs, all_fixed_locs, solved_increment = optimize(
                 current_x, increment_dict, tractions, ref_ctrl, mat_params)
 
-        return current_x, (jnp.stack(all_xs, axis=0), jnp.stack(all_fixed_locs, axis=0), None)
+        # Unflatten sequence to local configuration.
+        ctrl_seq = cell.unflatten_sequence(
+            all_xs, all_fixed_locs, ref_ctrl)
+        final_x_local = g2l(current_x, all_fixed_locs[-1], ref_ctrl)
+
+        return final_x_local, [ref_ctrl] + ctrl_seq
 
     rprint('Starting optimization (may be slow because of compilation).')
     iter_time = time.time()
-    optimized_curr_g_pos, (all_displacements, all_fixed_locs, _) = simulate()
+    final_x_local, ctrl_seq = simulate()
     rprint(f'\tSolve time: {time.time() - iter_time}')
 
     rprint(f'Generating image and video with optimization.')
-    all_velocities = jnp.zeros_like(all_displacements)
-    all_fixed_vels = jnp.zeros_like(all_fixed_locs)
 
+    # Reference configuration
     ref_config_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-ref.png')
-    image_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-optimized.png')
-    vid_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-optimized.mp4')
     create_static_image(beam.element, ref_ctrl, ref_config_path)
-    create_static_image(
-            beam.element, g2l(optimized_curr_g_pos, all_fixed_locs[-1], ref_ctrl), image_path)
-    ctrl_seq, _ = beam.unflatten_dynamics_sequence(
-        all_displacements, all_velocities, all_fixed_locs, all_fixed_vels, ref_ctrl)
+
+    # Deformed configuration
+    image_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-optimized.png')
+    create_static_image(beam.element, final_x_local, image_path)
+
+    # Deformation sequence movie
+    vid_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-optimized.mp4')
     create_movie(beam.element, ctrl_seq, vid_path)
 
     rprint(f'Finished simulation {args.exp_name}')
