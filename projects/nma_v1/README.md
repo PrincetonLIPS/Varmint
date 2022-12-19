@@ -1,4 +1,4 @@
-Code for the Neuromechanical Autoencoders paper.
+Code for the paper _Neuromechanical Autoencoders: Learning to Couple Elastic and Neural Network Nonlinearity_.
 
 Consists of 4 experiments:
 - Translation
