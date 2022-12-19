@@ -4,8 +4,6 @@ import jax
 import jax.numpy as jnp
 import numpy as onp
 
-import varmint.utils.typing
-
 
 def hvp(f, primals, tangents, args):
     def f_with_args(x):
@@ -28,11 +26,11 @@ def custom_norm(x):
         2-norm of x. 
     """
 
+    squared_sum = x.dot(x)
     return jax.lax.cond(
         squared_sum == 0,
-        lambda _: 0.0,
-        lambda x: jnp.sqrt(x),
-        operand=x.dot(x),
+        lambda: jnp.zeros_like(squared_sum),
+        lambda: jnp.sqrt(squared_sum),
     )
 
 
@@ -42,6 +40,27 @@ def divide00(num, denom):
     automatic differentation via JAX still work reasonably.
     """
 
-    force_zero = np.logical_and(num == 0, denom == 0)
-    return np.where(force_zero, 0.0, num) \
-        / np.where(force_zero, 1.0, denom)
+    force_zero = jnp.logical_and(num == 0, denom == 0)
+    return jnp.where(force_zero, 0.0, num) \
+        / jnp.where(force_zero, 1.0, denom)
+
+
+def zero_one_sign(arr):
+    """Returns an array of the same shape as the input with 
+    the value 1. where the input array is greater than or equal 
+    to zero and 0. where the input array is less than zero. 
+
+    Parameters
+    ----------
+    arr : ndarray 
+        input array 
+
+    Returns 
+    -------
+    binary_arr : ndarray 
+        result with shape of `arr` and value 1. where arr >= 0. 
+        and value 0. otherwise. 
+    """
+    binary_arr = 0.5 * (1.0 + jnp.sign(arr))
+    return binary_arr
+

@@ -2,7 +2,6 @@ from absl import app
 from absl import flags
 
 import os
-os.environ['JAX_PLATFORMS'] = 'cuda,cpu'
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 from jax.config import config
