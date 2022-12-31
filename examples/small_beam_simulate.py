@@ -76,7 +76,13 @@ def main(argv):
         TPUMat.E * jnp.ones(ref_ctrl.shape[0]),
         TPUMat.nu * jnp.ones(ref_ctrl.shape[0]),
     )
+
+    increment_dict = {
+        '1': jnp.array([0.0, 0.0]),
+        '2': jnp.array([-1.0]),
+    }
     tractions = beam.tractions_from_dict({})
+    dirichlet_ctrl = beam.fixed_locs_from_dict(ref_ctrl, increment_dict)
 
     optimizer = SparseNewtonIncrementalSolver(
             beam, potential_energy_fn, **config.solver_parameters)
@@ -90,10 +96,6 @@ def main(argv):
     optimize = optimizer.get_optimize_fn()
     def simulate():
         current_x = init_x
-        increment_dict = {
-            '1': jnp.array([0.0, 0.0]),
-            '2': jnp.array([-1.0]),
-        }
 
         current_x, all_xs, all_fixed_locs, solved_increment = optimize(
                 current_x, increment_dict, tractions, ref_ctrl, mat_params)
@@ -104,6 +106,10 @@ def main(argv):
     iter_time = time.time()
     optimized_curr_g_pos, (all_displacements, all_fixed_locs, _) = simulate()
     rprint(f'\tSolve time: {time.time() - iter_time}')
+
+    potential_energy_fn = beam.get_potential_energy_fn()
+    solution_point_args = (dirichlet_ctrl, tractions, ref_ctrl, mat_params)
+    print(f'Estimated integrand with quadrature: {potential_energy_fn(optimized_curr_g_pos, *solution_point_args)}')
 
     rprint(f'Generating image and video with optimization.')
     all_velocities = jnp.zeros_like(all_displacements)

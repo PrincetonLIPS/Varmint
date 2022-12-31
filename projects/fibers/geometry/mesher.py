@@ -48,14 +48,15 @@ def pixelize_implicit(domain_oracle, params, len_x, len_y, fidelity, negative=Tr
     # bool array in the shape of cells.shape[0] 
     cell_occupancy = onp.any(node_occupancy[cells], axis=-1)
     filtered_cells = cells[cell_occupancy, :]
-    inv_cell_ids = onp.zeros(cells.shape[0], dtype=onp.int)
+    inv_cell_ids = onp.ones(cells.shape[0], dtype=onp.int32) * -1
     inv_cell_ids[cell_occupancy] = onp.arange(filtered_cells.shape[0])
+    inv_cell_ids = jnp.array(inv_cell_ids)
     cells = filtered_cells
 
     # Indexing magic to reindex cell ids and coords.
-    inv_ids = onp.zeros_like(coords[:, 0], dtype=onp.int)
+    inv_ids = onp.zeros_like(coords[:, 0], dtype=onp.int32)
     ids = onp.unique(cells)
-    inv_ids[ids] = onp.arange(ids.shape[0], dtype=onp.int)
+    inv_ids[ids] = onp.arange(ids.shape[0], dtype=onp.int32)
     cells = inv_ids[cells]
     coords = coords[ids]
 
@@ -64,8 +65,8 @@ def pixelize_implicit(domain_oracle, params, len_x, len_y, fidelity, negative=Tr
     def find_patch(point):
         # Find cell index
         large_point = point * fidelity / jnp.array([len_x, len_y]) 
-        i = jnp.trunc(large_point[0]).astype(onp.int)
-        j = jnp.trunc(large_point[1]).astype(onp.int)
+        i = jnp.trunc(large_point[0]).astype(onp.int32)
+        j = jnp.trunc(large_point[1]).astype(onp.int32)
 
         cell_index = i * fidelity + j
         new_cell_index = inv_cell_ids[cell_index]

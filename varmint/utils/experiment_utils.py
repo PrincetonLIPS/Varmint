@@ -8,8 +8,6 @@ import random
 import json
 import pickle
 
-import pandas as pd
-
 import jax.numpy as np
 import numpy.random as npr
 

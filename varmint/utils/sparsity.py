@@ -101,7 +101,7 @@ def jvps_to_spmat(sparsemat_csc, groups, rows):
     all_rows = []
     all_cols = []
 
-    jvp_indexer = np.zeros(sparsemat_csc.shape[0] * len(groups), dtype=np.bool)
+    jvp_indexer = np.zeros(sparsemat_csc.shape[0] * len(groups), dtype=np.bool_)
 
     for i, g in enumerate(groups):
         indices = []

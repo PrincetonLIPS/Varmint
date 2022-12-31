@@ -64,6 +64,30 @@ def sample_fibers(key: ndarray, bounds: ndarray, num_fibers: int, length: float,
     fibers: ndarray = np.stack((starts, ends), axis=-fiber_dim)
     return fibers, next_key
 
+
+def sample_points(key, bounds, num_points):
+    next_key, location_key = npr.split(key)
+
+    x_key, y_key = npr.split(location_key)
+    points = np.array((
+            npr.uniform(x_key, shape=(num_points,), minval=bounds[0], maxval=bounds[2]),
+            npr.uniform(y_key, shape=(num_points,), minval=bounds[1], maxval=bounds[3]),
+    )).T
+
+    return points, next_key
+
+
+def estimate_field_value_mc(domain_oracle, integrand, points: ndarray, params: pytree, negative=True):
+    domain_oracle_params, integrand_params = params
+    f: callable = jax.vmap(lambda x: integrand(integrand_params, x))
+    domain: callable = jax.vmap(lambda x: domain_oracle(domain_oracle_params, x))
+
+    valid_points = domain(points) < 0 if negative else domain(points) > 0
+    area_estimate = points[valid_points].shape[0] / points.shape[0]
+    field_values = f(points[valid_points])
+
+    return np.mean(field_values, axis=0) * area_estimate
+
 def estimate_field_length(field: callable, fibers: ndarray, params: tuple, negative: bool = True) -> float:
     """Estimates the total fiber length for which a given scalar `field` takes on positive/negative
     value. 

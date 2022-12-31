@@ -617,7 +617,7 @@ class SingleElementGeometry(Geometry):
             print('WARNING: Constraints are not satisfied by init_ctrl.')
         
         if rigid_patches_boolean is None:
-            rigid_patches_boolean = onp.zeros(init_ctrl.shape[0], dtype=onp.bool)
+            rigid_patches_boolean = onp.zeros(init_ctrl.shape[0], dtype=onp.bool_)
         self.rigid_patches_boolean = rigid_patches_boolean
 
         self.constraints = constraints
@@ -700,7 +700,7 @@ class SingleElementGeometry(Geometry):
         if verbose and comm and comm.rank == 0:
             print('Computing rigidity groups.')
         self.rigid_labels = {}
-        self.all_rigid_indices = onp.zeros(init_ctrl.shape[:-1], dtype=onp.bool)
+        self.all_rigid_indices = onp.zeros(init_ctrl.shape[:-1], dtype=onp.bool_)
         for group in all_rigid_groups:
             label = rigid_labels_incomplete[group]
             indices = local_indices[label > 0]
@@ -718,7 +718,7 @@ class SingleElementGeometry(Geometry):
         # Complete the dirichlet_labels according to the sparsity graph.
         self.dirichlet_labels = {}
         self.dirichlet_label_fixeddims = {}
-        self.all_dirichlet_indices = onp.zeros(init_ctrl.shape[:-1], dtype=onp.bool)
+        self.all_dirichlet_indices = onp.zeros(init_ctrl.shape[:-1], dtype=onp.bool_)
         for group in dirichlet_labels:
 
             # If dirichlet entry is a tuple, then one is the 
@@ -823,7 +823,7 @@ class SingleElementGeometry(Geometry):
                     self.rigidity_nonfixed_labels.append(rigid_but_partially_fixed)
 
         all_inds_into_fixedlabels = onp.concatenate(all_inds_into_fixedlabels)
-        all_rigid_fixed_labels = onp.zeros(fixed_labels_withdims.shape[0], dtype=onp.bool)
+        all_rigid_fixed_labels = onp.zeros(fixed_labels_withdims.shape[0], dtype=onp.bool_)
         all_rigid_fixed_labels[all_inds_into_fixedlabels] = True
 
         # np.unique will make sure this is sorted
