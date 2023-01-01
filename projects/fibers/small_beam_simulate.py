@@ -13,8 +13,7 @@ from varmint.physics.constitutive import NeoHookean2D, LinearElastic2D
 from varmint.physics.materials import Material
 from varmint.utils.movie_utils import create_movie, create_static_image
 
-#from geometry.small_beam_geometry import construct_beam
-from geometry.small_beam_single_geometry import construct_beam
+from geometry.small_beam_geometry import construct_beam
 import estimators as est
 
 from varmint.utils.mpi_utils import rprint
@@ -33,23 +32,23 @@ varmint.prepare_experiment_args(
             source_root='n/fs/mm-iga/Varmint/projects/fibers/')
 
 config = varmint.config_dict.ConfigDict({
-    'quaddeg': 6,
+    'quaddeg': 10,
     'mat_model': 'NeoHookean2D',
     'ncp': 10,
     'splinedeg': 1,
 
-    'fidelity': 100,
+    'fidelity': 20,
     'len_x': 10,
-    'len_y': 3,
+    'len_y': 4,
 
-    'num_fibers': 10000,
+    'num_fibers': 100000,
     'fiber_len': 0.5,
 
     'solver_parameters': {
         'tol': 1e-8,
     },
 
-    'jax_seed': 44,
+    'jax_seed': 24,
 })
 
 varmint.config_flags.DEFINE_config_dict('config', config)
@@ -88,35 +87,8 @@ def get_energy_density_fn(element, material):
     return energy_density
 
 
-def get_global_energy_fn_single(energy_density_fn, find_patch, g2l, ref_ctrl, dirichlet_ctrl):
-    print(ref_ctrl.shape)
-    def global_energy_density(params, point):
-        global_coords, ref_ctrl, dirichlet_ctrl, mat_params = params
-        local_coords = g2l(global_coords, dirichlet_ctrl, ref_ctrl)
-
-        # Figure out which patch the point belongs to.
-        # Transform `point` to [0, 1] x [0, 1]
-        patch_index = 0
-        print(point)
-        point = point / jnp.array([10.0, 3.0])
-
-        valid_patch = energy_density_fn(point, jnp.take(local_coords, patch_index, axis=0),
-                                        jnp.take(ref_ctrl, patch_index, axis=0),
-                                        jax.tree_util.tree_map(
-                                            lambda x: jnp.take(x, patch_index, axis=0),
-                                                               mat_params))
-        valid_patch = energy_density_fn(point, local_coords[0], ref_ctrl[0], 
-                                        jax.tree_util.tree_map(
-                                            lambda x: x[0], mat_params))
-
-        return jax.lax.cond(patch_index >= 0,
-                            lambda: valid_patch,
-                            lambda: 0.0)
-
-    return global_energy_density
-
-
-def get_global_energy_fn(energy_density_fn, find_patch, g2l, ref_ctrl, dirichlet_ctrl):
+def get_global_energy_fn(energy_density_fn, find_patch, g2l, ref_ctrl,
+                         dirichlet_ctrl, fidelity):
     def global_energy_density(params, point):
         global_coords, ref_ctrl, dirichlet_ctrl, mat_params = params
         local_coords = g2l(global_coords, dirichlet_ctrl, ref_ctrl)
@@ -132,7 +104,7 @@ def get_global_energy_fn(energy_density_fn, find_patch, g2l, ref_ctrl, dirichlet
                                                                mat_params))
 
         return jax.lax.cond(patch_index >= 0,
-                            lambda: valid_patch,
+                            lambda: valid_patch * (fidelity ** 2),
                             lambda: 0.0)
 
     return global_energy_density
@@ -154,19 +126,14 @@ def main(argv):
         x, y = x[0], x[1]
         x_radius, y_radius = params
 
-        return -1
-        #return 1 - jnp.maximum(((x - 5.0) / x_radius)**2, ((y - 1.5) / y_radius)**2)
+        #return -1
+        return 1 - jnp.maximum(((x - 5.0) / x_radius)**2, ((y - 1.5) / y_radius)**2)
     geometry_params = (4, 0.5)
 
     # Construct geometry (simple beam).
-    #beam, ref_ctrl, find_patch = construct_beam(
-    #        domain_oracle=domain, params=geometry_params,
-    #        len_x=config.len_x, len_y=config.len_y, fidelity=config.fidelity,
-    #        quad_degree=config.quaddeg, material=mat)
-    find_patch = lambda x: 0
-    beam, ref_ctrl = construct_beam(
-            len_x=config.len_x, len_y=config.len_y,
-            patch_ncp=config.ncp, spline_degree=config.splinedeg,
+    beam, ref_ctrl, find_patch = construct_beam(
+            domain_oracle=domain, params=geometry_params,
+            len_x=config.len_x, len_y=config.len_y, fidelity=config.fidelity,
             quad_degree=config.quaddeg, material=mat)
 
     # Boundary conditions
@@ -198,8 +165,8 @@ def main(argv):
     # Now get the functions that we need to do fiber sampling.
     energy_density_fn = get_energy_density_fn(beam.element, mat)
     vmap_energy_density_fn = jax.jit(jax.vmap(energy_density_fn, in_axes=(0, None, None, None)))
-    global_energy_fn = get_global_energy_fn_single(energy_density_fn, find_patch, g2l,
-                                                   ref_ctrl, dirichlet_ctrl)
+    global_energy_fn = get_global_energy_fn(energy_density_fn, find_patch, g2l,
+                                            ref_ctrl, dirichlet_ctrl, config.fidelity)
 
     def simulate():
         current_x = l2g(ref_ctrl, ref_ctrl)
@@ -236,38 +203,25 @@ def main(argv):
     # Now it's time for fiber sampling. Use the alternatively defined energy functions
     # together with fiber sampling to estimate the gradient.
     key = config.jax_rng
+
+    # Sample fibers for FMC and points for standard MC.
     bounds = jnp.array([0.0, 0.0, config.len_x, config.len_y])
-    #fibers, key = est.sample_fibers(key, bounds, config.num_fibers, config.fiber_len)
+    fibers, key = est.sample_fibers(key, bounds, config.num_fibers, config.fiber_len)
     points, key = est.sample_points(key, bounds, config.num_fibers)
 
+    # Parameters for the energy function.
     integrand_params = (final_x_global, ref_ctrl, dirichlet_ctrl, mat_params)
-    #estimated_area = est.estimate_field_value(domain, global_energy_fn, fibers,
-    #                                          (geometry_params, integrand_params))
+
+    # Actually perform MC.
+    estimated_area = est.estimate_field_value(domain, global_energy_fn, fibers,
+                                              (geometry_params, integrand_params))
     estimated_area_mc = est.estimate_field_value_mc(domain, global_energy_fn, points,
                                                     (geometry_params, integrand_params))
-    quad_fn = beam.element.get_quad_fn()
-    total_domain_volume = config.len_x * config.len_y
 
-    energy_quadrature = jnp.mean(vmap_energy_density_fn(beam.element.quad_points, final_x_local[0], ref_ctrl[0], (mat_params[0][0], mat_params[1][0])))
-
-    mc_quadrature = jnp.mean((vmap_energy_density_fn(points / jnp.array([10.0, 3.0]), final_x_local[0], ref_ctrl[0], (mat_params[0][0], mat_params[1][0]))))
-
-    energy_quadrature = quad_fn(vmap_energy_density_fn(beam.element.quad_points, final_x_local[0], ref_ctrl[0], (mat_params[0][0], mat_params[1][0])))
-
-    #print(f'Estimated integrand with fiber sampling: {estimated_area * total_domain_volume}.')
-    print(f'Estimated integrand with quadrature: {potential_energy_fn(final_x_global, *solution_point_args)}')
-    print(f'Estimated integrand with monte carlo: {mc_quadrature}.')
-    print(f'Estimated integrand with quadrature: {energy_quadrature}')
-    #print(f'Estimated integrand with monte carlo: {estimated_area_mc * total_domain_volume}.')
-
-    init_x_global = l2g(ref_ctrl, ref_ctrl)
-    init_solution_point_args = (ref_ctrl, tractions, ref_ctrl, mat_params)
-    init_integrand_params = (init_x_global, ref_ctrl, ref_ctrl, mat_params)
-    init_estimated_area = est.estimate_field_value(domain, global_energy_fn, fibers,
-                                                   (geometry_params, init_integrand_params))
-
-    print(f'Estimated reference integrand with fiber sampling: {init_estimated_area}.')
-    print(f'Estimated reference integrand with quadrature: {potential_energy_fn(init_x_global, *init_solution_point_args)}')
+    print(f'Estimated integrand with fiber sampling: {estimated_area}.')
+    print(f'Estimated integrand with quadrature: '
+          f'{potential_energy_fn(final_x_global, *solution_point_args)}')
+    print(f'Estimated integrand with monte carlo: {estimated_area_mc}.')
 
     rprint(f'Generating image and video with optimization.')
 
