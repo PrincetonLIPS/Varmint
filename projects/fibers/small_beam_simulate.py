@@ -14,6 +14,7 @@ from varmint.physics.materials import Material
 from varmint.utils.movie_utils import create_movie, create_static_image
 
 from geometry.small_beam_geometry import construct_beam
+from plotting.small_beam_plot import plot_small_beam
 import estimators as est
 
 from varmint.utils.mpi_utils import rprint
@@ -37,7 +38,7 @@ config = varmint.config_dict.ConfigDict({
     'ncp': 10,
     'splinedeg': 1,
 
-    'fidelity': 20,
+    'fidelity': 100,
     'len_x': 10,
     'len_y': 4,
 
@@ -127,7 +128,7 @@ def main(argv):
         x_radius, y_radius = params
 
         #return -1
-        return 1 - jnp.maximum(((x - 5.0) / x_radius)**2, ((y - 1.5) / y_radius)**2)
+        return 1 - jnp.maximum(((x - 5.0) / x_radius)**2, ((y - 2.0) / y_radius)**2)
     geometry_params = (4, 0.5)
 
     # Construct geometry (simple beam).
@@ -183,9 +184,9 @@ def main(argv):
 
     # Reference configuration
     ref_config_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-ref.png')
-    create_static_image(beam.element, ref_ctrl, ref_config_path)
-    ref_ctrl = jnp.array(ref_ctrl)
+    plot_small_beam(config, beam.element, ref_ctrl, None, ref_config_path)
 
+    ref_ctrl = jnp.array(ref_ctrl)
     rprint('Starting optimization (may be slow because of compilation).')
     iter_time = time.time()
     final_x_local, ctrl_seq = simulate()
@@ -227,7 +228,7 @@ def main(argv):
 
     # Deformed configuration
     image_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-optimized.png')
-    create_static_image(beam.element, final_x_local, image_path)
+    plot_small_beam(config, beam.element, ref_ctrl, final_x_local, image_path)
 
     # Deformation sequence movie
     vid_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-optimized.mp4')

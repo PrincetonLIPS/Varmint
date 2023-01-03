@@ -4,7 +4,8 @@ import jax
 import jax.numpy as jnp
 import numpy as onp
 import matplotlib.pyplot as plt
-import quadpy
+
+from numpy.polynomial.legendre import leggauss
 
 from varmint.utils.typing import CtrlArray, ArrayND, Array2D, Array3D
 from varmint.geometry.bsplines import (
@@ -552,15 +553,18 @@ class Patch2D(Element):
         self.xwidths = xwidths
         self.ywidths = ywidths
 
-        # Ask quadpy for a quadrature scheme.
-        scheme = quadpy.c2.get_good_scheme(self.quad_deg)
-
-        # Scheme for line integrals
-        line_scheme = quadpy.c1.gauss_legendre(3 * self.quad_deg)
+        # Get quadrature weights from scipy.
+        points, weights = leggauss(self.quad_deg)
+        line_points, line_weights = leggauss(3 * self.quad_deg)
 
         # Change the domain from (-1,1)^2 to (0,1)^2
-        points = scheme.points.T/2 + 0.5
-        line_points = line_scheme.points / 2 + 0.5
+        points = points / 2 + 0.5
+        points = onp.stack(onp.meshgrid(points, points), axis=-1).reshape(-1, 2)
+
+        weights = weights.reshape(-1, 1) @ weights.reshape(1, -1) / 4
+        weights = weights.reshape(-1, 1)
+
+        line_points = line_points / 2 + 0.5
 
         # Repeat the quadrature points for each knot span, scaled appropriately.
         offset_mesh = mesh(uniq_xknots[:-1], uniq_yknots[:-1])
@@ -582,11 +586,8 @@ class Patch2D(Element):
             + uniq_yknots[:-1][:, onp.newaxis],
             (-1,))
 
-        # FIXME: Why don't I have to divide this by 4 to accommodate the change in
-        # interval?
-        # Answer(doktay): Because for some reason quadpy.c2 weights sum to 1 instead of 4.
-        self.weights = onp.reshape(scheme.weights, (1, 1, -1))
-        self.line_weights = onp.reshape(line_scheme.weights / 2, (1, -1))
+        self.weights = onp.reshape(weights, (1, 1, -1))
+        self.line_weights = onp.reshape(line_weights / 2, (1, -1))
         #self.line_weights = np.ones_like(self.line_weights)
 
     def get_map_fn(self, points):
@@ -853,8 +854,7 @@ class Patch2D(Element):
     def n_d(self):
         return 2
 
-    def get_boundary_path(self):
-        N = 20
+    def get_boundary_path(self, N=20):
         uu = onp.linspace(1e-6, 1-1e-6, N)
         path = onp.hstack([
             onp.vstack([uu[0]*onp.ones(N), uu]),

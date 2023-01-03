@@ -203,13 +203,9 @@ def create_movie_mnist(
           f'{len(ctrl_seq[0])} patches in {t1-t0} seconds.')
 
 
-def create_static_image(
-    element: Element,
-    ctrl_sol,
-    filename,
-    just_cp=False,
-    fig_kwargs={},
-):
+def create_static_image(element: Element, ctrl_sol, ax, just_cp=False, verbose=False,
+                        facecolor='lightsalmon', edgecolor='orangered', linewidth=1,
+                        alpha=1.0, boundary_path=20):
     t0 = time.time()
 
     # Get extrema of control points.
@@ -227,34 +223,25 @@ def create_static_image(
     min_y -= pad_y
     max_y += pad_y
 
-    # Set up the figure and axes.
-    fig = plt.figure(**fig_kwargs)
-    ax = plt.axes(xlim=(min_x, max_x), ylim=(min_y, max_y))
-    ax.set_aspect('equal')
-
     if just_cp:
         flat_cp = ctrl_sol.reshape(-1, 2)
         ax.scatter(flat_cp[:, 0], flat_cp[:, 1], s=10)
     else:
         # Things we need to both initialize and update.
-        objects = {}
-        path = element.get_boundary_path()
+        path = element.get_boundary_path(boundary_path)
         jit_map_fn = jax.jit(element.get_map_fn(path))
 
-        # Render the first time step.
         for patch_ctrl in ctrl_sol:
             locs = jit_map_fn(patch_ctrl)
-            # line, = ax.plot(locs[:,0], locs[:,1], 'b-')
             poly, = ax.fill(locs[:, 0], locs[:, 1],
-                            facecolor='lightsalmon',
-                            edgecolor='orangered',
-                            linewidth=1)
-
-    plt.savefig(filename)
-
-    plt.close(fig)
+                            facecolor=facecolor,
+                            edgecolor=edgecolor,
+                            linewidth=linewidth,
+                            alpha=alpha)
     t1 = time.time()
-    print(f'Generated image with {len(ctrl_sol)} patches in {t1-t0} seconds.')
+    if verbose:
+        print(f'Generated image with {len(ctrl_sol)} patches in {t1-t0} seconds.')
+    return (min_x, max_x), (min_y, max_y)
 
 
 def plot_ctrl(
