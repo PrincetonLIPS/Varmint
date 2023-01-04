@@ -105,7 +105,7 @@ def get_global_energy_fn(energy_density_fn, find_patch, g2l, ref_ctrl,
                                                                mat_params))
 
         return jax.lax.cond(patch_index >= 0,
-                            lambda: valid_patch * (fidelity ** 2),
+                            lambda: valid_patch * (fidelity ** 2),  # Scale to get integral right
                             lambda: 0.0)
 
     return global_energy_density
@@ -127,9 +127,8 @@ def main(argv):
         x, y = x[0], x[1]
         x_radius, y_radius = params
 
-        #return -1
         return 1 - jnp.maximum(((x - 5.0) / x_radius)**2, ((y - 2.0) / y_radius)**2)
-    geometry_params = (4, 0.5)
+    geometry_params = (4.0, 0.5)
 
     # Construct geometry (simple beam).
     beam, ref_ctrl, find_patch = construct_beam(
@@ -192,6 +191,26 @@ def main(argv):
     final_x_local, ctrl_seq = simulate()
     rprint(f'\tSolve time: {time.time() - iter_time}')
 
+    # Define the functions to compute the two terms in the energy total derivative.
+    # Use this adjoint for a vjp with the energy density function
+    @jax.jit
+    def energy_vjp(params, point):
+        adjoint, final_x_global, ref_ctrl, dirichlet_ctrl, mat_params = params
+
+        def global_energy_density_vjp_form(final_x_global):
+            integrand_params = (final_x_global, ref_ctrl, dirichlet_ctrl, mat_params)
+            return global_energy_fn(integrand_params, point)
+
+        primal, tangents = \
+                jax.jvp(global_energy_density_vjp_form, (final_x_global,), (adjoint,))
+        return tangents
+
+    global_energy_fn = jax.jit(global_energy_fn)
+
+    # Now it's time for fiber sampling. Use the alternatively defined energy functions
+    # together with fiber sampling to estimate the gradient.
+    key = config.jax_rng
+
     # Compute gradient with respect to geometry through fiber sampling here.
     # First solve adjoint problem.
     solution_point_args = (dirichlet_ctrl, tractions, ref_ctrl, mat_params)
@@ -201,28 +220,33 @@ def main(argv):
     adjoint = optimizer.linear_solve(final_x_global, solution_point_args, -grad_final_x,
                                      solve_tol=config.solver_parameters.tol)
 
-    # Now it's time for fiber sampling. Use the alternatively defined energy functions
-    # together with fiber sampling to estimate the gradient.
-    key = config.jax_rng
-
     # Sample fibers for FMC and points for standard MC.
     bounds = jnp.array([0.0, 0.0, config.len_x, config.len_y])
     fibers, key = est.sample_fibers(key, bounds, config.num_fibers, config.fiber_len)
-    points, key = est.sample_points(key, bounds, config.num_fibers)
+
+    # Actually perform MC.
+    field_value_grad = jax.grad(est.estimate_field_value, argnums=3)  # Differentiate wrt params
 
     # Parameters for the energy function.
     integrand_params = (final_x_global, ref_ctrl, dirichlet_ctrl, mat_params)
-
-    # Actually perform MC.
     estimated_area = est.estimate_field_value(domain, global_energy_fn, fibers,
                                               (geometry_params, integrand_params))
-    estimated_area_mc = est.estimate_field_value_mc(domain, global_energy_fn, points,
-                                                    (geometry_params, integrand_params))
+
+    pEptheta, _ = field_value_grad(domain, global_energy_fn, fibers,
+                                   (geometry_params, integrand_params))
+
+    # Parameters for adjoint
+    adjoint_integrand_params = (adjoint, final_x_global, ref_ctrl, dirichlet_ctrl, mat_params)
+    pdEptheta, _ = field_value_grad(domain, energy_vjp, fibers,
+                                    (geometry_params, adjoint_integrand_params))
+
+    total_energy_derivative = jax.tree_util.tree_map(lambda x, y: x + y, pEptheta, pdEptheta)
+
 
     print(f'Estimated integrand with fiber sampling: {estimated_area}.')
     print(f'Estimated integrand with quadrature: '
           f'{potential_energy_fn(final_x_global, *solution_point_args)}')
-    print(f'Estimated integrand with monte carlo: {estimated_area_mc}.')
+    print(f'Estimated total derivative: {total_energy_derivative}.')
 
     rprint(f'Generating image and video with optimization.')
 
