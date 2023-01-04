@@ -25,7 +25,7 @@ def construct_beam(domain_oracle, params, len_x, len_y, fidelity, quad_degree, m
 
     # Use the pixel mesher with the implicit function, and then convert output
     # to ctrl points understandable by Varmint.
-    coords, cells, find_patch = mshr.pixelize_implicit(domain_oracle, params, len_x, len_y, fidelity)
+    coords, cells, occupied_pixels, find_patch = mshr.find_occupied_pixels(domain_oracle, params, len_x, len_y, fidelity)
     all_ctrls = coords[cells].reshape(cells.shape[0], patch_ncp, patch_ncp, coords.shape[-1])
 
     # Dirichlet labels
@@ -54,4 +54,4 @@ def construct_beam(domain_oracle, params, len_x, len_y, fidelity, quad_degree, m
         constraints=(constraints[:, 0], constraints[:, 1]),
         dirichlet_labels=dirichlet_groups,
         traction_labels=traction_groups,
-    ), all_ctrls, find_patch
+    ), all_ctrls, occupied_pixels, find_patch

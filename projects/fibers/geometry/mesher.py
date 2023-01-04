@@ -74,3 +74,42 @@ def pixelize_implicit(domain_oracle, params, len_x, len_y, fidelity, negative=Tr
         return new_cell_index, large_point % 1.0
 
     return coords, cells, find_patch
+
+
+def find_occupied_pixels(domain_oracle, params, len_x, len_y, fidelity, negative=True):
+    """Given domain oracle, size of rectangular domain, and fidelity, discretize the domain.
+    
+    `domain_oracle` should take two inputs: `params`, and a single 2-D coordinate.
+    It should output a scalar. It will internally be vectorized wrt the second input.
+
+    If negative=True, the material exists where `domain_oracle < 0`. The discretization
+    is meant to overestimate; if `domain_oracle < 0` on any cell corner, it will be included.
+
+    This method will return the cells and coords for the full domain, along with a mask
+    denoting where material exists.
+    """
+
+    coords, cells = base_domain(len_x, len_y, fidelity)
+    v_oracle = jax.vmap(domain_oracle, in_axes=(None, 0))
+
+    if negative:
+        node_occupancy = v_oracle(params, coords) < 0.0
+    else:
+        node_occupancy = v_oracle(params, coords) > 0.0
+
+    # bool array in the shape of cells.shape[0] 
+    cell_occupancy = onp.any(node_occupancy[cells], axis=-1)
+
+    # Define a function to transform a point in physical space to 
+    # a cell index and coordinate within the cell in [0, 1] x [0, 1].
+    def find_patch(point):
+        # Find cell index
+        large_point = point * fidelity / jnp.array([len_x, len_y]) 
+        i = jnp.trunc(large_point[0]).astype(onp.int32)
+        j = jnp.trunc(large_point[1]).astype(onp.int32)
+
+        cell_index = i * fidelity + j
+
+        return cell_index, large_point % 1.0
+
+    return coords, cells, cell_occupancy, find_patch

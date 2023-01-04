@@ -42,7 +42,7 @@ config = varmint.config_dict.ConfigDict({
     'len_x': 10,
     'len_y': 4,
 
-    'num_fibers': 100000,
+    'num_fibers': 1000,
     'fiber_len': 0.5,
 
     'solver_parameters': {
@@ -88,7 +88,7 @@ def get_energy_density_fn(element, material):
     return energy_density
 
 
-def get_global_energy_fn(energy_density_fn, find_patch, g2l, ref_ctrl,
+def get_global_energy_fn(energy_density_fn, find_patch, occupied_pixels, g2l, ref_ctrl,
                          dirichlet_ctrl, fidelity):
     def global_energy_density(params, point):
         global_coords, ref_ctrl, dirichlet_ctrl, mat_params = params
@@ -104,8 +104,13 @@ def get_global_energy_fn(energy_density_fn, find_patch, g2l, ref_ctrl,
                                             lambda x: jnp.take(x, patch_index, axis=0),
                                                                mat_params))
 
-        return jax.lax.cond(patch_index >= 0,
-                            lambda: valid_patch * (fidelity ** 2),  # Scale to get integral right
+        # TODO(doktay): Why am I getting NaNs??
+        # Is it because quadrature points are getting sampled near the internal boundaries
+        # which might contain degenerate elements?
+        return jax.lax.cond(jnp.logical_and(patch_index >= 0,
+                                            jnp.logical_and(~jnp.isnan(valid_patch),
+                                                            occupied_pixels[patch_index])),
+                            lambda: valid_patch * (fidelity ** 2),
                             lambda: 0.0)
 
     return global_energy_density
@@ -128,10 +133,10 @@ def main(argv):
         x_radius, y_radius = params
 
         return 1 - jnp.maximum(((x - 5.0) / x_radius)**2, ((y - 2.0) / y_radius)**2)
-    geometry_params = (4.0, 0.5)
+    geometry_params = (4.01, 0.5)
 
     # Construct geometry (simple beam).
-    beam, ref_ctrl, find_patch = construct_beam(
+    beam, ref_ctrl, occupied_pixels, find_patch = construct_beam(
             domain_oracle=domain, params=geometry_params,
             len_x=config.len_x, len_y=config.len_y, fidelity=config.fidelity,
             quad_degree=config.quaddeg, material=mat)
@@ -144,8 +149,14 @@ def main(argv):
 
     # Defines the material parameters.
     # Can ignore this. Only useful when doing optimization wrt material params.
+    E_min = 1e-9
+    solver_mat_params = (
+        TPUMat.E * occupied_pixels + E_min * ~occupied_pixels,
+        TPUMat.nu * jnp.ones(ref_ctrl.shape[0]),
+    )
+
     mat_params = (
-        TPUMat.E * jnp.ones(ref_ctrl.shape[0]),
+        TPUMat.E  * jnp.ones(ref_ctrl.shape[0]),
         TPUMat.nu * jnp.ones(ref_ctrl.shape[0]),
     )
     tractions = beam.tractions_from_dict({})
@@ -165,14 +176,14 @@ def main(argv):
     # Now get the functions that we need to do fiber sampling.
     energy_density_fn = get_energy_density_fn(beam.element, mat)
     vmap_energy_density_fn = jax.jit(jax.vmap(energy_density_fn, in_axes=(0, None, None, None)))
-    global_energy_fn = get_global_energy_fn(energy_density_fn, find_patch, g2l,
+    global_energy_fn = get_global_energy_fn(energy_density_fn, find_patch, occupied_pixels, g2l,
                                             ref_ctrl, dirichlet_ctrl, config.fidelity)
 
     def simulate():
         current_x = l2g(ref_ctrl, ref_ctrl)
 
         current_x, all_xs, all_fixed_locs, solved_increment = optimize(
-                current_x, increment_dict, tractions, ref_ctrl, mat_params)
+                current_x, increment_dict, tractions, ref_ctrl, solver_mat_params)
 
         # Unflatten sequence to local configuration.
         ctrl_seq = beam.unflatten_sequence(
@@ -183,7 +194,7 @@ def main(argv):
 
     # Reference configuration
     ref_config_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-ref.png')
-    plot_small_beam(config, beam.element, ref_ctrl, None, ref_config_path)
+    plot_small_beam(config, beam.element, ref_ctrl[occupied_pixels], None, ref_config_path)
 
     ref_ctrl = jnp.array(ref_ctrl)
     rprint('Starting optimization (may be slow because of compilation).')
@@ -213,7 +224,7 @@ def main(argv):
 
     # Compute gradient with respect to geometry through fiber sampling here.
     # First solve adjoint problem.
-    solution_point_args = (dirichlet_ctrl, tractions, ref_ctrl, mat_params)
+    solution_point_args = (dirichlet_ctrl, tractions, ref_ctrl, solver_mat_params)
     final_x_global = l2g(final_x_local, ref_ctrl)
     grad_final_x = optimizer.grad_fun(final_x_global, *solution_point_args)
 
@@ -223,36 +234,47 @@ def main(argv):
     # Sample fibers for FMC and points for standard MC.
     bounds = jnp.array([0.0, 0.0, config.len_x, config.len_y])
     fibers, key = est.sample_fibers(key, bounds, config.num_fibers, config.fiber_len)
+    points, key = est.sample_points(key, bounds, config.num_fibers)
 
     # Actually perform MC.
-    field_value_grad = jax.grad(est.estimate_field_value, argnums=3)  # Differentiate wrt params
+    def field_value(fibers, geometry_params, integrand_params):
+        return est.estimate_field_value(domain, global_energy_fn, fibers,
+                                        (geometry_params, integrand_params))
+    field_value_grad = jax.grad(field_value, argnums=1)
+
+    def adjoint_field_value(fibers, geometry_params, adjoint_integrand_params):
+        return est.estimate_field_value(domain, energy_vjp, fibers,
+                                        (geometry_params, adjoint_integrand_params))
+    adjoint_field_value_grad = jax.grad(adjoint_field_value, argnums=1)
 
     # Parameters for the energy function.
-    integrand_params = (final_x_global, ref_ctrl, dirichlet_ctrl, mat_params)
-    estimated_area = est.estimate_field_value(domain, global_energy_fn, fibers,
-                                              (geometry_params, integrand_params))
+    integrand_params = (final_x_global, ref_ctrl, dirichlet_ctrl, solver_mat_params)
+    estimated_area = field_value(fibers, geometry_params, integrand_params)
+    estimated_area_mc = est.estimate_field_value_mc(domain, global_energy_fn, points,
+                                                    (geometry_params, integrand_params))
 
-    pEptheta, _ = field_value_grad(domain, global_energy_fn, fibers,
-                                   (geometry_params, integrand_params))
+
+    pEptheta = field_value_grad(fibers, geometry_params, integrand_params)
 
     # Parameters for adjoint
-    adjoint_integrand_params = (adjoint, final_x_global, ref_ctrl, dirichlet_ctrl, mat_params)
-    pdEptheta, _ = field_value_grad(domain, energy_vjp, fibers,
-                                    (geometry_params, adjoint_integrand_params))
+    adjoint_integrand_params = (adjoint, final_x_global, ref_ctrl, dirichlet_ctrl, solver_mat_params)
+    pdEptheta = adjoint_field_value_grad(fibers, geometry_params, adjoint_integrand_params)
 
     total_energy_derivative = jax.tree_util.tree_map(lambda x, y: x + y, pEptheta, pdEptheta)
 
 
     print(f'Estimated integrand with fiber sampling: {estimated_area}.')
+    print(f'Estimated integrand with Monte Carlo: {estimated_area_mc}.')
     print(f'Estimated integrand with quadrature: '
           f'{potential_energy_fn(final_x_global, *solution_point_args)}')
     print(f'Estimated total derivative: {total_energy_derivative}.')
+    print(f'\tFirst term: {pEptheta} \n\tSecond term: {pdEptheta}')
 
     rprint(f'Generating image and video with optimization.')
 
     # Deformed configuration
     image_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-optimized.png')
-    plot_small_beam(config, beam.element, ref_ctrl, final_x_local, image_path)
+    plot_small_beam(config, beam.element, ref_ctrl[occupied_pixels], final_x_local[occupied_pixels], image_path)
 
     # Deformation sequence movie
     vid_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-optimized.mp4')
