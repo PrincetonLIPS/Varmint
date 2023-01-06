@@ -1,3 +1,5 @@
+import jax
+
 import numpy as onp
 import matplotlib.pyplot as plt
 
@@ -30,4 +32,42 @@ def plot_small_beam(config, element, ref_ctrl, final_x_local, path):
     ax.set_axisbelow(True)
 
     fig.savefig(path)
+    plt.close(fig)
+
+
+def visualize_domain(config, step, domain, geometry_params, path, num_pts=1000):
+    xx = onp.linspace(0, config.len_x, num_pts)
+    yy = onp.linspace(0, config.len_y, num_pts)
+
+    pts = onp.stack(onp.meshgrid(xx, yy), axis=-1).reshape(-1, 2)
+    vals = jax.jit(jax.vmap(domain, in_axes=(None, 0)))(geometry_params, pts)
+    in_domain = vals < 0
+
+    fig = plt.figure()
+    ax = fig.gca()
+
+    ax.scatter(pts[in_domain, 0], pts[in_domain, 1], c='black', s=1)
+    ax.set_aspect('equal')
+
+    fig.savefig(path)
+
+    plt.figure(fig.number)
+    config.summary_writer.plot('implicit_domain', plt, step=step)
+
+    plt.close(fig)
+
+
+def visualize_pixel_domain(config, step, occupied_pixels, path):
+    fig = plt.figure()
+    ax = fig.gca()
+
+    occupied_pixels = occupied_pixels.reshape(config.fidelity, config.fidelity).T
+    occupied_pixels = occupied_pixels[::-1, :]
+    ax.imshow(1-occupied_pixels, cmap='gray', extent=(0.0, config.len_x, 0.0, config.len_y))
+
+    fig.savefig(path)
+
+    plt.figure(fig.number)
+    config.summary_writer.plot('pixelized_domain', plt, step=step)
+
     plt.close(fig)

@@ -76,7 +76,7 @@ def pixelize_implicit(domain_oracle, params, len_x, len_y, fidelity, negative=Tr
     return coords, cells, find_patch
 
 
-def find_occupied_pixels(domain_oracle, params, len_x, len_y, fidelity, negative=True):
+def find_occupied_pixels(domain_oracle, params, len_x, len_y, fidelity, negative=True, center=False):
     """Given domain oracle, size of rectangular domain, and fidelity, discretize the domain.
     
     `domain_oracle` should take two inputs: `params`, and a single 2-D coordinate.
@@ -92,13 +92,21 @@ def find_occupied_pixels(domain_oracle, params, len_x, len_y, fidelity, negative
     coords, cells = base_domain(len_x, len_y, fidelity)
     v_oracle = jax.vmap(domain_oracle, in_axes=(None, 0))
 
-    if negative:
-        node_occupancy = v_oracle(params, coords) < 0.0
-    else:
-        node_occupancy = v_oracle(params, coords) > 0.0
+    if center:
+        center = onp.mean(coords[cells, :], axis=1)
+        
+        if negative:
+            cell_occupancy = v_oracle(params, center) < 0.0
+        else:
+            cell_occupancy = v_oracle(params, center) > 0.0
+    else: 
+        if negative:
+            node_occupancy = v_oracle(params, coords) < 0.0
+        else:
+            node_occupancy = v_oracle(params, coords) > 0.0
 
-    # bool array in the shape of cells.shape[0] 
-    cell_occupancy = onp.any(node_occupancy[cells], axis=-1)
+        # bool array in the shape of cells.shape[0] 
+        cell_occupancy = onp.any(node_occupancy[cells], axis=-1)
 
     # Define a function to transform a point in physical space to 
     # a cell index and coordinate within the cell in [0, 1] x [0, 1].
