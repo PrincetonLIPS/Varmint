@@ -52,7 +52,7 @@ def visualize_domain(config, step, domain, geometry_params, path, num_pts=1000):
     fig.savefig(path)
 
     plt.figure(fig.number)
-    config.summary_writer.plot('implicit_domain', plt, step=step)
+    config.summary_writer.plot('Implicit Domain', plt, step=step)
 
     plt.close(fig)
 
@@ -68,6 +68,6 @@ def visualize_pixel_domain(config, step, occupied_pixels, path):
     fig.savefig(path)
 
     plt.figure(fig.number)
-    config.summary_writer.plot('pixelized_domain', plt, step=step)
+    config.summary_writer.plot('Pixelized Domain', plt, step=step)
 
     plt.close(fig)

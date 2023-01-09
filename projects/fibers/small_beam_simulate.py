@@ -48,28 +48,28 @@ config = varmint.config_dict.ConfigDict({
     'domain_degree': 1,
 
     'num_fibers': 20000,
-    'fiber_len': 0.2,
+    'fiber_len': 0.05,
 
     'solver_parameters': {
         'tol': 1e-8,
         'base_incs': 1,
     },
 
-    'E_min_schedule': True,
+    'E_min_schedule': False,
     'schedule_update_interval': 100,
     'schedule_decay_rate': 0.5,
-    'inverse_fibers': True,
+    'inverse_fibers': False,
 
     'jax_seed': 24,
 
-    'area_penalty': 1000,
+    'area_penalty': 100,
 
     'num_iters': 10000,
     'vis_every': 10,
     'save_every': 100,
     'plot_deformed': False,
 
-    'lr': 0.1,
+    'lr': 0.01,
 })
 
 varmint.config_flags.DEFINE_config_dict('config', config)
@@ -332,32 +332,35 @@ def main(argv):
         area_pen_val = area_penalty_grad(fibers, geometry_params)
         min_area_pen_val = min_area_penalty_grad(fibers, geometry_params)
 
+        curr_area_estimate = area_estimate(fibers, geometry_params)
+        curr_real_area = jnp.mean(occupied_pixels)
+        area_penalty_grad_norm = jnp.linalg.norm(area_pen_val + min_area_pen_val)
+
+        config.summary_writer.scalar('Fiber energies', estimated_energy, step=i)
+        config.summary_writer.scalar('Quad energies', quadrature_energy, step=i)
+        config.summary_writer.scalar('Fiber area estimate', curr_area_estimate, step=i)
+        config.summary_writer.scalar('Real area', curr_real_area, step=i)
+        config.summary_writer.scalar('Area penalty grad norm', area_penalty_grad_norm, step=i)
+        config.summary_writer.scalar('E_min', E_min / TPUMat.E, step=i)
+
         print(f'Iteration {i} Fiber sampling time: {time.time() - fiber_start_time}')
         print(f'\tCurrent E_min value: {E_min}.')
-        print(f'\tEstimated area with fiber sampling: {area_estimate(fibers, geometry_params)}.')
-        print(f'\tReal area after rounding: {jnp.mean(occupied_pixels)}.')
+        print(f'\tEstimated area with fiber sampling: {curr_area_estimate}.')
+        print(f'\tReal area after rounding: {curr_real_area}.')
         print(f'\tEstimated integrand with fiber sampling: {estimated_energy}.')
         print(f'\tEstimated integrand with quadrature: {quadrature_energy}')
-        print(f'\tArea penalty grad: {jnp.linalg.norm(area_pen_val + min_area_pen_val)}')
-
-        updates, opt_state = outer_optimizer.update(
-                total_energy_derivative - area_pen_val - min_area_pen_val, opt_state)
-        geometry_params = jax.tree_util.tree_map(lambda x, y: x - y, geometry_params, updates)
-
-        if config.E_min_schedule:
-            if i % config.schedule_update_interval == 0:
-                E_min = max(E_min * config.schedule_decay_rate, 1e-9)
+        print(f'\tArea penalty grad: {area_penalty_grad_norm}')
 
         if i % config.vis_every == 0 or i == config.num_iters - 1:
             vis_start_time = time.time()
 
             # Implicit topology
             image_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-implicit-iter{i}.png')
-            visualize_domain(config, domain, geometry_params, image_path)
+            visualize_domain(config, i, domain, geometry_params, image_path)
 
             # Pixelixed topology
             image_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-pixelized-iter{i}.png')
-            visualize_pixel_domain(config, occupied_pixels, image_path)
+            visualize_pixel_domain(config, i, occupied_pixels, image_path)
 
             # Energy graph
             image_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-energy-plot.png')
@@ -367,9 +370,9 @@ def main(argv):
             ax.plot(quad_energies, label='Quadrature energy')
             ax.legend()
             fig.savefig(image_path)
-            plt.figure(fig.number)
-            config.summary_writer.plot('energies plot', plt, step=i)
             plt.close(fig)
+
+            config.summary_writer.flush()
 
             rprint(f'Generated visualizations in {time.time() - vis_start_time} secs.')
 
@@ -389,6 +392,14 @@ def main(argv):
                                      f'sim-{args.exp_name}-pickles-energies-iter{i}.png')
             with open(file_path, 'wb') as f:
                 pickle.dump((fiber_energies, quad_energies), f)
+
+        updates, opt_state = outer_optimizer.update(
+                total_energy_derivative - area_pen_val - min_area_pen_val, opt_state)
+        geometry_params = jax.tree_util.tree_map(lambda x, y: x - y, geometry_params, updates)
+
+        if config.E_min_schedule:
+            if i % config.schedule_update_interval == 0:
+                E_min = max(E_min * config.schedule_decay_rate, 1e-9)
 
     rprint(f'Finished simulation {args.exp_name}')
 
