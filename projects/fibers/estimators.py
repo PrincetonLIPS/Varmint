@@ -12,7 +12,7 @@ import jax.random as npr
 
 from numpy.polynomial.legendre import leggauss
 
-from projects.fibers.implicit_differentiation import bind_solver, bisection_solver
+from projects.fibers.implicit_differentiation import bind_solver, bisection_solver, bisect
 
 from varmint.utils.typing import *
 from varmint.utils.ad_utils import zero_one_sign, custom_norm
@@ -268,3 +268,43 @@ def estimate_field_value(domain_oracle: callable, integrand: callable, fibers: n
     cumulative_fiber_length: float = np.linalg.norm(fibers[:, 1] - fibers[:, 0], axis=1).sum()
     return field_value / cumulative_fiber_length
 
+
+def compute_shape_derivative(objective_fn: callable, domain_oracle: callable, integrand: callable, fibers: ndarray, params: pytree, negative: bool=True): 
+    """Compute the shape derivative with respect to an objective function at random points along the shape boundary.
+    
+    The `domain_oracle` defines the domain through the implicit function. The `integrand` defines the integral
+    over the domain that we want to use in the objective function. The objective is of the form J(I) where I is
+
+    $$I = \int_{\Omega} integrand(int_params, x) dx$$
+
+    and \Omega is the domain defined by the domain oracle. Hence, `objective_fn`: R -> R.
+    This function will compute intersections of each fiber with the domain, evaluate the shape derivative at those
+    locations, and then use that information to compute new values of the domain oracle at the intersection points.
+    The return value will be size (num_fibers,). It is then the job of the user to optimize the parameters of the
+    domain to match these points.
+    """
+
+    domain_oracle_params, integrand_params = params 
+    I = estimate_field_value(domain_oracle, integrand, fibers, params)
+    upstream_grad = jax.grad(objective_fn)(I).squeeze()  # Should just be a scalar.
+
+    def domain_with_params(point):
+        return domain_oracle(domain_oracle_params, point)
+
+    # Sample a bunch of points on the current surface.
+    surface_points = jax.vmap(bisect, in_axes=(None, 0))(domain_with_params, fibers)
+    is_surface = jnp.abs(jax.vmap(domain_with_params)(surface_points)) < 1e-8
+
+    # Compute the energy density at each point.
+    energy_densities = jax.vmap(integrand, in_axes=(None, 0))(integrand_params, surface_points)
+
+    # Compute the gradient norm of the implicit surface at each point.
+    implicit_grad_norm = jax.vmap(lambda p: jnp.linalg.norm(jax.grad(domain_with_params)(p)))
+
+    # Compute the update to the domain at each surface point.
+    if negative:
+        domain_updates = energy_densities * implicit_grad_norm(surface_points)
+    else:
+        domain_updates = -energy_densities * implicit_grad_norm(surface_points)
+
+    return upstream_grad * domain_updates, surface_points, is_surface

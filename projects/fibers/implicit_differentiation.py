@@ -13,7 +13,7 @@ from varmint.utils.typing import *
 from varmint.utils.ad_utils import divide00
 
 
-def bisect(f: callable, fiber: ndarray, num_iterations: int=10) -> float: 
+def bisect(f: callable, fiber: ndarray, num_iterations: int=100) -> float: 
     """Batchable bisection solver running for a specified number of steps."""
 
     interpolant: callable = lambda x: fiber[0] + x * (fiber[1] - fiber[0])
@@ -26,9 +26,7 @@ def bisect(f: callable, fiber: ndarray, num_iterations: int=10) -> float:
         left, right = endpoints 
         midpoint: float = (left + right) / 2. 
         return jax.lax.cond(h(midpoint) < 0., lambda _: jnp.array([midpoint, right]), lambda _: jnp.array([left, midpoint]), operand=midpoint)
-
-    for _ in range(num_iterations): 
-        endpoints: ndarray = _bisect(endpoints)
+    endpoints = jax.lax.fori_loop(0, num_iterations, lambda i, endpoints: _bisect(endpoints), endpoints)
 
     return interpolant(endpoints[0])
 

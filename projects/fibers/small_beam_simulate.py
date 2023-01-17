@@ -2,12 +2,7 @@ import varmint
 
 import time
 import os
-import argparse
 import pickle
-
-import sys
-import os
-import gc
 
 from varmint.solver.incremental_loader import SparseNewtonIncrementalSolver
 from varmint.physics.constitutive import NeoHookean2D, LinearElastic2D
@@ -18,6 +13,7 @@ import varmint.geometry.bsplines as bsplines
 
 from geometry.small_beam_geometry import construct_beam
 from plotting.small_beam_plot import plot_small_beam, visualize_domain, visualize_pixel_domain
+from implicit_differentiation import bisect
 import estimators as est
 import geometry.mesher as mshr
 
@@ -31,7 +27,6 @@ import optax
 
 import matplotlib.pyplot as plt
 
-
 varmint.prepare_experiment_args(
     None, exp_root='/n/fs/mm-iga/Varmint/projects/fibers/experiments',
             source_root='n/fs/mm-iga/Varmint/projects/fibers/')
@@ -44,7 +39,7 @@ config = varmint.config_dict.ConfigDict({
     'len_x': 10,
     'len_y': 4,
 
-    'domain_ncp': 10,
+    'domain_ncp': 20,
     'domain_degree': 1,
 
     'num_fibers': 20000,
@@ -60,16 +55,20 @@ config = varmint.config_dict.ConfigDict({
     'schedule_decay_rate': 0.5,
     'inverse_fibers': False,
 
+    'shape_derivative': True,
+    'shape_derivative_optimization_iters': 500,
+    'shape_derivative_optimization_lr': 0.01,
+
     'jax_seed': 24,
 
-    'area_penalty': 100,
+    'area_penalty': 10,
 
     'num_iters': 10000,
     'vis_every': 10,
     'save_every': 100,
     'plot_deformed': False,
 
-    'lr': 0.01,
+    'lr': 0.1,
 })
 
 varmint.config_flags.DEFINE_config_dict('config', config)
@@ -146,6 +145,25 @@ def main(argv):
     else:
         raise ValueError(f'Unknown material model: {config.mat_model}')
 
+    @jax.vmap
+    def checkerboard(point):
+        mu1 = jnp.array([0.25, 0.25])
+        mu2 = jnp.array([0.75, 0.75])
+        mu3 = jnp.array([0.25, 0.75])
+        mu4 = jnp.array([0.75, 0.25])
+        radius = 0.2
+
+        return -jnp.minimum(
+            jnp.linalg.norm(point - mu1) - radius, 
+            jnp.minimum(jnp.linalg.norm(point - mu2) - radius,
+                        jnp.minimum(jnp.linalg.norm(point - mu3) - radius,
+                                    jnp.linalg.norm(point - mu4) - radius)))
+
+    xx = jnp.linspace(0, 1, config.domain_ncp)
+    yy = jnp.linspace(0, 1, config.domain_ncp)
+    chkr_points = jnp.stack(jnp.meshgrid(xx, yy), axis=-1).reshape(-1, 2)
+    chkr = checkerboard(chkr_points).reshape(config.domain_ncp, config.domain_ncp)
+
     # Define implicit function for geometry using Bsplines.
     def domain(params, point):
         point = point.reshape(1, -1)
@@ -154,8 +172,10 @@ def main(argv):
         return bsplines.bspline2d(point, params, knots, knots, config.domain_degree).squeeze()
 
     # Initial geometry parameters are a checkerboard pattern
-    init_controls = -1 * onp.ones((config.domain_ncp, config.domain_ncp, 1)) + 0.7
-    init_controls[1:-1:2, 1:-1:2] += 2
+    init_controls = -1 * onp.ones((config.domain_ncp, config.domain_ncp, 1)) + 0.8
+    #init_controls[1:-1:2, 1:-1:2] += 2
+    init_controls = chkr
+
     knots = bsplines.default_knots(config.domain_degree, config.domain_ncp)
     geometry_params = jnp.array(init_controls)
 
@@ -268,6 +288,39 @@ def main(argv):
     fiber_energies = []
     quad_energies = []
 
+    @jax.jit
+    def shape_derivative_optimization(fibers, geometry_params, integrand_params):
+        # First compute shape derivative for energy.
+        energy_term, surface_points, is_surface = est.compute_shape_derivative(lambda x: x, domain, global_energy_fn,
+                                                                    fibers, (geometry_params, integrand_params))
+        def max_area_penalty_fn(area_estimate):
+            return jax.nn.relu(area_estimate - 0.5) ** 2 * config.area_penalty
+        max_area_penalty_term, _, _ = est.compute_shape_derivative(max_area_penalty_fn, domain, lambda _, x: 1.0,
+                                                                fibers, (geometry_params, None))
+
+        def min_area_penalty_fn(area_estimate):
+            return jax.nn.relu(0.4 - area_estimate) ** 2 * config.area_penalty
+        min_area_penalty_term, _, _ = est.compute_shape_derivative(min_area_penalty_fn, domain, lambda _, x: 1.0,
+                                                                fibers, (geometry_params, None))
+
+        domain_perturbations = -(energy_term - max_area_penalty_term - min_area_penalty_term) * config.lr
+
+        # Now optimize geometric parameters to match the perturbations at intersection points.
+        vmap_domain = jax.vmap(domain, in_axes=(None, 0))
+        def loss_fn(geometric_params):
+            return jnp.sum(is_surface * (vmap_domain(geometric_params, surface_points) - domain_perturbations) ** 2)
+        grad_fn = jax.grad(loss_fn, argnums=0)
+        initial_loss = loss_fn(geometry_params)
+
+        def body_fn(geometry_params):
+            return jax.tree_util.tree_map(lambda x, y: x - y * config.shape_derivative_optimization_lr,
+                                            geometry_params, grad_fn(geometry_params))
+
+        geometry_params = jax.lax.fori_loop(0, config.shape_derivative_optimization_iters, lambda i, x: body_fn(x), geometry_params)
+        final_loss = loss_fn(geometry_params)
+
+        return geometry_params, initial_loss, final_loss
+
     # Here we start optimization
     rprint('Starting optimization (may be slow because of compilation).')
     for i in range(config.num_iters):
@@ -306,50 +359,53 @@ def main(argv):
 
         # Parameters for the energy function.
         integrand_params = (final_x_global, occupied_pixels, solver_mat_params)
-        estimated_energy = field_value(fibers, geometry_params, integrand_params)
-
-        if config.inverse_fibers:
-            inverted_integrand_params = (final_x_global, 1 - occupied_pixels, solver_mat_params)
-            inverted_estimated_energy = field_value(fibers, -1 * geometry_params, inverted_integrand_params)
-
-            estimated_energy += inverted_estimated_energy
 
         solution_point_args = (dirichlet_ctrl, tractions, ref_ctrl, rounded_mat_params)
         quadrature_energy = potential_energy_fn(final_x_global, *solution_point_args)
-
-        fiber_energies.append(estimated_energy)
         quad_energies.append(quadrature_energy)
-
-        pEptheta = field_value_grad(fibers, geometry_params, integrand_params)
-
-        # Parameters for adjoint
-        adjoint_integrand_params = (adjoint, final_x_global, occupied_pixels, solver_mat_params)
-        pdEptheta = adjoint_field_value_grad(fibers, geometry_params, adjoint_integrand_params)
-
-        total_energy_derivative = jax.tree_util.tree_map(lambda x, y: x + y, pEptheta, pdEptheta)
-
-        # Compute total area and penalize if deviating outside of [0.4, 0.5].
-        area_pen_val = area_penalty_grad(fibers, geometry_params)
-        min_area_pen_val = min_area_penalty_grad(fibers, geometry_params)
-
-        curr_area_estimate = area_estimate(fibers, geometry_params)
         curr_real_area = jnp.mean(occupied_pixels)
-        area_penalty_grad_norm = jnp.linalg.norm(area_pen_val + min_area_pen_val)
 
-        config.summary_writer.scalar('Fiber energies', estimated_energy, step=i)
+        if not config.shape_derivative:
+            estimated_energy = field_value(fibers, geometry_params, integrand_params)
+
+            if config.inverse_fibers:
+                inverted_integrand_params = (final_x_global, 1 - occupied_pixels, solver_mat_params)
+                inverted_estimated_energy = field_value(fibers, -1 * geometry_params, inverted_integrand_params)
+
+                estimated_energy += inverted_estimated_energy
+
+            fiber_energies.append(estimated_energy)
+
+            pEptheta = field_value_grad(fibers, geometry_params, integrand_params)
+
+            # Parameters for adjoint
+            adjoint_integrand_params = (adjoint, final_x_global, occupied_pixels, solver_mat_params)
+            pdEptheta = adjoint_field_value_grad(fibers, geometry_params, adjoint_integrand_params)
+
+            total_energy_derivative = jax.tree_util.tree_map(lambda x, y: x + y, pEptheta, pdEptheta)
+
+            # Compute total area and penalize if deviating outside of [0.4, 0.5].
+            area_pen_val = area_penalty_grad(fibers, geometry_params)
+            min_area_pen_val = min_area_penalty_grad(fibers, geometry_params)
+            area_penalty_grad_norm = jnp.linalg.norm(area_pen_val + min_area_pen_val)
+
+            curr_area_estimate = area_estimate(fibers, geometry_params)
+
+            config.summary_writer.scalar('Fiber energies', estimated_energy, step=i)
+            config.summary_writer.scalar('Fiber area estimate', curr_area_estimate, step=i)
+            config.summary_writer.scalar('Area penalty grad norm', area_penalty_grad_norm, step=i)
+            print(f'\tEstimated area with fiber sampling: {curr_area_estimate}.')
+            print(f'\tEstimated integrand with fiber sampling: {estimated_energy}.')
+            print(f'\tArea penalty grad: {area_penalty_grad_norm}')
+            print(f'Iteration {i} Fiber sampling time: {time.time() - fiber_start_time}')
+
         config.summary_writer.scalar('Quad energies', quadrature_energy, step=i)
-        config.summary_writer.scalar('Fiber area estimate', curr_area_estimate, step=i)
         config.summary_writer.scalar('Real area', curr_real_area, step=i)
-        config.summary_writer.scalar('Area penalty grad norm', area_penalty_grad_norm, step=i)
         config.summary_writer.scalar('E_min', E_min / TPUMat.E, step=i)
 
-        print(f'Iteration {i} Fiber sampling time: {time.time() - fiber_start_time}')
         print(f'\tCurrent E_min value: {E_min}.')
-        print(f'\tEstimated area with fiber sampling: {curr_area_estimate}.')
         print(f'\tReal area after rounding: {curr_real_area}.')
-        print(f'\tEstimated integrand with fiber sampling: {estimated_energy}.')
         print(f'\tEstimated integrand with quadrature: {quadrature_energy}')
-        print(f'\tArea penalty grad: {area_penalty_grad_norm}')
 
         if i % config.vis_every == 0 or i == config.num_iters - 1:
             vis_start_time = time.time()
@@ -393,9 +449,16 @@ def main(argv):
             with open(file_path, 'wb') as f:
                 pickle.dump((fiber_energies, quad_energies), f)
 
-        updates, opt_state = outer_optimizer.update(
-                total_energy_derivative - area_pen_val - min_area_pen_val, opt_state)
-        geometry_params = jax.tree_util.tree_map(lambda x, y: x - y, geometry_params, updates)
+
+        if config.shape_derivative:
+            shape_derivative_start = time.time()
+            geometry_params, init_loss, final_loss = shape_derivative_optimization(fibers, geometry_params, integrand_params)
+            rprint(f'Shape derivative time: {time.time() - shape_derivative_start}')
+            rprint(f'\tInitial loss: {init_loss} Final loss: {final_loss}')
+        else:
+            updates, opt_state = outer_optimizer.update(
+                    total_energy_derivative - area_pen_val - min_area_pen_val, opt_state)
+            geometry_params = jax.tree_util.tree_map(lambda x, y: x - y, geometry_params, updates)
 
         if config.E_min_schedule:
             if i % config.schedule_update_interval == 0:

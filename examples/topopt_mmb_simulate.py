@@ -43,15 +43,15 @@ eutils.prepare_experiment_args(
 
 config = config_dict.ConfigDict({
     'ncp': 2,
-    'quaddeg': 8,
+    'quaddeg': 3,
     'splinedeg': 1,
 
-    'nx': 30,
+    'nx': 40,
     'ny': 20,
-    'width': 80.0,
+    'width': 120.0,
     'height': 25.0,
     'disp': 3.0,
-    'volf': 0.4,
+    'volf': 0.5,
     'f1': 1.0,
     'f2': 4.0,
 
@@ -96,7 +96,7 @@ def construct_simulation(config, geo_params, numx, numy, disp_t, patch_ncp):
         increment_dict = {
             '1': np.array([0.0, 0.0]),
             '2': np.array([0.0, -disp_t]),
-            '3': np.array([0.0, 0.0]),
+            #'3': np.array([0.0, 0.0]),
         }
 
         current_x, all_xs, all_fixed_locs, solved_increment = \
@@ -167,7 +167,12 @@ def main(argv):
     rprint('Saving results of target simulation...')
     image_path = os.path.join(args.exp_dir, f'sim-target.png')
     vid_path = os.path.join(args.exp_dir, f'sim-target.mp4')
-    create_static_image(cell.element, g2l(final_x, all_fixed_locs[-1], get_ref_ctrl_fn()), image_path)
+    fig = plt.figure()
+    ax = fig.gca()
+    create_static_image(cell.element, g2l(final_x, all_fixed_locs[-1], get_ref_ctrl_fn()), ax)
+    ax.set_aspect('equal')
+    fig.savefig(image_path)
+    plt.close(fig)
 
     ctrl_seq, _ = cell.unflatten_dynamics_sequence(
     all_displacements, all_velocities, all_fixed_locs, all_fixed_vels, get_ref_ctrl_fn())
@@ -256,7 +261,7 @@ def main(argv):
         loop, change = 0, 1
         val_grad_O = jax.value_and_grad(objective_fn)
         val_grad_C = jax.value_and_grad(constraint_fn)
-        while change > 0.005 and loop < 150:
+        while change > 0.0005 and loop < 300:
             c, dc = val_grad_O(x)
             v, dv = val_grad_C(x)
             iter_time = time.time()
@@ -332,7 +337,12 @@ def main(argv):
     rprint('Saving results of final sim...')
     image_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-final.png')
     vid_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-final.mp4')
-    create_static_image(cell.element, g2l(final_x, all_fixed_locs[-1], get_ref_ctrl_fn()), image_path)
+    fig = plt.figure()
+    ax = fig.gca()
+    create_static_image(cell.element, g2l(final_x, all_fixed_locs[-1], get_ref_ctrl_fn()), ax)
+    ax.set_aspect('equal')
+    fig.savefig(image_path)
+    plt.close(fig)
 
     ctrl_seq, _ = cell.unflatten_dynamics_sequence(
     all_displacements, all_velocities, all_fixed_locs, all_fixed_vels, get_ref_ctrl_fn())
