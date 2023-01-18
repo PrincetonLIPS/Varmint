@@ -240,9 +240,8 @@ class SingleElementGeometry(Geometry):
         a traction specification array."""
 
         parsed_tractions = \
-            {key: val * self.traction_labels[key][..., jnp.newaxis]
-                    for key, val in tractions.items()}
-
+            [val * self.traction_labels[key][..., jnp.newaxis]
+                    for key, val in tractions.items()]
         zero_tractions = jnp.zeros((self.index_array.shape[0], \
                                     self.element.num_boundaries, \
                                     self.element.n_d))

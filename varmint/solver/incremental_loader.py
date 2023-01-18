@@ -42,6 +42,7 @@ class SparseNewtonIncrementalSolver:
         # This function takes in a vector of increments and forms a dictionary
         # mapping the increments to the boundary conditions.
         self.fixed_locs_from_dict = jax.jit(geometry.fixed_locs_from_dict, device=jax.devices()[dev_id])
+        self.tractions_from_dict = jax.jit(geometry.tractions_from_dict, device=jax.devices()[dev_id])
         self.base_incs = base_incs
 
         self.sparse_reconstruct = geometry.get_jac_reconstruction_fn()
@@ -148,7 +149,7 @@ class SparseNewtonIncrementalSolver:
 
     def get_optimize_fn(self):
         @jax.custom_vjp
-        def optimize(x0, increment_dict, tractions, ref_ctrl, mat_params):
+        def optimize(x0, increment_dict, tractions_dict, ref_ctrl, mat_params):
             self.timer.reset()
 
             # Magic numbers to tune
@@ -171,7 +172,10 @@ class SparseNewtonIncrementalSolver:
             def try_increment(increment, x_s, tol):
                 fixed_displacements = jax.tree_util.tree_map(
                     lambda x: increment * x, increment_dict)
+                tractions_disp = jax.tree_util.tree_map(
+                    lambda x: increment * x, tractions_dict)
                 fixed_locs = self.fixed_locs_from_dict(ref_ctrl, fixed_displacements)
+                tractions = self.tractions_from_dict(tractions_disp)
                 args = (fixed_locs, tractions, ref_ctrl, mat_params)
 
                 xk = x_s
@@ -207,7 +211,7 @@ class SparseNewtonIncrementalSolver:
                 else:
                     success = True
 
-                return xk, success, fixed_locs
+                return xk, success, fixed_locs, tractions
 
             while solved_increment < (1.0 - 1e-8):
                 if proposed_increment < 1e-4:
@@ -221,7 +225,7 @@ class SparseNewtonIncrementalSolver:
                 else:
                     tol = low_tol
 
-                xk, success, fixed_locs = try_increment(increment, x_inc, tol)
+                xk, success, fixed_locs, tractions = try_increment(increment, x_inc, tol)
                 args = (fixed_locs, tractions, ref_ctrl)
 
                 if success:
@@ -249,8 +253,9 @@ class SparseNewtonIncrementalSolver:
             xk, increment_dict, tractions, ref_ctrl, mat_params = res
             (g, _, _, _) = g_all
 
-            def preprocess(increment_dict, tractions, ref_ctrl, mat_params):
+            def preprocess(increment_dict, tractions_dict, ref_ctrl, mat_params):
                 fixed_locs = self.fixed_locs_from_dict(ref_ctrl, increment_dict)
+                tractions = self.tractions_from_dict(tractions_dict)
                 return (fixed_locs, tractions, ref_ctrl, mat_params)
 
             args, f_vjp = jax.vjp(preprocess, increment_dict, tractions, ref_ctrl, mat_params)

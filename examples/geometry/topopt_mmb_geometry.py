@@ -75,14 +75,24 @@ def construct_mmb_beam(geo_params, numx, numy, patch_ncp, quad_degree, spline_de
     #group_2 = (np.abs(all_ctrls[..., 0] - 0.0) < 1e-14) * (np.abs(all_ctrls[..., 1] - H_b) < 1e-14)
     #group_3 = (np.abs(all_ctrls[..., 0] - W_b) < 1e-14) * (np.abs(all_ctrls[..., 1] - 0.0) < 1e-14)
 
+    # Example traction group: Right side
+    traction_group = np.abs(all_ctrls[..., 0] - W_b) < 1e-14
+
+    # Keep any element that contains a node on the traction group.
+    traction_group = np.any(traction_group, axis=(1, 2))
+
+    # Elements have 4 boundaries: left, top, right, bottom in that order.
+    # Here we want to set the right boundary.
+    traction_group = traction_group.reshape(-1, 1) * np.array([[0, 0, 1, 0]])
+
     dirichlet_groups = {
         '1': group_1,
-        '2': (group_2, np.array([0, 1]))
+        #'2': (group_2, np.array([0, 1]))
         #'3': group_3,
     }
 
     traction_groups = {
-        # empty
+        'A': traction_group,
     }
 
     return SingleElementGeometry(

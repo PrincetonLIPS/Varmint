@@ -46,9 +46,9 @@ config = config_dict.ConfigDict({
     'quaddeg': 3,
     'splinedeg': 1,
 
-    'nx': 40,
+    'nx': 60,
     'ny': 20,
-    'width': 120.0,
+    'width': 75.0,
     'height': 25.0,
     'disp': 3.0,
     'volf': 0.5,
@@ -69,6 +69,21 @@ class SteelMat(Material):
     _density = 8.0
 
 
+def generate_point_load_fn(ref_ctrl, g2l, point):
+    # point is an array of shape (2,)
+    index = np.sum((ref_ctrl - point) ** 2, axis=-1) < 1e-8
+    num_indices = np.sum(index)
+
+    def point_load_fn(current_x, fixed_locs, ref_ctrl, force):
+        def_ctrl = g2l(current_x, fixed_locs, ref_ctrl)
+
+        # index can contain multiple entries. We want to divide by number of
+        # occurrences to get the force correctly.
+        return -np.sum((def_ctrl[index] - ref_ctrl[index]) * force) / num_indices
+
+    return point_load_fn
+
+
 def construct_simulation(config, geo_params, numx, numy, disp_t, patch_ncp):
     mat = LinearElastic2D(SteelMat)
 
@@ -76,17 +91,25 @@ def construct_simulation(config, geo_params, numx, numy, disp_t, patch_ncp):
         construct_mmb_beam(geo_params, numx, numy, patch_ncp, quad_degree=config.quaddeg,
                            spline_degree=config.splinedeg, material=mat)
 
-
     l2g, g2l = cell.get_global_local_maps()
-    tractions = {}
-    tractions = cell.tractions_from_dict(tractions)
-
     ref_ctrl = get_ref_ctrl_fn()
 
-
     potential_energy_fn = cell.get_potential_energy_fn()
+
+    # Add a point load at the top right corner.
+    point_load_fn = \
+        generate_point_load_fn(ref_ctrl, g2l, np.array([config.width, config.height]))
+
+    # Magnitude of point load.
+    point_force = np.array([0.0, -10.0])
+
+    # Use this objective function in the solver instead of the standard potential energy.
+    def potential_energy_with_point_load(current_x, fixed_locs, tractions, ref_ctrl, mat_params):
+        return potential_energy_fn(current_x, fixed_locs, tractions, ref_ctrl, mat_params) \
+                + point_load_fn(current_x, fixed_locs, ref_ctrl, point_force)
+
     strain_energy_fn = jax.jit(cell.get_strain_energy_fn())
-    optimizer = SparseNewtonIncrementalSolver(cell, potential_energy_fn,
+    optimizer = SparseNewtonIncrementalSolver(cell, potential_energy_with_point_load,
                                               **config.solver_parameters)
     optimize = optimizer.get_optimize_fn()
 
@@ -95,17 +118,22 @@ def construct_simulation(config, geo_params, numx, numy, disp_t, patch_ncp):
 
         increment_dict = {
             '1': np.array([0.0, 0.0]),
-            '2': np.array([0.0, -disp_t]),
+            #'2': np.array([0.0, -disp_t]),
             #'3': np.array([0.0, 0.0]),
         }
 
+        tractions_dict = {
+            'A': np.array([0.0, -0.0]),
+        }
+
         current_x, all_xs, all_fixed_locs, solved_increment = \
-                optimize(init_x, increment_dict, tractions, ref_ctrl, mat_params)
+                optimize(init_x, increment_dict, tractions_dict, ref_ctrl, mat_params)
         if solved_increment < 1.0:
             # TODO(doktay): Fix along with returning full strain energy curve.
             raise RuntimeError("Could not complete solve.")
 
         fixed_locs = cell.fixed_locs_from_dict(ref_ctrl, increment_dict)
+        tractions = cell.tractions_from_dict({})
         strain_energy = strain_energy_fn(current_x, fixed_locs, tractions, ref_ctrl, mat_params)
         return current_x, (np.stack(all_xs, axis=0),
                            np.stack(all_fixed_locs, axis=0),
