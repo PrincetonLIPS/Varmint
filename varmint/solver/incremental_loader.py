@@ -30,7 +30,7 @@ from varmint.utils.ad_utils import hvp
 
 
 class SparseNewtonIncrementalSolver:
-    def __init__(self, geometry: SingleElementGeometry, loss_fun, base_incs=10,
+    def __init__(self, geometry: SingleElementGeometry, loss_fun, base_incs=10, line_search_stepback=0.8, always_factor=False,
                  step_size=1.0, tol=1e-8, dev_id=0, save_mats=0, save_mats_path='saved_mats/', print_runtime_stats=False):
         self.iter_num = 0
         self.geometry = geometry
@@ -44,6 +44,8 @@ class SparseNewtonIncrementalSolver:
         self.fixed_locs_from_dict = jax.jit(geometry.fixed_locs_from_dict, device=jax.devices()[dev_id])
         self.tractions_from_dict = jax.jit(geometry.tractions_from_dict, device=jax.devices()[dev_id])
         self.base_incs = base_incs
+        self.line_search_stepback = line_search_stepback
+        self.always_factor = always_factor
 
         self.sparse_reconstruct = geometry.get_jac_reconstruction_fn()
         self.sparsity_tangents = geometry.jac_reconstruction_tangents
@@ -88,8 +90,8 @@ class SparseNewtonIncrementalSolver:
 
         self.adjoint_op = jax.jit(adjoint_op, device=jax.devices()[dev_id])
 
-    def linear_solve(self, xk, args, g, solve_tol=1e-5):
-        if self.preconditioner is None:
+    def linear_solve(self, xk, args, g, solve_tol=1e-5, force_nofactor=False):
+        if not force_nofactor and (self.preconditioner is None or self.always_factor):
             with Time(self.timer, 'hessian_construction'):
                 data, row_indices, col_indptr = jax.block_until_ready(self.sparse_hess_construct(xk, args))
                 sparse_hess = scipy.sparse.csc_matrix((data, row_indices, col_indptr))
@@ -116,7 +118,7 @@ class SparseNewtonIncrementalSolver:
         A = scipy.sparse.linalg.LinearOperator(
             (g.size, g.size), _loss_hvp, dtype=np.float64)
         with Time(self.timer, 'gmres'):
-            res, info = scipy.sparse.linalg.lgmres(A, -g, tol=solve_tol, M=M, inner_m=3, maxiter=5)
+            res, info = scipy.sparse.linalg.lgmres(A, -g, tol=solve_tol, M=M, maxiter=10)
 
         if info > 0:
             with Time(self.timer, 'hessian_construction'):
@@ -193,7 +195,7 @@ class SparseNewtonIncrementalSolver:
                         test_loss = jax.block_until_ready(self.loss_fun(xk + dx * step_size, *args))
                     if not np.isnan(test_loss):
                         # Even if we find a step that doesn't get NaN, step 0.8 of the way there.
-                        xk = xk + dx * step_size * 0.8
+                        xk = xk + dx * step_size * self.line_search_stepback
                     elif step_size > min_step_size:
                         xk = x0
                         inum = 0
@@ -261,7 +263,7 @@ class SparseNewtonIncrementalSolver:
             args, f_vjp = jax.vjp(preprocess, increment_dict, tractions, ref_ctrl, mat_params)
 
             # Compute adjoint wrt upstream adjoints.
-            adjoint = self.linear_solve(xk, args,  -g, solve_tol=self.tol)
+            adjoint = self.linear_solve(xk, args,  -g, solve_tol=self.tol, force_nofactor=True)
             args_bar = self.adjoint_op(xk, adjoint, args)
             increment_dict_bar, tractions_bar, ref_ctrl_bar, mat_params_bar = f_vjp(args_bar)
             return None, increment_dict_bar, tractions_bar, ref_ctrl_bar, mat_params_bar
