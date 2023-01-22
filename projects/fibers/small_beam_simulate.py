@@ -66,16 +66,34 @@ config = varmint.config_dict.ConfigDict({
     'vis_every': 10,
     'save_every': 100,
     'plot_deformed': False,
+    'maximize': True,
+
+    'max_update': 1.0,
 
     'lr': 0.1,
 })
 
 varmint.config_flags.DEFINE_config_dict('config', config)
 
-class TPUMat(Material):
-    _E = 0.07
-    _nu = 0.3
-    _density = 1.25
+class SteelMat(Material):
+    _E = 200.0
+    _nu = 0.30
+    _density = 8.0
+
+
+def generate_point_load_fn(ref_ctrl, g2l, point):
+    # point is an array of shape (2,)
+    index = jnp.sum((ref_ctrl - point) ** 2, axis=-1) < 1e-8
+    num_indices = jnp.sum(index)
+
+    def point_load_fn(current_x, fixed_locs, ref_ctrl, force):
+        def_ctrl = g2l(current_x, fixed_locs, ref_ctrl)
+
+        # index can contain multiple entries. We want to divide by number of
+        # occurrences to get the force correctly.
+        return -jnp.sum((def_ctrl[index] - ref_ctrl[index]) * force) / num_indices
+
+    return point_load_fn
 
 
 def get_energy_density_fn(element, material):
@@ -138,9 +156,9 @@ def main(argv):
     config = args.config
 
     if config.mat_model == 'NeoHookean2D':
-        mat = NeoHookean2D(TPUMat)
+        mat = NeoHookean2D(SteelMat)
     elif config.mat_model == 'LinearElastic2D':
-        mat = LinearElastic2D(TPUMat)
+        mat = LinearElastic2D(SteelMat)
     else:
         raise ValueError(f'Unknown material model: {config.mat_model}')
 
@@ -156,11 +174,11 @@ def main(argv):
 
     @jax.vmap
     def checkerboard16(point):
-        centers = jnp.array([[0.15, 0.15], [0.15, 0.4], [0.15, 0.6], [0.15, 0.85],
-                             [0.4, 0.15], [0.4, 0.4], [0.4, 0.6], [0.4, 0.85],
-                             [0.6, 0.15], [0.6, 0.4], [0.6, 0.6], [0.6, 0.85],
-                             [0.85, 0.15], [0.85, 0.4], [0.85, 0.6], [0.85, 0.85]])
-        radius = 0.05
+        centers = jnp.array([[0.13, 0.13], [0.13, 0.37], [0.13, 0.63], [0.13, 0.87],
+                             [0.37, 0.13], [0.37, 0.37], [0.37, 0.63], [0.37, 0.87],
+                             [0.63, 0.13], [0.63, 0.37], [0.63, 0.63], [0.63, 0.87],
+                             [0.87, 0.13], [0.87, 0.37], [0.87, 0.63], [0.87, 0.87]])
+        radius = 0.1
 
         return -jnp.min(jnp.linalg.norm(point - centers, axis=-1) - radius, axis=0)
 
@@ -171,11 +189,10 @@ def main(argv):
 
     # Define implicit function for geometry using Bsplines.
     def domain(params, point):
-        offset, bparams = params
         point = point.reshape(1, -1)
         point = point / jnp.array([config.len_x, config.len_y])
 
-        return bsplines.bspline2d(point, bparams, knots, knots, config.domain_degree).squeeze() + offset
+        return bsplines.bspline2d(point, params, knots, knots, config.domain_degree).squeeze()
 
     # Initial geometry parameters are a checkerboard pattern
     init_controls = -1 * onp.ones((config.domain_ncp, config.domain_ncp, 1)) + 0.8
@@ -183,8 +200,7 @@ def main(argv):
     init_controls = chkr
 
     knots = bsplines.default_knots(config.domain_degree, config.domain_ncp)
-    bspline_params = jnp.array(init_controls)
-    geometry_params = (0.0, bspline_params)
+    geometry_params = jnp.array(init_controls)
 
     # Construct geometry (simple beam).
     beam, ref_ctrl, occupied_pixels, find_patch = construct_beam(
@@ -192,41 +208,63 @@ def main(argv):
             len_x=config.len_x, len_y=config.len_y, fidelity=config.fidelity,
             quad_degree=config.quaddeg, material=mat)
 
-    # Boundary conditions
-    increment_dict = {
-        '1': jnp.array([0.0, 0.0]),
-        '2': jnp.array([-1.0]),  # Only applied to y-coordinate.
-    }
-
-    # Defines the material parameters.
-    if config.E_min_schedule:
-        E_min = TPUMat.E * 1e-1
-    else:
-        E_min = 1e-9
-
-    mat_params = (
-        TPUMat.E  * jnp.ones(ref_ctrl.shape[0]),
-        TPUMat.nu * jnp.ones(ref_ctrl.shape[0]),
-    )
-    tractions = beam.tractions_from_dict({})
-    dirichlet_ctrl = beam.fixed_locs_from_dict(ref_ctrl, increment_dict)
-
-    # We would like to minimize the potential energy.
-    potential_energy_fn = jax.jit(beam.get_potential_energy_fn())
-    optimizer = SparseCholeskyLinearSolver(beam, potential_energy_fn,
-                                           **config.solver_parameters)
-    optimize = optimizer.get_optimize_fn()
-
-    bounds = jnp.array([0.0, 0.0, config.len_x, config.len_y])
-
     # ref_ctrl is in "local" coordinates. The "global" coordinates are reparameterized
     # versions (with Dirichlet conditions factored out) to perform unconstrained
     # optimization on. The l2g and g2l functions translate between the two representations.
     l2g, g2l = beam.get_global_local_maps()
 
+    increment_dict = {
+        '1': jnp.array([0.0, 0.0]),
+        #'2': jnp.array([0.0, -disp_t]),
+        '3': jnp.array([0.0, 0.0]),
+    }
+
+    tractions_dict = {
+        'A': jnp.array([0.0, -0.0]),
+    }
+
+    # Defines the material parameters.
+    if config.E_min_schedule:
+        E_min = SteelMat.E * 1e-1
+    else:
+        E_min = 1e-9
+
+    mat_params = (
+        SteelMat.E  * jnp.ones(ref_ctrl.shape[0]),
+        SteelMat.nu * jnp.ones(ref_ctrl.shape[0]),
+    )
+    tractions = beam.tractions_from_dict(tractions_dict)
+    dirichlet_ctrl = beam.fixed_locs_from_dict(ref_ctrl, increment_dict)
+
+    # We would like to minimize the potential energy.
+    potential_energy_fn = jax.jit(beam.get_potential_energy_fn())
+
+    # Need a version of potential energy without point forces
+    # to do adjoint optimization.
+    nopoint_grad_fn = jax.jit(jax.grad(beam.get_potential_energy_fn()))
+
+    # Add a point load at the top left corner.
+    point_load_fn = \
+        generate_point_load_fn(ref_ctrl, g2l, jnp.array([0.0, config.len_y]))
+
+    # Magnitude of point load.
+    point_force = jnp.array([0.0, -1.0])
+
+    # Use this objective function in the solver instead of the standard potential energy.
+    def potential_energy_with_point_load(current_x, fixed_locs, tractions, ref_ctrl, mat_params):
+        return potential_energy_fn(current_x, fixed_locs, tractions, ref_ctrl, mat_params) \
+                + point_load_fn(current_x, fixed_locs, ref_ctrl, point_force)
+
+    strain_energy_fn = jax.jit(beam.get_strain_energy_fn())
+
+    optimizer = SparseCholeskyLinearSolver(beam, potential_energy_with_point_load,
+                                           **config.solver_parameters)
+    optimize = optimizer.get_optimize_fn()
+
+    bounds = jnp.array([0.0, 0.0, config.len_x, config.len_y])
+
     # Now get the functions that we need to do fiber sampling.
     energy_density_fn = get_energy_density_fn(beam.element, mat)
-    vmap_energy_density_fn = jax.jit(jax.vmap(energy_density_fn, in_axes=(0, None, None, None)))
     global_energy_fn = get_global_energy_fn(energy_density_fn, find_patch, g2l,
                                             ref_ctrl, dirichlet_ctrl, config.fidelity)
 
@@ -253,11 +291,17 @@ def main(argv):
                                         (geometry_params, integrand_params))
     field_value_grad = jax.jit(jax.grad(field_value, argnums=1))
 
+    @jax.jit
+    def adjoint_field_value(fibers, geometry_params, adjoint_integrand_params):
+        return est.estimate_field_value(domain, energy_vjp, fibers,
+                                        (geometry_params, adjoint_integrand_params))
+    adjoint_field_value_grad = jax.jit(jax.grad(adjoint_field_value, argnums=1))
+
     # Define simulation function
     def simulate(solver_mat_params):
         current_x = l2g(ref_ctrl, ref_ctrl)
         current_x = optimize(
-                current_x, increment_dict, {}, ref_ctrl, solver_mat_params)
+                current_x, increment_dict, tractions_dict, ref_ctrl, solver_mat_params)
 
         fixed_locs = beam.fixed_locs_from_dict(ref_ctrl, increment_dict)
         final_x_local = g2l(current_x, fixed_locs, ref_ctrl)
@@ -270,18 +314,18 @@ def main(argv):
 
     def area_penalty(fibers, geometry_params):
         area_estimate = est.estimate_field_area(domain, fibers, geometry_params)
-        return jax.nn.relu(area_estimate - 0.5) ** 2 * config.area_penalty  # lol
+        return jax.nn.relu(area_estimate - 0.5) * config.area_penalty  # lol
     area_penalty_grad = jax.jit(jax.grad(area_penalty, argnums=1))
 
     def min_area_penalty(fibers, geometry_params):
         area_estimate = est.estimate_field_area(domain, fibers, geometry_params)
-        return jax.nn.relu(0.4 - area_estimate) ** 2 * config.area_penalty  # lol
+        return jax.nn.relu(0.4 - area_estimate) * config.area_penalty  # lol
     min_area_penalty_grad = jax.jit(jax.grad(min_area_penalty, argnums=1))
 
     key = config.jax_rng
 
-    outer_optimizer = optax.adam(config.lr)
-    opt_state = outer_optimizer.init(geometry_params[1])
+    outer_optimizer = optax.sgd(config.lr)
+    opt_state = outer_optimizer.init(geometry_params)
 
     fiber_energies = []
     quad_energies = []
@@ -322,40 +366,17 @@ def main(argv):
     # Here we start optimization
     rprint('Starting optimization (may be slow because of compilation).')
     for i in range(config.num_iters):
-
-        # Compute an offset that approximately satisfies the area constraint.
-        offset, bspline_params = geometry_params
-        def real_area(offset):
-            params = (offset, bspline_params)
-            _, _, occupied_pixels, _ = mshr.find_occupied_pixels(domain, params,
-                                                                config.len_x, config.len_y,
-                                                                config.fidelity, center=True)
-            return jnp.mean(occupied_pixels), occupied_pixels
-        current_area, occupied_pixels = real_area(offset)
-        previous_over = None
-        offset_increment = 0.01
-        while current_area < 0.495 or current_area > 0.505:
-            if current_area < 0.495:
-                if previous_over == True:
-                    offset_increment /= 2
-                offset -= offset_increment
-                previous_over = False
-            else:
-                if previous_over == False:
-                    offset_increment /= 2
-                offset += offset_increment
-                previous_over = True
-            current_area, occupied_pixels = real_area(offset)
-        geometry_params = (offset, bspline_params)
-        ###### Finished computing offset.
+        _, _, occupied_pixels, _ = mshr.find_occupied_pixels(domain, geometry_params,
+                                                            config.len_x, config.len_y,
+                                                            config.fidelity, center=True)
 
         solver_mat_params = (
-            TPUMat.E * occupied_pixels + E_min * ~occupied_pixels,
-            TPUMat.nu * jnp.ones(ref_ctrl.shape[0]),
+            SteelMat.E * occupied_pixels + E_min * ~occupied_pixels,
+            SteelMat.nu * jnp.ones(ref_ctrl.shape[0]),
         )
         rounded_mat_params = (
-            TPUMat.E  * occupied_pixels,
-            TPUMat.nu * jnp.ones(ref_ctrl.shape[0]),
+            SteelMat.E  * occupied_pixels,
+            SteelMat.nu * jnp.ones(ref_ctrl.shape[0]),
         )
 
         ref_ctrl = jnp.array(ref_ctrl)
@@ -369,8 +390,18 @@ def main(argv):
 
         # Compute gradient with respect to geometry through fiber sampling here.
         # First solve adjoint problem.
-        solution_point_args = (dirichlet_ctrl, tractions, ref_ctrl, solver_mat_params)
+        solution_point_args = (dirichlet_ctrl,
+                               beam.tractions_from_dict({}),
+                               ref_ctrl,
+                               solver_mat_params)
         final_x_global = l2g(final_x_local, ref_ctrl)
+
+        # Make sure to get grad wrt objective function, which does not
+        # include point force energy.
+        grad_final_x = nopoint_grad_fn(final_x_global, *solution_point_args)
+
+        # Adjoint solve with existing Cholesky matrix.
+        adjoint = optimizer.factor(grad_final_x)
 
         # Sample fibers for FMC and points for standard MC.
         fibers, key = est.sample_fibers(key, bounds, config.num_fibers, config.fiber_len)
@@ -379,7 +410,7 @@ def main(argv):
         integrand_params = (final_x_global, occupied_pixels, solver_mat_params)
 
         solution_point_args = (dirichlet_ctrl, tractions, ref_ctrl, rounded_mat_params)
-        quadrature_energy = potential_energy_fn(final_x_global, *solution_point_args)
+        quadrature_energy = strain_energy_fn(final_x_global, *solution_point_args)
         quad_energies.append(quadrature_energy)
         curr_real_area = jnp.mean(occupied_pixels)
 
@@ -394,27 +425,32 @@ def main(argv):
 
             fiber_energies.append(estimated_energy)
 
-            pEptheta = field_value_grad(fibers, geometry_params, integrand_params)[1]  # Only need the gradient wrt geometry params.
-            total_energy_derivative = pEptheta  #jax.tree_util.tree_map(lambda x, y: x + y, pEptheta, pdEptheta)
+            pEptheta = field_value_grad(fibers, geometry_params, integrand_params)
+
+            # Parameters for adjoint
+            adjoint_integrand_params = (adjoint, final_x_global, occupied_pixels, solver_mat_params)
+            pdEptheta = adjoint_field_value_grad(fibers, geometry_params, adjoint_integrand_params)
+
+            total_energy_derivative = jax.tree_util.tree_map(lambda x, y: x + y, pEptheta, pdEptheta)
 
             # Compute total area and penalize if deviating outside of [0.4, 0.5].
-            # area_pen_val = area_penalty_grad(fibers, geometry_params)
-            # min_area_pen_val = min_area_penalty_grad(fibers, geometry_params)
-            # area_penalty_grad_norm = jnp.linalg.norm(area_pen_val + min_area_pen_val)
+            area_pen_val = area_penalty_grad(fibers, geometry_params)
+            min_area_pen_val = min_area_penalty_grad(fibers, geometry_params)
+            area_penalty_grad_norm = jnp.linalg.norm(area_pen_val + min_area_pen_val)
 
             curr_area_estimate = area_estimate(fibers, geometry_params)
 
             config.summary_writer.scalar('Fiber energies', estimated_energy, step=i)
             config.summary_writer.scalar('Fiber area estimate', curr_area_estimate, step=i)
-            #config.summary_writer.scalar('Area penalty grad norm', area_penalty_grad_norm, step=i)
+            config.summary_writer.scalar('Area penalty grad norm', area_penalty_grad_norm, step=i)
             print(f'\tEstimated area with fiber sampling: {curr_area_estimate}.')
             print(f'\tEstimated integrand with fiber sampling: {estimated_energy}.')
-            #print(f'\tArea penalty grad: {area_penalty_grad_norm}')
+            print(f'\tArea penalty grad: {area_penalty_grad_norm}')
             print(f'Iteration {i} Fiber sampling time: {time.time() - fiber_start_time}')
 
         config.summary_writer.scalar('Quad energies', quadrature_energy, step=i)
         config.summary_writer.scalar('Real area', curr_real_area, step=i)
-        config.summary_writer.scalar('E_min', E_min / TPUMat.E, step=i)
+        config.summary_writer.scalar('E_min', E_min / SteelMat.E, step=i)
 
         print(f'\tCurrent E_min value: {E_min}.')
         print(f'\tReal area after rounding: {curr_real_area}.')
@@ -469,9 +505,19 @@ def main(argv):
             rprint(f'Shape derivative time: {time.time() - shape_derivative_start}')
             rprint(f'\tInitial loss: {init_loss} Final loss: {final_loss}')
         else:
-            updates, opt_state = outer_optimizer.update(total_energy_derivative, opt_state)
-            new_bspline_params = jax.tree_util.tree_map(lambda x, y: x - y, geometry_params[1], updates)
-            geometry_params = (geometry_params[0], new_bspline_params)
+            if config.maximize:
+                updates, opt_state = outer_optimizer.update(
+                    total_energy_derivative - min_area_pen_val - area_pen_val, opt_state)
+            else:
+                updates, opt_state = outer_optimizer.update(
+                    -total_energy_derivative - min_area_pen_val - area_pen_val, opt_state)
+
+            print('max absolute update: ', jnp.max(jnp.abs(updates)))
+            # if max absolute update is greater than max_update, scale all updates by max_update / max absolute update
+            if jnp.max(jnp.abs(updates)) > config.max_update:
+                updates = jnp.multiply(updates, config.max_update / jnp.max(jnp.abs(updates)))
+
+            geometry_params = jax.tree_util.tree_map(lambda x, y: x - y, geometry_params, updates)
 
         if config.E_min_schedule:
             if i % config.schedule_update_interval == 0:

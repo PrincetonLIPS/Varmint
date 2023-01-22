@@ -31,14 +31,26 @@ def construct_beam(domain_oracle, params, len_x, len_y, fidelity, quad_degree, m
     # Dirichlet labels
     group_1 = np.abs(all_ctrls[..., 0] - 0.0) < 1e-9
     group_2 = np.abs(all_ctrls[..., 0] - len_x) < 1e-9
+    group_3 = (np.abs(all_ctrls[..., 0] - len_x) < 1e-14) * (np.abs(all_ctrls[..., 1] - 0.0) < 1e-14)
+
+    # Example traction group: Right side
+    traction_group = np.abs(all_ctrls[..., 0] - len_x) < 1e-14
+
+    # Keep any element that contains a node on the traction group.
+    traction_group = np.any(traction_group, axis=(1, 2))
+
+    # Elements have 4 boundaries: left, top, right, bottom in that order.
+    # Here we want to set the right boundary.
+    traction_group = traction_group.reshape(-1, 1) * np.array([[0, 0, 1, 0]])
 
     dirichlet_groups = {
-        '1': group_1,
-        '2': (group_2, np.array([0, 1])),
+        '1': (group_1, np.array([1, 0])),
+        #'2': (group_2, np.array([0, 1])),
+        '3': (group_3, np.array([0, 1])),
     }
 
     traction_groups = {
-        # empty
+        'A': traction_group,
     }
 
     # Find all constraints with a KDTree. Should take O(n log n) time.
