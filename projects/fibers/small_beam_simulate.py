@@ -219,7 +219,7 @@ def main(argv):
     print('loaded')
 
     # Construct geometry (simple beam).
-    beam, ref_ctrl, occupied_pixels, find_patch = construct_beam(
+    beam, ref_ctrl, occupied_pixels, find_patch, gen_stratified_fibers = construct_beam(
             domain_oracle=domain, params=geometry_params,
             len_x=config.len_x, len_y=config.len_y, fidelity=config.fidelity,
             quad_degree=config.quaddeg, material=mat)
@@ -342,7 +342,7 @@ def main(argv):
 
     key = config.jax_rng
 
-    outer_optimizer = optax.sgd(config.lr)
+    outer_optimizer = optax.adam(config.lr)
     opt_state = outer_optimizer.init(geometry_params)
 
     fiber_energies = []
@@ -362,6 +362,12 @@ def main(argv):
     image_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-pixelized-baseline.png')
     visualize_pixel_domain(config, 0, baseline_pixels, image_path)
 
+    @jax.jit
+    def cell_area_estimate(key, geometry_params):
+        key, fibers_per_cell = gen_stratified_fibers(key)
+        cell_area = jax.vmap(est.estimate_field_area, in_axes=(None, 0, None))(domain, fibers_per_cell, geometry_params)
+        return key, cell_area
+
     # Here we start optimization
     rprint('Starting optimization (may be slow because of compilation).')
     for i in range(config.num_iters):
@@ -369,8 +375,14 @@ def main(argv):
                                                             config.len_x, config.len_y,
                                                             config.fidelity, center=True)
 
+        t_strat_sample = time.time()
+        key, cell_area = cell_area_estimate(key, geometry_params)
+        print(f'cell area est in time {time.time() - t_strat_sample} cell_area: {cell_area.shape}')
+        new_E = E_min + (SteelMat.E - E_min) * cell_area
+
         solver_mat_params = (
-            SteelMat.E * occupied_pixels + E_min * ~occupied_pixels,
+            #SteelMat.E * occupied_pixels + E_min * ~occupied_pixels,
+            new_E,
             SteelMat.nu * jnp.ones(ref_ctrl.shape[0]),
         )
         rounded_mat_params = (

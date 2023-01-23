@@ -59,6 +59,40 @@ def construct_beam(domain_oracle, params, len_x, len_y, fidelity, quad_degree, m
     constraints = kdtree.query_pairs(1e-14)
     constraints = np.array(list(constraints))
 
+    @jax.jit
+    def gen_stratified_fibers(key):
+        """Return 2 fibers per cell. Shape is (n_cells, 2, fiber_dim, fiber_dim)."""
+
+        key, subkey = jax.random.split(key)
+        a = jax.random.uniform(subkey, shape=(cells.shape[0], 2))
+
+        h_fibers = jnp.stack([
+                        jnp.stack([jnp.zeros_like(a[:, 0]), a[:, 0]], axis=-1),
+                        jnp.stack([jnp.ones_like(a[:, 0]), a[:, 0]], axis=-1)
+                   ], axis=-2)
+        v_fibers = jnp.stack([
+                        jnp.stack([a[:, 1], jnp.zeros_like(a[:, 1])], axis=-1),
+                        jnp.stack([a[:, 1], jnp.ones_like(a[:, 1])], axis=-1)
+                   ], axis=-2)
+
+        cell_xmax = jnp.max(coords[cells][:, :, 0], axis=-1) # get max x coordinate in each cell
+        cell_xmin = jnp.min(coords[cells][:, :, 0], axis=-1) # get min x coordinate in each cell
+
+        cell_ymax = jnp.max(coords[cells][:, :, 1], axis=-1) # get max y coordinate in each cell
+        cell_ymin = jnp.min(coords[cells][:, :, 1], axis=-1) # get min y coordinate in each cell
+
+        scaled_h_fibers = jnp.stack([
+                h_fibers[..., 0] * (cell_xmax[:, None] - cell_xmin[:, None]) + cell_xmin[:, None],
+                h_fibers[..., 1] * (cell_ymax[:, None] - cell_ymin[:, None]) + cell_ymin[:, None]
+        ], axis=-1)
+
+        scaled_v_fibers = jnp.stack([
+                v_fibers[..., 0] * (cell_xmax[:, None] - cell_xmin[:, None]) + cell_xmin[:, None],
+                v_fibers[..., 1] * (cell_ymax[:, None] - cell_ymin[:, None]) + cell_ymin[:, None]
+        ], axis=-1)
+
+        return key, jnp.stack([scaled_h_fibers, scaled_v_fibers], axis=1)
+
     return SingleElementGeometry(
         element=element,
         material=material,
@@ -66,4 +100,4 @@ def construct_beam(domain_oracle, params, len_x, len_y, fidelity, quad_degree, m
         constraints=(constraints[:, 0], constraints[:, 1]),
         dirichlet_labels=dirichlet_groups,
         traction_labels=traction_groups,
-    ), all_ctrls, occupied_pixels, find_patch
+    ), all_ctrls, occupied_pixels, find_patch, gen_stratified_fibers
