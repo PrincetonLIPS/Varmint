@@ -38,7 +38,7 @@ config = varmint.config_dict.ConfigDict({
     'quaddeg': 3,
     'mat_model': 'LinearElastic2D',
 
-    'fidelity': 200,
+    'fidelity': 100,
     'len_x': 75,
     'len_y': 25,
 
@@ -58,6 +58,8 @@ config = varmint.config_dict.ConfigDict({
     'inverse_fibers': False,
     'min_area_penalty': False,
     'max_area_penalty': True,
+    'constrain_spatial_norm': True,
+    'spatial_norm_penalty': 0.1,
 
     'jax_seed': 24,
 
@@ -65,7 +67,7 @@ config = varmint.config_dict.ConfigDict({
     'area_penalty_norm_bound': 10,
 
     'num_iters': 10000,
-    'vis_every': 1,
+    'vis_every': 10,
     'save_every': 100,
     'plot_deformed': False,
     'maximize': True,
@@ -74,7 +76,9 @@ config = varmint.config_dict.ConfigDict({
     'n_grad_check': 10,
     'grad_check_eps': 1e-6,
 
-    'max_update': 1.0,
+    'max_update': 0.01,
+    'max_value': 1.0,
+    'reload': False,
 
     'lr': 0.1,
 })
@@ -214,12 +218,13 @@ def main(argv):
     geometry_params = jnp.array(init_controls)
 
     # Reload
-    reload_path = '/n/fs/mm-iga/Varmint/projects/fibers/experiments/bridge_16init_lr0001_75x25/sim-bridge_16init_lr0001_75x25-pickles-geoparams-iter4700.png.npy'
-    geometry_params = onp.load(reload_path)
-    print('loaded')
+    if config.reload:
+        reload_path = '/n/fs/mm-iga/Varmint/projects/fibers/experiments/bridge_16init_lr0001_75x25/sim-bridge_16init_lr0001_75x25-pickles-geoparams-iter4700.png.npy'
+        geometry_params = onp.load(reload_path)
+        print('loaded')
 
     # Construct geometry (simple beam).
-    beam, ref_ctrl, occupied_pixels, find_patch, gen_stratified_fibers = construct_beam(
+    beam, ref_ctrl, occupied_pixels, find_patch, gen_stratified_fibers, coords = construct_beam(
             domain_oracle=domain, params=geometry_params,
             len_x=config.len_x, len_y=config.len_y, fidelity=config.fidelity,
             quad_degree=config.quaddeg, material=mat)
@@ -326,47 +331,82 @@ def main(argv):
 
         return current_x, final_x_local, strain_energy
 
-    @jax.jit
-    def area_estimate(fibers, geometry_params):
-        return est.estimate_field_area(domain, fibers, geometry_params)
+    #@jax.jit
+    #def area_estimate(fibers, geometry_params):
+    #    return est.estimate_field_area(domain, fibers, geometry_params)
 
-    def area_penalty(fibers, geometry_params):
-        area_estimate = est.estimate_field_area(domain, fibers, geometry_params)
-        return (jax.nn.relu(area_estimate - 0.524) ** 2) * config.area_penalty  # lol
-    area_penalty_grad = jax.jit(jax.grad(area_penalty, argnums=1))
+    #def area_penalty(fibers, geometry_params):
+    #    area_estimate = est.estimate_field_area(domain, fibers, geometry_params)
+    #    return (jax.nn.relu(area_estimate - 0.524) ** 2) * config.area_penalty  # lol
+    #area_penalty_grad = jax.jit(jax.grad(area_penalty, argnums=1))
 
-    def min_area_penalty(fibers, geometry_params):
-        area_estimate = est.estimate_field_area(domain, fibers, geometry_params)
-        return (jax.nn.relu(0.4 - area_estimate) ** 2) * config.area_penalty  # lol
-    min_area_penalty_grad = jax.jit(jax.grad(min_area_penalty, argnums=1))
+    #def min_area_penalty(fibers, geometry_params):
+    #    area_estimate = est.estimate_field_area(domain, fibers, geometry_params)
+    #    return (jax.nn.relu(0.4 - area_estimate) ** 2) * config.area_penalty  # lol
+    #min_area_penalty_grad = jax.jit(jax.grad(min_area_penalty, argnums=1))
 
     key = config.jax_rng
 
     outer_optimizer = optax.adam(config.lr)
     opt_state = outer_optimizer.init(geometry_params)
 
-    fiber_energies = []
     quad_energies = []
 
     # Baseline model
-    path = '/n/fs/mm-iga/Varmint/projects/symgroups/experiments/topopt_with_save/iter_900_pixels.npy'
-    baseline_pixels = onp.load(path)[::-1, :].T.flatten()
-    baseline_mat_params = (
-            SteelMat.E * baseline_pixels + E_min * ~baseline_pixels,
-            SteelMat.nu * jnp.ones(ref_ctrl.shape[0]),
-    )
-    _, _, baseline_se_p = simulate(baseline_mat_params)
-    print(f'Baseline SE: {baseline_se_p}')
+    #path = '/n/fs/mm-iga/Varmint/projects/symgroups/experiments/topopt_with_save/iter_900_pixels.npy'
+    #baseline_pixels = onp.load(path)[::-1, :].T.flatten()
+    #baseline_mat_params = (
+    #        SteelMat.E * baseline_pixels + E_min * ~baseline_pixels,
+    #        SteelMat.nu * jnp.ones(ref_ctrl.shape[0]),
+    #)
+    #_, _, baseline_se_p = simulate(baseline_mat_params)
+    #print(f'Baseline SE: {baseline_se_p}')
 
-    # SIMP Baseline topology
-    image_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-pixelized-baseline.png')
-    visualize_pixel_domain(config, 0, baseline_pixels, image_path)
+    ## SIMP Baseline topology
+    #image_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-pixelized-baseline.png')
+    #visualize_pixel_domain(config, 0, baseline_pixels, image_path)
 
     @jax.jit
     def cell_area_estimate(key, geometry_params):
-        key, fibers_per_cell = gen_stratified_fibers(key)
+        _, fibers_per_cell = gen_stratified_fibers(key)
         cell_area = jax.vmap(est.estimate_field_area, in_axes=(None, 0, None))(domain, fibers_per_cell, geometry_params)
-        return key, cell_area
+        return cell_area
+
+    @jax.jit
+    def cell_area_estimate2(key, geometry_params):
+        _, fibers_per_cell = gen_stratified_fibers(key)
+        cell_area = jax.vmap(est.estimate_field_area, in_axes=(None, 0, None))(domain, fibers_per_cell, geometry_params)
+        return cell_area
+
+    #@jax.jit
+    def cell_area_estimate3(key, geometry_params):
+        _, fibers_per_cell = gen_stratified_fibers(key)
+        cell_area = jax.vmap(est.estimate_field_area, in_axes=(None, 0, None))(domain, fibers_per_cell, geometry_params)
+        return cell_area
+
+    domain_spatial_grad = jax.jit(jax.vmap(jax.grad(domain, argnums=1), in_axes=(None, 0)))
+
+    def objective(cell_area):
+        solver_mat_params = (
+            E_min + (SteelMat.E - E_min) * cell_area,
+            SteelMat.nu * jnp.ones(ref_ctrl.shape[0]),
+        )
+        _, _, se_p = simulate(solver_mat_params)
+        return se_p
+
+    def area_penalty(cell_area):
+        area_estimate = jnp.mean(cell_area)
+
+        return (jax.nn.relu(area_estimate - 0.524) ** 2) * config.area_penalty  # lol
+
+    def min_area_penalty(cell_area):
+        area_estimate = jnp.mean(cell_area)
+
+        return (jax.nn.relu(0.4 - area_estimate) ** 2) * config.area_penalty  # lol
+
+    def max_spatial_norm(geometry_params):
+        domain_spatial_grad_norms = jnp.linalg.norm(domain_spatial_grad(geometry_params, coords), axis=-1)
+        return jnp.max(domain_spatial_grad_norms)
 
     # Here we start optimization
     rprint('Starting optimization (may be slow because of compilation).')
@@ -375,125 +415,70 @@ def main(argv):
                                                             config.len_x, config.len_y,
                                                             config.fidelity, center=True)
 
-        t_strat_sample = time.time()
-        key, cell_area = cell_area_estimate(key, geometry_params)
-        print(f'cell area est in time {time.time() - t_strat_sample} cell_area: {cell_area.shape}')
-        new_E = E_min + (SteelMat.E - E_min) * cell_area
+        #t_strat_sample = time.time()
+        key, subkey = jax.random.split(key)
 
-        solver_mat_params = (
-            #SteelMat.E * occupied_pixels + E_min * ~occupied_pixels,
-            new_E,
-            SteelMat.nu * jnp.ones(ref_ctrl.shape[0]),
-        )
-        rounded_mat_params = (
-            SteelMat.E  * occupied_pixels,
-            SteelMat.nu * jnp.ones(ref_ctrl.shape[0]),
-        )
+        # Get the function to compute vjp here. Will be more efficient than
+        # evaluating this function three times.
+        cell_area, cell_area_vjp = jax.vjp(cell_area_estimate, subkey, geometry_params)
+        #print(f'cell area est in time {time.time() - t_strat_sample} cell_area: {cell_area.shape}')
 
-        ref_ctrl = jnp.array(ref_ctrl)
-        iter_time = time.time()
-        try:
-            final_x_global, final_x_local, se_p = simulate(solver_mat_params)
-        except Exception as e:
-            # Implicit topology
-            image_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-implicit-failure.png')
-            visualize_domain(config, i, domain, geometry_params, image_path)
+        obj_val, obj_ca_bar = jax.value_and_grad(objective)(cell_area)
+        obj_val = obj_val.block_until_ready()
+        total_energy_derivative = cell_area_vjp(obj_ca_bar)[1].block_until_ready()
 
-            # Pixelixed topology
-            image_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-pixelized-failure.png')
-            visualize_pixel_domain(config, i, occupied_pixels, image_path)
-            print(e)
-            sys.exit()
+        cell_area, cell_area_vjp = jax.vjp(cell_area_estimate2, subkey, geometry_params)
+        area_pen_val, area_pen_ca_bar = jax.value_and_grad(area_penalty)(cell_area)
+        area_pen_val = area_pen_val.block_until_ready()
+        area_pen_grad = cell_area_vjp(area_pen_ca_bar)[1].block_until_ready()
 
-        solve_time = time.time() - iter_time
+        #cell_area, cell_area_vjp = jax.vjp(cell_area_estimate3, subkey, geometry_params)
+        #min_area_pen_val, min_area_pen_ca_bar = jax.value_and_grad(min_area_penalty)(cell_area)
+        #min_area_pen_val = min_area_pen_val.block_until_ready()
+        #min_area_pen_grad = cell_area_vjp(min_area_pen_ca_bar)[1].block_until_ready()
+        min_area_pen_grad = 0.0
 
-        # Now it's time for fiber sampling. Use the alternatively defined energy functions
-        # together with fiber sampling to estimate the gradient.
-        fiber_start_time = time.time()
-
-        # Compute gradient with respect to geometry through fiber sampling here.
-        # First solve adjoint problem.
-        solution_point_args = (dirichlet_ctrl,
-                               beam.tractions_from_dict({}),
-                               ref_ctrl,
-                               solver_mat_params)
-
-        # Make sure to get grad wrt objective function, which does not
-        # include point force energy.
-        grad_final_x = nopoint_grad_fn(final_x_global, *solution_point_args)
-
-        # Adjoint solve with existing Cholesky matrix.
-        adjoint = optimizer.factor(grad_final_x)
-
-        # Sample fibers for FMC and points for standard MC.
-        fibers, key = est.sample_fibers(key, bounds, config.num_fibers, config.fiber_len)
-
-        # Parameters for the energy function.
-        integrand_params = (final_x_global, occupied_pixels, solver_mat_params)
-        estimated_energy = field_value(fibers, geometry_params, integrand_params)
-
-        solution_point_args = (dirichlet_ctrl, tractions, ref_ctrl, solver_mat_params)
-        quadrature_energy = strain_energy_fn(final_x_global, *solution_point_args)
-
-        fiber_energies.append(estimated_energy)
+        quadrature_energy = obj_val
         quad_energies.append(quadrature_energy)
 
-        pEptheta = field_value_grad(fibers, geometry_params, integrand_params)
-
-        if config.gradient_check:
-            # Generate a bunch of random perturbations to geometry_params, compute
-            # the new estimated energy with these geometry params, and store them 
-            # to later compare with gradient.
-            for _ in range(config.n_grad_check):
-                pert = onp.random.randn(*geometry_params.shape)
-                pert = pert / onp.linalg.norm(pert.flatten())
-
-                pert_energy = field_value(fibers, geometry_params + pert * config.grad_check_eps, integrand_params)
-                fd_forward_grad = (pert_energy - estimated_energy) / config.grad_check_eps
-                ad_forward_grad = onp.sum(pEptheta * pert)
-                print(f'\tgrad check error: {(fd_forward_grad - ad_forward_grad)/fd_forward_grad}')
-
-        # Parameters for adjoint
-        adjoint_integrand_params = (adjoint, final_x_global, occupied_pixels, solver_mat_params)
-        pdEptheta = adjoint_field_value_grad(fibers, geometry_params, adjoint_integrand_params)
-
-        total_energy_derivative = jax.tree_util.tree_map(lambda x, y: x + y, pEptheta, pdEptheta)
-        direct_grad_norm = jnp.linalg.norm(pEptheta)
-        adjoint_grad_norm = jnp.linalg.norm(pdEptheta)
+        # Compute norms to clip large gradients
         total_energy_derivative_norm = jnp.linalg.norm(total_energy_derivative)
-
-        dot_product_dist = jnp.sum(pEptheta * pdEptheta) / (direct_grad_norm * adjoint_grad_norm)
-
-        # Compute total area and penalize if deviating outside of [0.4, 0.5].
-        area_pen_val = area_penalty_grad(fibers, geometry_params)
-        min_area_pen_val = min_area_penalty_grad(fibers, geometry_params)
-        area_penalty_grad_norm = jnp.linalg.norm(area_pen_val + min_area_pen_val)
+        area_penalty_grad_norm = jnp.linalg.norm(area_pen_grad + min_area_pen_grad)
 
         if area_penalty_grad_norm > config.area_penalty_norm_bound * total_energy_derivative_norm:
-            area_pen_val = area_pen_val \
+            area_pen_grad = area_pen_grad \
                            * config.area_penalty_norm_bound \
                            * total_energy_derivative_norm / area_penalty_grad_norm
-            min_area_pen_val = min_area_pen_val \
-                               * config.area_penalty_norm_bound \
-                               * total_energy_derivative_norm / area_penalty_grad_norm
+            #min_area_pen_grad = min_area_pen_grad \
+            #                   * config.area_penalty_norm_bound \
+            #                   * total_energy_derivative_norm / area_penalty_grad_norm
 
-        area_obj_dot_product_dist = jnp.sum(pEptheta * (area_pen_val + min_area_pen_val)) / \
-                (direct_grad_norm * area_penalty_grad_norm)
+        grad_max_spatial_norm = jax.grad(max_spatial_norm)(geometry_params)
+
+        # Rescale spatial norm to energy derivative norm
+        grad_max_spatial_norm = grad_max_spatial_norm * total_energy_derivative_norm / jnp.linalg.norm(grad_max_spatial_norm)
 
         curr_real_area = jnp.mean(occupied_pixels)
-        curr_area_estimate = area_estimate(fibers, geometry_params)
+        #curr_area_estimate = area_estimate(fibers, geometry_params)
 
-        config.summary_writer.scalar('Fiber energies', estimated_energy, step=i)
-        config.summary_writer.scalar('Fiber area estimate', curr_area_estimate, step=i)
+        # Compute the spatial grad of the domain at each nodal point, to see if we get blowup.
+        domain_spatial_grad_norms = jnp.linalg.norm(domain_spatial_grad(geometry_params, coords), axis=-1)
+
+        #config.summary_writer.scalar('Fiber area estimate', curr_area_estimate, step=i)
         config.summary_writer.scalar('Area penalty grad norm', area_penalty_grad_norm, step=i)
-        fiber_sampling_time = time.time() - fiber_start_time
-        print(f'iter: {i:4} fs_area: {curr_area_estimate:<6.4} r_area: {curr_real_area:<6.4} '
-              f'fs_j: {estimated_energy:<10.6} r_j: {se_p:<10.6} '
+        print(f'iter: {i:4} r_area: {curr_real_area:<6.4} '
+              f'fs_j: {obj_val:<10.6} r_j: {obj_val:<10.6} '
+              f'min_spatial_norm: {jnp.min(domain_spatial_grad_norms):<10.6} max_spatial_norm: {jnp.max(domain_spatial_grad_norms):<10.6} '
               #f'fs_time: {fiber_sampling_time:<5.3} s_time: {solve_time:<5.3} '
               f'area_pen: {area_penalty_grad_norm:<6.3} '
-              f'direct_grad_n: {direct_grad_norm:<8.6} adjoint_grad_n: {adjoint_grad_norm:<8.6} '
-              f'dot_prod: {dot_product_dist:<4.3} area_obj_dot_dist {area_obj_dot_product_dist:<4.3} ')
+              f'max_sg_norm: {jnp.linalg.norm(grad_max_spatial_norm):<6.4} '
+              f'energy_d_norm: {total_energy_derivative_norm:<6.4} '
+              #f'direct_grad_n: {direct_grad_norm:<8.6} adjoint_grad_n: {adjoint_grad_norm:<8.6} '
+              #f'dot_prod: {dot_product_dist:<4.3} area_obj_dot_dist {area_obj_dot_product_dist:<4.3} '
+              )
 
+        config.summary_writer.scalar('Min spatial norm', jnp.min(domain_spatial_grad_norms), step=i)
+        config.summary_writer.scalar('Max spatial norm', jnp.max(domain_spatial_grad_norms), step=i)
         config.summary_writer.scalar('Quad energies', quadrature_energy, step=i)
         config.summary_writer.scalar('Real area', curr_real_area, step=i)
         config.summary_writer.scalar('E_min', E_min / SteelMat.E, step=i)
@@ -513,7 +498,6 @@ def main(argv):
             image_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-energy-plot.png')
             fig = plt.figure()
             ax = fig.gca()
-            ax.plot(fiber_energies, label='Fiber estimated energy')
             ax.plot(quad_energies, label='Quadrature energy')
             ax.legend()
             fig.savefig(image_path)
@@ -538,7 +522,7 @@ def main(argv):
             file_path = os.path.join(args.exp_dir,
                                      f'sim-{args.exp_name}-pickles-energies-iter{i}.png')
             with open(file_path, 'wb') as f:
-                pickle.dump((fiber_energies, quad_energies), f)
+                pickle.dump((quad_energies), f)
 
         if config.maximize:
             all_grads = total_energy_derivative
@@ -546,9 +530,12 @@ def main(argv):
             all_grads = -total_energy_derivative
 
         if config.min_area_penalty:
-            all_grads -= min_area_pen_val
+            all_grads -= min_area_pen_grad
         if config.max_area_penalty:
-            all_grads -= area_pen_val
+            all_grads -= area_pen_grad
+
+        if config.constrain_spatial_norm:
+            all_grads -= grad_max_spatial_norm * config.spatial_norm_penalty
 
         updates, opt_state = outer_optimizer.update(all_grads, opt_state)
 
@@ -557,6 +544,9 @@ def main(argv):
             updates = jnp.multiply(updates, config.max_update / jnp.max(jnp.abs(updates)))
 
         geometry_params = jax.tree_util.tree_map(lambda x, y: x - y, geometry_params, updates)
+
+        # Clip geometry params.
+        geometry_params = jnp.clip(geometry_params, -config.max_value, config.max_value)
 
         if config.E_min_schedule:
             if i % config.schedule_update_interval == 0:

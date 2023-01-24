@@ -100,4 +100,4 @@ def construct_beam(domain_oracle, params, len_x, len_y, fidelity, quad_degree, m
         constraints=(constraints[:, 0], constraints[:, 1]),
         dirichlet_labels=dirichlet_groups,
         traction_labels=traction_groups,
-    ), all_ctrls, occupied_pixels, find_patch, gen_stratified_fibers
+    ), all_ctrls, occupied_pixels, find_patch, gen_stratified_fibers, coords
