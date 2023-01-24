@@ -10,6 +10,9 @@ from varmint.geometry.geometry import SingleElementGeometry
 from varmint.physics.constitutive import PhysicsModel
 from varmint.utils.geometry_utils import generate_constraints
 
+import estimators as est
+import geometry_utils as geo_utils
+
 from . import mesher as mshr
 
 
@@ -44,13 +47,14 @@ def construct_beam(domain_oracle, params, len_x, len_y, fidelity, quad_degree, m
     traction_group = traction_group.reshape(-1, 1) * np.array([[0, 0, 1, 0]])
 
     dirichlet_groups = {
-        '1': (group_1, np.array([1, 0])),
+        #'1': (group_1, np.array([1, 0])),
+        '1': group_1,
         #'2': (group_2, np.array([0, 1])),
-        '3': (group_3, np.array([0, 1])),
+        #'3': (group_3, np.array([0, 1])),
     }
 
     traction_groups = {
-        'A': traction_group,
+        #'A': traction_group,
     }
 
     # Find all constraints with a KDTree. Should take O(n log n) time.
@@ -93,6 +97,26 @@ def construct_beam(domain_oracle, params, len_x, len_y, fidelity, quad_degree, m
 
         return key, jnp.stack([scaled_h_fibers, scaled_v_fibers], axis=1)
 
+    @jax.jit
+    def gen_per_cell_fibers(key, n_fibers=20):
+        n_cells = cells.shape[0]
+        all_keys = jax.random.split(key, n_cells)
+
+        cell_xmax = jnp.max(coords[cells][:, :, 0], axis=-1) # get max x coordinate in each cell
+        cell_xmin = jnp.min(coords[cells][:, :, 0], axis=-1) # get min x coordinate in each cell
+
+        cell_ymax = jnp.max(coords[cells][:, :, 1], axis=-1) # get max y coordinate in each cell
+        cell_ymin = jnp.min(coords[cells][:, :, 1], axis=-1) # get min y coordinate in each cell
+
+        len_fiber = jnp.maximum(cell_xmax[0] - cell_xmin[0], cell_ymax[0] - cell_ymin[0])
+        all_fibers = jax.vmap(est.sample_fibers, in_axes=(0, 0, None, None))(all_keys, (cell_xmin, cell_ymin, cell_xmax, cell_ymax), n_fibers, len_fiber)[0]
+
+        # Rearrange cell to make convex hull.
+        hull_cells = np.stack((cells[:, 0], cells[:, 1], cells[:, 3], cells[:, 2]), axis=-1)
+        all_fibers = jax.vmap(geo_utils.clip_inside_convex_hull, in_axes=(0, 0))(all_fibers, coords[hull_cells])
+
+        return all_fibers
+
     return SingleElementGeometry(
         element=element,
         material=material,
@@ -100,4 +124,4 @@ def construct_beam(domain_oracle, params, len_x, len_y, fidelity, quad_degree, m
         constraints=(constraints[:, 0], constraints[:, 1]),
         dirichlet_labels=dirichlet_groups,
         traction_labels=traction_groups,
-    ), all_ctrls, occupied_pixels, find_patch, gen_stratified_fibers, coords
+    ), all_ctrls, occupied_pixels, find_patch, gen_per_cell_fibers, coords

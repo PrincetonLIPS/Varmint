@@ -18,7 +18,7 @@ from varmint.utils.typing import *
 from varmint.utils.ad_utils import zero_one_sign, custom_norm
 
 
-@functools.partial(jit, static_argnums=tuple(range(2, 6)))
+@functools.partial(jit, static_argnums=((2,) + tuple(range(4, 6))))
 def sample_fibers(key: ndarray, bounds: ndarray, num_fibers: int, length: float, fiber_dim: int = 2, numeric_type: type = FP64) -> ndarray:
     """Samples fibers according to a jointly uniform distribution over the starts of 
     the fibers and their angle; the endpoints are then determined by the fibers length.
