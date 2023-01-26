@@ -47,10 +47,10 @@ def construct_beam(domain_oracle, params, len_x, len_y, fidelity, quad_degree, m
     traction_group = traction_group.reshape(-1, 1) * np.array([[0, 0, 1, 0]])
 
     dirichlet_groups = {
-        #'1': (group_1, np.array([1, 0])),
-        '1': group_1,
+        '1': (group_1, np.array([1, 0])),
+        #'1': group_1,
         #'2': (group_2, np.array([0, 1])),
-        #'3': (group_3, np.array([0, 1])),
+        '3': (group_3, np.array([0, 1])),
     }
 
     traction_groups = {
@@ -108,7 +108,7 @@ def construct_beam(domain_oracle, params, len_x, len_y, fidelity, quad_degree, m
         cell_ymax = jnp.max(coords[cells][:, :, 1], axis=-1) # get max y coordinate in each cell
         cell_ymin = jnp.min(coords[cells][:, :, 1], axis=-1) # get min y coordinate in each cell
 
-        len_fiber = jnp.maximum(cell_xmax[0] - cell_xmin[0], cell_ymax[0] - cell_ymin[0])
+        len_fiber = 2 * jnp.maximum(cell_xmax[0] - cell_xmin[0], cell_ymax[0] - cell_ymin[0])
         all_fibers = jax.vmap(est.sample_fibers, in_axes=(0, 0, None, None))(all_keys, (cell_xmin, cell_ymin, cell_xmax, cell_ymax), n_fibers, len_fiber)[0]
 
         # Rearrange cell to make convex hull.

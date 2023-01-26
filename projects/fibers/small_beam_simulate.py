@@ -39,14 +39,14 @@ config = varmint.config_dict.ConfigDict({
     'mat_model': 'LinearElastic2D',
 
     'fidelity': 50,
-    #'len_x': 75,
-    #'len_y': 25,
-    'len_x': 160,
-    'len_y': 100,
+    'len_x': 75,
+    'len_y': 25,
+
+    'simp_exponent': 3,
 
     'init_pattern': '16',
 
-    'domain_ncp': 10,
+    'domain_ncp': 20,
     'domain_degree': 1,
 
     'num_fibers': 10000,
@@ -69,8 +69,8 @@ config = varmint.config_dict.ConfigDict({
     'area_penalty_norm_bound': 10,
 
     'num_iters': 10000,
-    'vis_every': 10,
-    'save_every': 100,
+    'vis_every': 1,
+    'save_every': 10,
     'plot_deformed': False,
     'maximize': True,
 
@@ -78,6 +78,8 @@ config = varmint.config_dict.ConfigDict({
     'gradient_check': False,
     'n_grad_check': 10,
     'grad_check_eps': 1e-6,
+
+    'eta': 0.5,
 
     'max_update': 0.01,
     'max_value': 0.1,
@@ -216,10 +218,8 @@ def main(argv):
     nopoint_grad_fn = jax.jit(jax.grad(beam.get_potential_energy_fn()))
 
     # Add a point load at the top left corner.
-    #point_load_fn = \
-    #    generate_point_load_fn(ref_ctrl, g2l, jnp.array([0.0, config.len_y]))
     point_load_fn = \
-        generate_point_load_fn(ref_ctrl, g2l, jnp.array([config.len_x, 0.0]))
+        generate_point_load_fn(ref_ctrl, g2l, jnp.array([0.0, config.len_y]))
 
     # Magnitude of point load.
     point_force = jnp.array([0.0, -1.0])
@@ -290,6 +290,7 @@ def main(argv):
     domain_spatial_grad = jax.jit(jax.vmap(jax.grad(domain, argnums=1), in_axes=(None, 0)))
 
     def objective(cell_area):
+        cell_area = cell_area ** config.simp_exponent
         solver_mat_params = (
             E_min + (SteelMat.E - E_min) * cell_area,
             SteelMat.nu * jnp.ones(ref_ctrl.shape[0]),
@@ -298,9 +299,11 @@ def main(argv):
         return se_p
 
     def constraint(cell_area):
+        cell_area = cell_area ** config.simp_exponent
         return jnp.mean(cell_area) - config.vol_constraint
 
     def area_penalty(cell_area):
+        cell_area = cell_area ** config.simp_exponent
         area_estimate = jnp.mean(cell_area)
 
         return (jax.nn.relu(area_estimate - config.vol_constraint) ** 2) * config.area_penalty  # lol
@@ -433,7 +436,7 @@ def main(argv):
             dv = constraint_grad
             while (l2 - l1) / (l1 + l2) > 1e-3:
                 lmid = (l2 + l1) / 2.0
-                eta = 0.5  # Numerical damping coefficient.
+                eta = config.eta  # Numerical damping coefficient.
 
                 # Optimality criteria update.
                 # If dc and dv are 0, then the first term will be zero. We want it to
