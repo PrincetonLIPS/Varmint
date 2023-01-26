@@ -913,15 +913,15 @@ class SingleElementGeometry(Geometry):
             csr_matrix((all_entries, (all_rows, all_cols)),
                        (n_nonfixed + n_rigid, n_nonfixed + n_rigid), dtype=onp.int8)
 
-        if verbose and comm and comm.rank == 0:
-            print(f'Number of dof: {n_nonfixed + n_rigid}.')
+        #if verbose and comm and comm.rank == 0:
+        print(f'Number of dof: {n_nonfixed + n_rigid}.', flush=True)
         self.n_dof = n_nonfixed + n_rigid
-        if verbose and comm and comm.rank == 0:
-            print('Sparsity precomputation.')
+        #if verbose and comm and comm.rank == 0:
+        print('Sparsity precomputation.', flush=True)
         self._jac_reconstruction_tangents, self._jac_reconstruction_fn = \
             sparsity.pattern_to_reconstruction(self._jac_sparsity_graph)
-        if verbose and comm and comm.rank == 0:
-            print('\tDone.')
+        #if verbose and comm and comm.rank == 0:
+        print('\tDone.', flush=True)
         if verbose and comm and comm.rank == 0:
             print(f'\t# JVPs: {self._jac_reconstruction_tangents.shape[0]}')
 

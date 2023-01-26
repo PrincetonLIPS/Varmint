@@ -88,11 +88,11 @@ class SparseCholeskyLinearSolver:
                 sparse_hess = scipy.sparse.csc_matrix((data, row_indices, col_indptr))
 
             with Time(self.timer, 'gradient'):
-                g = jax.block_until_ready(self.grad_fun(xk, *args))
+                g = jax.block_until_ready(self.grad_fun(x0, *args))
 
             if self.factor is None:
                 with Time(self.timer, 'analysis'):
-                    self.factor = cholmod.analyze(sparse_hess, ordering_method='best')
+                    self.factor = cholmod.analyze(sparse_hess)
             
             with Time(self.timer, 'solving'):
                 self.factor.cholesky_inplace(sparse_hess)
@@ -114,13 +114,9 @@ class SparseCholeskyLinearSolver:
                 return (fixed_locs, tractions, ref_ctrl, mat_params)
 
             args, f_vjp = jax.vjp(preprocess, increment_dict, tractions, ref_ctrl, mat_params)
-            
-            # Compute adjoint wrt upstream adjoints.
-            if self.factor is None:
-                raise Exception('Cholesky factorization not computed.')
-            with Time(self.timer, 'adjoint'):
-                adjoint = self.factor(g)
 
+            # Compute adjoint wrt upstream adjoints.
+            adjoint = self.factor(g)
             args_bar = self.adjoint_op(xk, adjoint, args)
             increment_dict_bar, tractions_bar, ref_ctrl_bar, mat_params_bar = f_vjp(args_bar)
             return None, increment_dict_bar, tractions_bar, ref_ctrl_bar, mat_params_bar

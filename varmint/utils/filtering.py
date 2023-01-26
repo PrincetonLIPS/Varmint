@@ -27,9 +27,9 @@ def _gaussian_filter_bwd(filter_width, kernel_size, res, g):
 gaussian_filter.defvjp(_gaussian_filter_fwd, _gaussian_filter_bwd)
 
 
-def physical_density(x, config, use_filter=True):
-    return gaussian_filter(config.f1, config.f2, x) if use_filter else x  # maybe filter
+def physical_density(x, f1, f2, use_filter=True):
+    return gaussian_filter(f1, f2, x) if use_filter else x  # maybe filter
 
 
-def mean_density(x, config, use_filter=True):
-    return np.mean(physical_density(x, config, use_filter)) # / np.mean(args.mask)
+def mean_density(x, f1, f2, use_filter=True):
+    return np.mean(physical_density(x, f1, f2, use_filter)) # / np.mean(args.mask)
