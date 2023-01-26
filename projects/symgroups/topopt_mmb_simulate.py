@@ -11,7 +11,9 @@ import argparse
 
 import optax
 
+from geometry.small_beam_geometry import construct_beam
 from geometry.topopt_mmb_geometry import construct_mmb_beam
+
 from varmint.geometry.elements import Patch2D
 from varmint.geometry.geometry import Geometry, SingleElementGeometry
 from varmint.physics.constitutive import NeoHookean2D, LinearElastic2D
@@ -23,7 +25,7 @@ import varmint.utils.experiment_utils as eutils
 
 from varmint.utils.mpi_utils import *
 
-from varmint.solver.incremental_loader import SparseNewtonIncrementalSolver
+from varmint.solver.cholesky_solver import SparseCholeskyLinearSolver
 
 import numpy.random as npr
 import numpy as onp
@@ -52,15 +54,13 @@ config = config_dict.ConfigDict({
     'height': 25.0,
     'disp': 3.0,
     'volf': 0.5,
-    'f1': 1.0,
-    'f2': 4.0,
+    'f1': 5.0,
+    'f2': 40.0,
 
-    'solver_parameters': {
-        'tol': 1e-8,
-        'base_incs': 1,
-        'line_search_stepback': 1.0,
-        'always_factor': True,
-    }
+    'solver_parameters': {},
+
+    'max_iters': 1000,
+    'change_tol': 0.0005,
 })
 
 config_flags.DEFINE_config_dict('config', config)
@@ -90,18 +90,17 @@ def generate_point_load_fn(ref_ctrl, g2l, point):
 def construct_simulation(config, geo_params, numx, numy, disp_t, patch_ncp):
     mat = LinearElastic2D(SteelMat)
 
-    cell, get_ref_ctrl_fn = \
-        construct_mmb_beam(geo_params, numx, numy, patch_ncp, quad_degree=config.quaddeg,
-                           spline_degree=config.splinedeg, material=mat)
+    cell, ref_ctrl = \
+        construct_beam(geo_params[0], geo_params[1], numx, numy,
+                       quad_degree=config.quaddeg, material=mat)
 
     l2g, g2l = cell.get_global_local_maps()
-    ref_ctrl = get_ref_ctrl_fn()
 
     potential_energy_fn = cell.get_potential_energy_fn()
 
     # Add a point load at the top right corner.
     point_load_fn = \
-        generate_point_load_fn(ref_ctrl, g2l, np.array([config.width, config.height]))
+        generate_point_load_fn(ref_ctrl, g2l, np.array([0.0, config.height]))
 
     # Magnitude of point load.
     point_force = np.array([0.0, -1.0])
@@ -112,8 +111,8 @@ def construct_simulation(config, geo_params, numx, numy, disp_t, patch_ncp):
                 + point_load_fn(current_x, fixed_locs, ref_ctrl, point_force)
 
     strain_energy_fn = jax.jit(cell.get_strain_energy_fn())
-    optimizer = SparseNewtonIncrementalSolver(cell, potential_energy_with_point_load,
-                                              **config.solver_parameters)
+    optimizer = SparseCholeskyLinearSolver(cell, potential_energy_with_point_load,
+                                           **config.solver_parameters)
     optimize = optimizer.get_optimize_fn()
 
     def simulate(mat_params):
@@ -122,27 +121,21 @@ def construct_simulation(config, geo_params, numx, numy, disp_t, patch_ncp):
         increment_dict = {
             '1': np.array([0.0, 0.0]),
             #'2': np.array([0.0, -disp_t]),
-            #'3': np.array([0.0, 0.0]),
+            '3': np.array([0.0, 0.0]),
         }
 
         tractions_dict = {
             'A': np.array([0.0, -0.0]),
         }
 
-        current_x, all_xs, all_fixed_locs, solved_increment = \
-                optimize(init_x, increment_dict, tractions_dict, ref_ctrl, mat_params)
-        if solved_increment < 1.0:
-            # TODO(doktay): Fix along with returning full strain energy curve.
-            raise RuntimeError("Could not complete solve.")
+        current_x = optimize(init_x, increment_dict, tractions_dict, ref_ctrl, mat_params)
 
         fixed_locs = cell.fixed_locs_from_dict(ref_ctrl, increment_dict)
         tractions = cell.tractions_from_dict({})
         strain_energy = strain_energy_fn(current_x, fixed_locs, tractions, ref_ctrl, mat_params)
-        return current_x, (np.stack(all_xs, axis=0),
-                           np.stack(all_fixed_locs, axis=0),
-                           strain_energy)
+        return current_x, fixed_locs, strain_energy
 
-    return cell, simulate, get_ref_ctrl_fn, optimizer
+    return cell, simulate, ref_ctrl, optimizer
 
 
 def main(argv):
@@ -158,9 +151,8 @@ def main(argv):
     disp_i = config.disp
 
     DISP = disp_i / 20 * np.arange(20 + 1)
-    cell, sim_fn, get_ref_ctrl_fn, optimizer = \
+    cell, sim_fn, _ref_ctrl, optimizer = \
             construct_simulation(config, gps_i, nx, ny, disp_i, patch_ncp)
-    _ref_ctrl = get_ref_ctrl_fn()
 
     ########
     vol_frac = config.volf
@@ -182,22 +174,22 @@ def main(argv):
     l2g, g2l = cell.get_global_local_maps()
 
     def constraint(ele_d):
-        return filtering.mean_density(ele_d, config, use_filter=True) - vol_frac
+        return filtering.mean_density(ele_d, config.f1, config.f2) - vol_frac
 
     def objective(ele_d):
-        ele_d = filtering.physical_density(ele_d, config, use_filter=True)
+        ele_d = filtering.physical_density(ele_d, config.f1, config.f2)
         E_ele = e_min + ele_d ** p * (e_0 - e_min)
         mat_params = (E_ele[::-1].reshape(nx*ny), nu_ini)
-        _, (_, _, se_p) = sim_fn(mat_params)
+        _, _, se_p = sim_fn(mat_params)
 
         # TODO(doktay): Convert back to se_p[-1] when full SE is computed.
         return np.linalg.norm(se_p)
 
     def simulate_model(ele_d, output_path):
-        ele_d = filtering.physical_density(ele_d, config, use_filter=True)
+        ele_d = filtering.physical_density(ele_d, config.f1, config.f2)
         E_ele = e_min + ele_d ** p * (e_0 - e_min)
         mat_params = (E_ele[::-1].reshape(nx*ny), nu_ini)
-        final_x, (all_displacements, all_fixed_locs, se_o) = sim_fn(mat_params)
+        final_x, fixed_locs, _ = sim_fn(mat_params)
 
         # TODO(doktay): plt.plot(DISP, se_t, 'o-b', DISP, se_o, 'o--r')
         plt.savefig(os.path.join(args.exp_dir, f"compare_SE-{output_path}.png"))
@@ -212,7 +204,7 @@ def main(argv):
         vid_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-{output_path}.mp4')
         fig = plt.figure()
         ax = fig.gca()
-        create_static_image(cell.element, g2l(final_x, all_fixed_locs[-1], get_ref_ctrl_fn()), ax)
+        create_static_image(cell.element, g2l(final_x, fixed_locs, _ref_ctrl), ax)
         ax.set_aspect('equal')
         fig.savefig(image_path)
         plt.close(fig)
@@ -228,12 +220,12 @@ def main(argv):
 
     x = vol_frac * np.ones((ny,nx))
     change = 1.0
-    for loop in range(300):
-        if change < 0.0005:
+    for loop in range(config.max_iters):
+        if change < config.change_tol:
             break
 
-        if loop % 100 == 0:
-            simulate_model(x, f'iteration-{loop}')
+        #if loop % 100 == 0:  
+        #    simulate_model(x, f'iteration-{loop}')
 
         iter_time = time.time()
         c, dc = val_grad_O(x)
@@ -244,8 +236,8 @@ def main(argv):
                 avg_iter_time = sum(iter_times) / len(iter_times)
             else:
                 avg_iter_time = 0
+            iter_times = []
             rprint(f'Iter: {loop}, Obj: {c:.2f}, Constr: {v:.2E}, Largest elem chg: {change:.4f}, Avg iter time: {avg_iter_time:.2f}s')
-            optimizer.timer.summarize()
             plt.imshow(1 - x, extent=(0, gps_i[0], 0, gps_i[1]), cmap='gray',vmin=0, vmax=1)
             plt.savefig(os.path.join(args.exp_dir, f"gray-{loop}.png"))
             plt.close()

@@ -39,6 +39,7 @@ def construct_mmb_beam(geo_params, numx, numy, patch_ncp, quad_degree, spline_de
         h_b = H_b/num_y
 
         for j in range(num_y):
+            print('j = ', j)
             sq_patches_corners = su_corners_beam(w_b,h_b)
 
             ctrls = []
@@ -73,7 +74,7 @@ def construct_mmb_beam(geo_params, numx, numy, patch_ncp, quad_degree, spline_de
     group_1 = np.abs(all_ctrls[..., 0] - 0.0) < 1e-14
     group_2 = np.abs(all_ctrls[..., 0] - W_b) < 1e-14
     #group_2 = (np.abs(all_ctrls[..., 0] - 0.0) < 1e-14) * (np.abs(all_ctrls[..., 1] - H_b) < 1e-14)
-    #group_3 = (np.abs(all_ctrls[..., 0] - W_b) < 1e-14) * (np.abs(all_ctrls[..., 1] - 0.0) < 1e-14)
+    group_3 = (np.abs(all_ctrls[..., 0] - W_b) < 1e-14) * (np.abs(all_ctrls[..., 1] - 0.0) < 1e-14)
 
     # Example traction group: Right side
     traction_group = np.abs(all_ctrls[..., 0] - W_b) < 1e-14
@@ -86,15 +87,16 @@ def construct_mmb_beam(geo_params, numx, numy, patch_ncp, quad_degree, spline_de
     traction_group = traction_group.reshape(-1, 1) * np.array([[0, 0, 1, 0]])
 
     dirichlet_groups = {
-        '1': group_1,
+        '1': (group_1, np.array([1, 0])),
         #'2': (group_2, np.array([0, 1]))
-        #'3': group_3,
+        '3': group_3,
     }
 
     traction_groups = {
         'A': traction_group,
     }
 
+    print('Finished initializing geometry. Creating object.')
     return SingleElementGeometry(
         element=element,
         material=material,
