@@ -16,7 +16,7 @@ import geometry_utils as geo_utils
 from . import mesher as mshr
 
 
-def construct_beam(domain_oracle, params, len_x, len_y, fidelity, quad_degree, material, negative=True):
+def construct_beam(domain_oracle, params, len_x, len_y, nx, ny, quad_degree, material, negative=True):
     # Create knot vectors with 1-D splines and 2 control points.
     spline_degree = 1
     patch_ncp = 2
@@ -28,7 +28,7 @@ def construct_beam(domain_oracle, params, len_x, len_y, fidelity, quad_degree, m
 
     # Use the pixel mesher with the implicit function, and then convert output
     # to ctrl points understandable by Varmint.
-    coords, cells, occupied_pixels, find_patch = mshr.find_occupied_pixels(domain_oracle, params, len_x, len_y, fidelity)
+    coords, cells, occupied_pixels, find_patch = mshr.find_occupied_pixels(domain_oracle, params, len_x, len_y, nx, ny)
     all_ctrls = coords[cells].reshape(cells.shape[0], patch_ncp, patch_ncp, coords.shape[-1])
 
     # Dirichlet labels
@@ -98,7 +98,7 @@ def construct_beam(domain_oracle, params, len_x, len_y, fidelity, quad_degree, m
         return key, jnp.stack([scaled_h_fibers, scaled_v_fibers], axis=1)
 
     @jax.jit
-    def gen_per_cell_fibers(key, n_fibers=20):
+    def gen_per_cell_fibers(key, n_fibers=10):
         n_cells = cells.shape[0]
         all_keys = jax.random.split(key, n_cells)
 

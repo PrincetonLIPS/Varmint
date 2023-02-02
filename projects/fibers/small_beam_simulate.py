@@ -12,6 +12,7 @@ from varmint.physics.constitutive import NeoHookean2D, LinearElastic2D
 from varmint.physics.materials import Material
 from varmint.utils.movie_utils import create_movie, create_static_image
 
+import varmint.utils.filtering as filtering
 import varmint.geometry.bsplines as bsplines
 
 from geometry.small_beam_geometry import construct_beam
@@ -38,11 +39,12 @@ config = varmint.config_dict.ConfigDict({
     'quaddeg': 3,
     'mat_model': 'LinearElastic2D',
 
-    'fidelity': 50,
+    'nx': 150,
+    'ny': 50,
     'len_x': 75,
     'len_y': 25,
 
-    'simp_exponent': 3,
+    'simp_exponent': 1,
 
     'init_pattern': '16',
 
@@ -79,10 +81,16 @@ config = varmint.config_dict.ConfigDict({
     'n_grad_check': 10,
     'grad_check_eps': 1e-6,
 
-    'eta': 0.5,
+    'filter': False,
 
-    'max_update': 0.01,
-    'max_value': 0.1,
+    'eta': 0.1,
+    'eta_decay': 0.9,
+    'decay_interval': 25,
+
+    'slow_constraint': True,
+
+    'max_value': 0.5,
+    'move_limit': 0.01,
     'reload': False,
 
     'lr': 0.1,
@@ -175,14 +183,14 @@ def main(argv):
 
     # Reload
     if config.reload:
-        reload_path = '/n/fs/mm-iga/Varmint/projects/fibers/experiments/bridge_16init_lr0001_75x25/sim-bridge_16init_lr0001_75x25-pickles-geoparams-iter4700.png.npy'
+        reload_path = '/n/fs/mm-iga/Varmint/projects/fibers/experiments/mmb_against_simp_simp1_slowerdecay/sim-mmb_against_simp_simp1_slowerdecay-pickles-geoparams-iter400.png.npy'
         geometry_params = onp.load(reload_path)
         print('loaded')
 
     # Construct geometry (simple beam).
-    beam, ref_ctrl, occupied_pixels, find_patch, gen_stratified_fibers, coords = construct_beam(
+    beam, ref_ctrl, occupied_pixels, _, gen_stratified_fibers, coords = construct_beam(
             domain_oracle=domain, params=geometry_params,
-            len_x=config.len_x, len_y=config.len_y, fidelity=config.fidelity,
+            len_x=config.len_x, len_y=config.len_y, nx=config.nx, ny=config.ny,
             quad_degree=config.quaddeg, material=mat)
 
     # ref_ctrl is in "local" coordinates. The "global" coordinates are reparameterized
@@ -193,7 +201,7 @@ def main(argv):
     increment_dict = {
         '1': jnp.array([0.0, 0.0]),
         #'2': jnp.array([0.0, -disp_t]),
-        #'3': jnp.array([0.0, 0.0]),
+        '3': jnp.array([0.0, 0.0]),
     }
 
     tractions_dict = {
@@ -256,18 +264,20 @@ def main(argv):
     quad_energies = []
 
     # Baseline model
-    #path = '/n/fs/mm-iga/Varmint/projects/symgroups/experiments/topopt_with_save/iter_900_pixels.npy'
-    #baseline_pixels = onp.load(path)[::-1, :].T.flatten()
-    #baseline_mat_params = (
-    #        SteelMat.E * baseline_pixels + E_min * ~baseline_pixels,
-    #        SteelMat.nu * jnp.ones(ref_ctrl.shape[0]),
-    #)
-    #_, _, baseline_se_p = simulate(baseline_mat_params)
-    #print(f'Baseline SE: {baseline_se_p}')
+    path = '/n/fs/mm-iga/Varmint/projects/symgroups/experiments/mmb_simp/eled-400.npy'
+    baseline_pixels = onp.load(path)[::-1, :].T
+    #baseline_pixels = filtering.physical_density(baseline_pixels, 2.5, 20.0)
+    print(f'Baseline area: {onp.mean(baseline_pixels.flatten() ** 3)}')
+    baseline_mat_params = (
+            E_min + baseline_pixels.flatten() ** 3 * (SteelMat.E - E_min),
+            SteelMat.nu * jnp.ones(ref_ctrl.shape[0]),
+    )
+    _, _, baseline_se_p = simulate(baseline_mat_params)
+    print(f'Baseline SE: {baseline_se_p}')
 
-    ## SIMP Baseline topology
-    #image_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-pixelized-baseline.png')
-    #visualize_pixel_domain(config, 0, baseline_pixels, image_path)
+    # SIMP Baseline topology
+    image_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-pixelized-baseline.png')
+    visualize_pixel_domain(config, 0, baseline_pixels, image_path)
 
     @jax.jit
     def cell_area_estimate(key, geometry_params):
@@ -289,7 +299,12 @@ def main(argv):
 
     domain_spatial_grad = jax.jit(jax.vmap(jax.grad(domain, argnums=1), in_axes=(None, 0)))
 
-    def objective(cell_area):
+    def objective(_cell_area):
+        if config.filter:
+            filtered_cell_area = filtering.physical_density(_cell_area.reshape(config.nx, config.ny), 2.5, 20.0)
+        else:
+            filtered_cell_area = _cell_area
+        cell_area = filtered_cell_area.flatten()
         cell_area = cell_area ** config.simp_exponent
         solver_mat_params = (
             E_min + (SteelMat.E - E_min) * cell_area,
@@ -298,7 +313,12 @@ def main(argv):
         _, _, se_p = simulate(solver_mat_params)
         return se_p
 
-    def constraint(cell_area):
+    def constraint(_cell_area):
+        if config.filter:
+            filtered_cell_area = filtering.physical_density(_cell_area.reshape(config.nx, config.ny), 2.5, 20.0)
+        else:
+            filtered_cell_area = _cell_area
+        cell_area = filtered_cell_area.flatten()
         cell_area = cell_area ** config.simp_exponent
         return jnp.mean(cell_area) - config.vol_constraint
 
@@ -314,10 +334,13 @@ def main(argv):
 
     # Here we start optimization
     rprint('Starting optimization (may be slow because of compilation).')
+    eta = config.eta  # Numerical damping coefficient.
     for i in range(config.num_iters):
+        if i > 0 and i % config.decay_interval == 0:
+            eta = eta * config.eta_decay
         _, _, occupied_pixels, _ = mshr.find_occupied_pixels(domain, geometry_params,
                                                             config.len_x, config.len_y,
-                                                            config.fidelity, center=True)
+                                                            config.nx, config.ny, center=True)
 
 
         # Get the function to compute vjp here. Will be more efficient than
@@ -358,7 +381,7 @@ def main(argv):
 
         #config.summary_writer.scalar('Fiber area estimate', curr_area_estimate, step=i)
         config.summary_writer.scalar('Area penalty grad norm', area_penalty_grad_norm, step=i)
-        print(f'iter: {i:4} r_area: {curr_real_area:<6.4} '
+        print(f'iter: {i:4} r_area: {curr_real_area:<6.4} eta: {eta:<6.4} '
               f'r_j: {obj_val:<10.6} '
               f'min_spatial_norm: {jnp.min(domain_spatial_grad_norms):<10.6} max_spatial_norm: {jnp.max(domain_spatial_grad_norms):<10.6} '
               f'area_pen: {area_penalty_grad_norm:<6.3} '
@@ -381,7 +404,7 @@ def main(argv):
 
             # Pixelixed topology
             image_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-pixelized-iter{i}.png')
-            visualize_pixel_domain(config, i, occupied_pixels, image_path)
+            visualize_pixel_domain(config, i, cell_area, image_path)
 
             # Energy graph
             image_path = os.path.join(args.exp_dir, f'sim-{args.exp_name}-energy-plot.png')
@@ -422,7 +445,7 @@ def main(argv):
             def quick_constraint(geometry_params):
                 _, _, occupied_pixels, _ = mshr.find_occupied_pixels(domain, geometry_params,
                                                                     config.len_x, config.len_y,
-                                                                    config.fidelity, center=True)
+                                                                    config.nx, config.ny, center=True)
                 return jnp.mean(occupied_pixels) - config.vol_constraint
 
             def slow_constraint(geometry_params):
@@ -431,12 +454,11 @@ def main(argv):
 
             # Bisection algorithm to find optimal lagrange multiplier.
             translated_gps = geometry_params + config.max_value
-            l1, l2, move = 0, 1e5, config.max_value / 5.0
+            l1, l2, move = 0, 1e1, config.move_limit
             dc = total_energy_derivative
             dv = constraint_grad
             while (l2 - l1) / (l1 + l2) > 1e-3:
                 lmid = (l2 + l1) / 2.0
-                eta = config.eta  # Numerical damping coefficient.
 
                 # Optimality criteria update.
                 # If dc and dv are 0, then the first term will be zero. We want it to
@@ -450,11 +472,14 @@ def main(argv):
                 xnew = jnp.maximum(translated_gps - move, xnew)  # Cap from below by move limit.
                 xnew = jnp.maximum(jnp.zeros_like(xnew), xnew)  # Cap from below by 0.
 
-                const = quick_constraint(xnew - config.max_value)
-
                 # If too much volume, increase lagrange multiplier.
                 # Else, decrease.
-                if slow_constraint(xnew - config.max_value) > 0:
+                if config.slow_constraint:
+                    constraint_val = slow_constraint(xnew - config.max_value)
+                else:
+                    constraint_val = quick_constraint(xnew - config.max_value)
+
+                if constraint_val > 0:
                     l1 = lmid
                 else:
                     l2 = lmid

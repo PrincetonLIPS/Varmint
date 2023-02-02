@@ -61,7 +61,7 @@ def visualize_pixel_domain(config, step, occupied_pixels, path):
     fig = plt.figure()
     ax = fig.gca()
 
-    occupied_pixels = occupied_pixels.reshape(config.fidelity, config.fidelity).T
+    occupied_pixels = occupied_pixels.reshape(config.nx, config.ny).T
     occupied_pixels = occupied_pixels[::-1, :]
     ax.imshow(1-occupied_pixels, cmap='gray', extent=(0.0, config.len_x, 0.0, config.len_y))
 

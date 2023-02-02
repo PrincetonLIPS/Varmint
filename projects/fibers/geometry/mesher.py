@@ -7,10 +7,9 @@ from scipy import ndimage
 import matplotlib.pyplot as plt
 
 
-def base_domain(len_x, len_y, fidelity):
+def base_domain(len_x, len_y, nx, ny):
     """Generate a dense rectangular grid of cells with the given fidelity."""
 
-    nx, ny = fidelity, fidelity
     xcoords = onp.linspace(0.0, len_x, nx + 1)
     ycoords = onp.linspace(0.0, len_y, ny + 1)
 
@@ -76,7 +75,7 @@ def pixelize_implicit(domain_oracle, params, len_x, len_y, fidelity, negative=Tr
     return coords, cells, find_patch
 
 
-def find_occupied_pixels(domain_oracle, params, len_x, len_y, fidelity, negative=True, center=False):
+def find_occupied_pixels(domain_oracle, params, len_x, len_y, nx, ny, negative=True, center=False):
     """Given domain oracle, size of rectangular domain, and fidelity, discretize the domain.
     
     `domain_oracle` should take two inputs: `params`, and a single 2-D coordinate.
@@ -89,7 +88,7 @@ def find_occupied_pixels(domain_oracle, params, len_x, len_y, fidelity, negative
     denoting where material exists.
     """
 
-    coords, cells = base_domain(len_x, len_y, fidelity)
+    coords, cells = base_domain(len_x, len_y, nx, ny)
     v_oracle = jax.vmap(domain_oracle, in_axes=(None, 0))
 
     if center:
