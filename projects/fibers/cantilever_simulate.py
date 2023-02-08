@@ -65,12 +65,12 @@ config = varmint.config_dict.ConfigDict({
     'constrain_spatial_norm': True,
     'spatial_norm_penalty': 0.1,
 
-    'jax_seed': 24,
+    'jax_seed': 42,
 
     'area_penalty': 10,
     'area_penalty_norm_bound': 10,
 
-    'num_iters': 10000,
+    'num_iters': 450,
     'vis_every': 1,
     'save_every': 10,
     'plot_deformed': False,
