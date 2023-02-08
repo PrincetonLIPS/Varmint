@@ -29,9 +29,8 @@ def construct_beam(len_x, len_y, nx, ny, quad_degree, material):
     all_ctrls = coords[cells].reshape(cells.shape[0], patch_ncp, patch_ncp, coords.shape[-1])
 
     # Dirichlet labels
-    group_1 = np.abs(all_ctrls[..., 0] - 0.0) < 1e-9
-    group_2 = np.abs(all_ctrls[..., 0] - len_x) < 1e-9
-    group_3 = (np.abs(all_ctrls[..., 0] - len_x) < 1e-14) * (np.abs(all_ctrls[..., 1] - 0.0) < 1e-14)
+    group_1 = np.abs(all_ctrls[..., 1] - 0.0) < 1e-9
+    group_2 = np.abs(all_ctrls[..., 1] - len_y) < 1e-9
 
     # Example traction group: Right side
     traction_group = np.abs(all_ctrls[..., 0] - len_x) < 1e-14
@@ -44,9 +43,8 @@ def construct_beam(len_x, len_y, nx, ny, quad_degree, material):
     traction_group = traction_group.reshape(-1, 1) * np.array([[0, 0, 1, 0]])
 
     dirichlet_groups = {
-        '1': (group_1, np.array([1, 0])),
-        #'2': (group_2, np.array([0, 1])),
-        '3': (group_3, np.array([0, 1])),
+        '1': group_1,
+        '2': group_2,
     }
 
     traction_groups = {

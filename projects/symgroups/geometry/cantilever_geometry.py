@@ -44,9 +44,9 @@ def construct_beam(len_x, len_y, nx, ny, quad_degree, material):
     traction_group = traction_group.reshape(-1, 1) * np.array([[0, 0, 1, 0]])
 
     dirichlet_groups = {
-        '1': (group_1, np.array([1, 0])),
+        '1': group_1,
         #'2': (group_2, np.array([0, 1])),
-        '3': (group_3, np.array([0, 1])),
+        #'3': (group_3, np.array([0, 1])),
     }
 
     traction_groups = {

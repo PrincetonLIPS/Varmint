@@ -2,12 +2,17 @@ import sys
 import os
 import argparse
 import logging
+import jax
 import numpy             as np
 import numpy.random      as npr
+import jax.numpy         as jnp
+import jax.random        as jrnd
 import matplotlib.pyplot as plt
+import haiku             as hk
 import symmetria.cli     as cli
 
 from symmetria import Symmetria
+from functools import partial
 
 logger = logging.getLogger()
 
@@ -25,9 +30,31 @@ def parse_command_line():
     cli.CLI_PLANE,
     cli.CLI_RFF,
     cli.CLI_CONTOUR,
+    cli.CLI_NN,
   )
 
   return parser.parse_args()
+
+
+def get_network(input_dims, layers, activation, seed):
+  def network(x):
+    stack = []
+    for layer in layers:
+      stack.append(hk.Linear(layer))
+      stack.append(activation)
+    stack.append(hk.Linear(1))
+
+    mlp = hk.Sequential(stack)
+    return mlp(x)
+
+  base_fn_t = hk.transform(network)
+  base_fn_t = hk.without_apply_rng(base_fn_t)
+
+  rng = jrnd.PRNGKey(seed)
+  weights = base_fn_t.init(rng, jnp.ones(input_dims))
+
+  return jax.jit(jax.vmap(partial(base_fn_t.apply,weights), in_axes=0))
+
 
 def main():
   args = parse_command_line()
@@ -44,9 +71,8 @@ def main():
   S = Symmetria.plane_group(args.group)
   basis = S.sg.basic_basis
 
-
-  xlims = [-2, 2]
-  ylims = [-2, 2]
+  xlims = [0, 9]
+  ylims = [0, 3]
 
   pxx = np.linspace(*xlims, args.image_sz)
   pxy = np.linspace(*ylims, args.image_sz)
@@ -60,23 +86,32 @@ def main():
 
   embedded_px = embedder(px_grid.reshape(-1,2))[0]
   embed_dims = embedded_px.shape[1]
+  netfunc = get_network(
+    embed_dims,
+    args.layers,
+    jnp.sin,
+    args.seed,
+  )
 
-  # Build a random function in the embedding space.
-  omegas = rng.standard_normal((embed_dims, args.num_feats)) \
-    / args.length_scale
-  phis = rng.random(args.num_feats) * 2 * np.pi
-  weights = rng.standard_normal((args.num_feats,)) \
-    / np.sqrt(args.num_feats)
-  output = np.cos(embedded_px @ omegas + phis) @ weights
+  # Build a random NN function in the embedding space.
+  output = netfunc(embedded_px).reshape(args.image_sz, args.image_sz)
+  output = output - jnp.min(output)
+  output = output / jnp.max(output)
 
+  #plt.scatter(
+  #  px_grid[:,:,0],
+  #  px_grid[:,:,1],
+  #  c=output,
+  #  cmap='Greys',
+  #)
   plt.contourf(
     px_grid[:,:,0],
     px_grid[:,:,1],
-    output.reshape(args.image_sz, args.image_sz),
+    2*output-1,
     cmap=args.colormap,
   )
+
   plt.gca().set_aspect('equal')
-  plt.axis('off')
   plt.savefig('test.png')
   plt.show()
 

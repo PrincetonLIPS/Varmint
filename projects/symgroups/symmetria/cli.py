@@ -107,7 +107,7 @@ CLI_ORBIFOLD = {
 CLI_PLANE = {
   'image-sz': {
     'type': int,
-    'default': 500,
+    'default': 100,
     'help': 'Number of pixels in width and height',
   },
   'view-scale': {
@@ -159,6 +159,14 @@ CLI_CONTOUR = {
     'default': 'viridis',
     'help': 'Colormap to use for rendering contours',
   },
+}
+
+CLI_NN = {
+  'layers': {
+    'type': int,
+    'default': [20, 20, 20],
+    'help': 'Number of layers in the NN',
+  }
 }
 
 

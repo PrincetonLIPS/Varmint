@@ -21,6 +21,7 @@ def create_movie(
     filename,
     fig_kwargs={},
     comet_exp=None,
+    ax_on=True,
 ):
     t0 = time.time()
 
@@ -49,6 +50,9 @@ def create_movie(
     fig = plt.figure(**fig_kwargs)
     ax = plt.axes(xlim=(min_x, max_x), ylim=(min_y, max_y))
     ax.set_aspect('equal')
+
+    if not ax_on:
+        plt.axis('off')
 
     # Things we need to both initialize and update.
     objects = {}

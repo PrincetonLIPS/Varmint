@@ -11,8 +11,7 @@ import argparse
 
 import optax
 
-from geometry.small_beam_geometry import construct_beam
-from geometry.topopt_mmb_geometry import construct_mmb_beam
+from geometry.compress_geometry import construct_beam
 
 from varmint.geometry.elements import Patch2D
 from varmint.geometry.geometry import Geometry, SingleElementGeometry
@@ -53,8 +52,8 @@ config = config_dict.ConfigDict({
     'sym_group': 1,
 
     # Number of repeats across each axis.
-    'sym_xreps': 15,
-    'sym_yreps': 5,
+    'sym_xreps': 10,
+    'sym_yreps': 10,
 
     'num_verts': 5000,
     'graph_method': 'mesh',
@@ -69,9 +68,9 @@ config = config_dict.ConfigDict({
     'quaddeg': 3,
     'splinedeg': 1,
 
-    'nx': 300,
-    'ny': 100,
-    'width': 75.0,
+    'nx': 200,
+    'ny': 200,
+    'width': 25.0,
     'height': 25.0,
     'disp': 3.0,
     'volf': 0.5,
@@ -82,8 +81,9 @@ config = config_dict.ConfigDict({
     'simp_move_limit': 0.2,
 
     'optim_type': 'grad',
-    'weight_lr': 0.0001,
-    'volume_penalty': 100.0,
+    'weight_lr': 0.1,
+    'volume_penalty': 10000.0,
+    'maximize': True,
 
     'solver_parameters': {},
 
@@ -151,7 +151,7 @@ def construct_simulation(config, geo_params, numx, numy, disp_t, patch_ncp):
         generate_point_load_fn(ref_ctrl, g2l, np.array([0.0, config.height]))
 
     # Magnitude of point load.
-    point_force = np.array([0.0, -1.0])
+    point_force = np.array([0.0, -0.0])
 
     # Use this objective function in the solver instead of the standard potential energy.
     def potential_energy_with_point_load(current_x, fixed_locs, tractions, ref_ctrl, mat_params):
@@ -168,8 +168,7 @@ def construct_simulation(config, geo_params, numx, numy, disp_t, patch_ncp):
 
         increment_dict = {
             '1': np.array([0.0, 0.0]),
-            #'2': np.array([0.0, -disp_t]),
-            '3': np.array([0.0, 0.0]),
+            '2': np.array([0.0, -1.0]),
         }
 
         tractions_dict = {
@@ -180,9 +179,8 @@ def construct_simulation(config, geo_params, numx, numy, disp_t, patch_ncp):
 
         fixed_locs = cell.fixed_locs_from_dict(ref_ctrl, increment_dict)
         tractions = cell.tractions_from_dict({})
-        #strain_energy = strain_energy_fn(current_x, fixed_locs, tractions, ref_ctrl, mat_params)
-        point_load = point_load_fn(current_x, fixed_locs, ref_ctrl, point_force)
-        return current_x, fixed_locs, point_load
+        strain_energy = strain_energy_fn(current_x, fixed_locs, tractions, ref_ctrl, mat_params)
+        return current_x, fixed_locs, strain_energy
 
     return cell, simulate, ref_ctrl, optimizer
 
@@ -231,7 +229,7 @@ def main(argv):
         outputs = netfunc(weights, embedded_px)
         #outputs = outputs - np.min(outputs)
         #outputs = outputs / np.max(outputs)
-        outputs = jax.nn.sigmoid(outputs)
+        outputs = jax.nn.sigmoid(outputs / 100.0)
         return outputs.reshape((config.ny, config.nx))
 
     def match_weights_to_pixels(weights, pixels):
@@ -289,7 +287,16 @@ def main(argv):
         _, _, se_p = sim_fn(mat_params)
 
         # TODO(doktay): Convert back to se_p[-1] when full SE is computed.
-        return np.linalg.norm(se_p)
+        return se_p
+
+    def penalized_objective(ele_d):
+        se_p = objective(ele_d)
+        penalty = constraint_sq(ele_d)
+
+        if config.maximize:
+            return -se_p + penalty * config.volume_penalty
+        else:
+            return se_p + penalty * config.volume_penalty
 
     def simulate_model(ele_d, output_path):
         ele_d = filtering.physical_density(ele_d, config.f1, config.f2)
@@ -319,7 +326,7 @@ def main(argv):
     frames = []
     iter_times = []
 
-    weight_optimizer = optax.adam(config.weight_lr)
+    weight_optimizer = optax.sgd(config.weight_lr)
     opt_state = weight_optimizer.init(init_weights)
     scale = 1.0
 
@@ -327,7 +334,7 @@ def main(argv):
     # Run the optimality criteria optimization algorithm from the 88 lines paper.
     val_grad_O = jax.value_and_grad(objective)
     val_grad_C = jax.value_and_grad(constraint)
-    val_grad_C2 = jax.value_and_grad(constraint_sq)
+    val_grad_C2 = jax.value_and_grad(penalized_objective)
 
     x = vol_frac * np.ones((ny,nx))
     weights = init_weights
@@ -345,6 +352,7 @@ def main(argv):
         iter_time = time.time()
         c, dc = val_grad_O(x)
         v, dv = val_grad_C(x)
+        v2, dv2 = val_grad_C2(x)
 
         # Numpy magic to average gradients across orbits. Hack only for P1 group.
         x_stride = config.nx // config.sym_xreps
@@ -358,6 +366,10 @@ def main(argv):
                                   x_stride, config.sym_xreps), axis=(1, 3))
         dv = np.tile(grads_per_orbit, (config.sym_yreps, config.sym_xreps))
 
+        grads_per_orbit = np.mean(dv2.reshape(y_stride, config.sym_yreps,
+                                  x_stride, config.sym_xreps), axis=(1, 3))
+        dv2 = np.tile(grads_per_orbit, (config.sym_yreps, config.sym_xreps))
+
         loop += 1
         losses.append(c)
         frames.append(x.copy())
@@ -368,7 +380,7 @@ def main(argv):
             else:
                 avg_iter_time = 0
             iter_times = []
-            rprint(f'Iter: {loop}, Obj: {c:.2f}, Constr: {v:.2E}, Largest elem chg: {change:.4f}, Avg iter time: {avg_iter_time:.2f}s')
+            rprint(f'Iter: {loop}, Obj: {c:.4f}, Volume: {v+vol_frac:.4}, Full obj: {v2:.4f}, Avg iter time: {avg_iter_time:.2f}s')
 
             plt.imshow(1 - x, extent=(0, gps_i[0], 0, gps_i[1]), cmap='gray',vmin=0, vmax=1)
             plt.savefig(os.path.join(args.exp_dir, f"gray-{loop}.png"))
@@ -383,18 +395,8 @@ def main(argv):
             #plt.close()
 
         if config.optim_type == 'grad':
-            v2, dv2 = val_grad_C2(x)
-
-            grads_per_orbit = np.mean(dv2.reshape(y_stride, config.sym_yreps,
-                                      x_stride, config.sym_xreps), axis=(1, 3))
-            dv2 = np.tile(grads_per_orbit, (config.sym_yreps, config.sym_xreps))
-
-            weights_grad = weights_to_pixels_vjp(dc)[0]
-            vol_grad = weights_to_pixels_vjp(dv2)[0]
-            total_grad = jax.tree_util.tree_map(lambda x, y: x + y * config.volume_penalty,
-                                                weights_grad, vol_grad)
-
-            updates, opt_state = weight_optimizer.update(total_grad, opt_state)
+            penalized_obj_grad = weights_to_pixels_vjp(dv2)[0]
+            updates, opt_state = weight_optimizer.update(penalized_obj_grad, opt_state)
             weights = optax.apply_updates(weights, updates)
         elif config.optim_type == 'oc':
             # Bisection algorithm to find optimal lagrange multiplier.

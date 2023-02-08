@@ -48,14 +48,14 @@ config = config_dict.ConfigDict({
     'quaddeg': 3,
     'splinedeg': 1,
 
-    'nx': 300,
-    'ny': 100,
+    'nx': 150,
+    'ny': 50,
     'width': 75.0,
     'height': 25.0,
     'disp': 3.0,
     'volf': 0.5,
-    'f1': 5.0,
-    'f2': 40.0,
+    'f1': 2.5,
+    'f2': 20.0,
 
     'solver_parameters': {},
 
@@ -124,9 +124,7 @@ def construct_simulation(config, geo_params, numx, numy, disp_t, patch_ncp):
             '3': np.array([0.0, 0.0]),
         }
 
-        tractions_dict = {
-            'A': np.array([0.0, -0.0]),
-        }
+        tractions_dict = {}
 
         current_x = optimize(init_x, increment_dict, tractions_dict, ref_ctrl, mat_params)
 
@@ -186,6 +184,7 @@ def main(argv):
         return np.linalg.norm(se_p)
 
     def simulate_model(ele_d, output_path):
+
         ele_d = filtering.physical_density(ele_d, config.f1, config.f2)
         E_ele = e_min + ele_d ** p * (e_0 - e_min)
         mat_params = (E_ele[::-1].reshape(nx*ny), nu_ini)
@@ -241,6 +240,9 @@ def main(argv):
             plt.imshow(1 - x, extent=(0, gps_i[0], 0, gps_i[1]), cmap='gray',vmin=0, vmax=1)
             plt.savefig(os.path.join(args.exp_dir, f"gray-{loop}.png"))
             plt.close()
+
+            # Save checkpoint.
+            np.save(os.path.join(args.exp_dir, f"eled-{loop}.npy"), x)
 
         loop += 1
         losses.append(c)
